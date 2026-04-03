@@ -1,0 +1,118 @@
+name:                lore
+version:             0.1.0.0
+github:              "githubuser/lore"
+license:             BSD-3-Clause
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2026 Author name here"
+
+extra-source-files:
+- README.md
+- CHANGELOG.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/githubuser/lore#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- time
+- aeson
+- bytestring
+- co-log-core
+- containers
+- directory
+- exceptions
+- filepath
+- ghc
+- ghc-paths
+- ghc-boot
+- hpack
+- mtl
+- process
+- text
+- transformers
+
+ghc-options:
+- -Werror
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-home-modules
+- -Wpartial-fields
+- -Wredundant-constraints
+
+library:
+  source-dirs: src
+
+executables:
+  lore-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - lore
+
+tests:
+  lore-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -Wno-incomplete-patterns
+    dependencies:
+    - lore
+
+default-extensions:
+  - Haskell2010
+  - RecordWildCards
+  - NamedFieldPuns
+  - DuplicateRecordFields
+  - OverloadedLabels
+  - OverloadedStrings
+  - FlexibleContexts
+  - FlexibleInstances
+  - StandaloneDeriving
+  - ScopedTypeVariables
+  - ExplicitForAll
+  - TypeOperators
+  - TypeApplications
+  - DeriveGeneric
+  - MonoLocalBinds
+  - DerivingStrategies
+  - BlockArguments
+  - PostfixOperators
+  - TupleSections
+  - LambdaCase
+  - NumericUnderscores
+  - MultiWayIf
+  - BangPatterns
+  - ConstraintKinds
+  - DataKinds
+  - DefaultSignatures
+  - DerivingVia
+  - EmptyDataDecls
+  - ExistentialQuantification
+  - FunctionalDependencies
+  - GADTs
+  - KindSignatures
+  - MultiParamTypeClasses
+  - NumDecimals
+  - PatternSynonyms
+  - RankNTypes
+  - TypeFamilies
+  - ViewPatterns
+  - PartialTypeSignatures
+  - OverloadedRecordDot

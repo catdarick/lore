@@ -1,0 +1,250 @@
+cabal-version: 2.2
+
+-- This file has been generated from package.yaml by hpack version 0.37.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           lore
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/githubuser/lore#readme>
+homepage:       https://github.com/githubuser/lore#readme
+bug-reports:    https://github.com/githubuser/lore/issues
+author:         Author name here
+maintainer:     example@example.com
+copyright:      2026 Author name here
+license:        BSD-3-Clause
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    CHANGELOG.md
+
+source-repository head
+  type: git
+  location: https://github.com/githubuser/lore
+
+library
+  exposed-modules:
+      GHC.DynFlags
+      Internal.Diagnostics
+      Internal.File
+      Internal.Logger
+      Internal.Package
+      Internal.PackageDB
+      Internal.Targets
+      Internal.Types
+      Lib
+      Lore
+      Monad
+      Session
+  other-modules:
+      Paths_lore
+  autogen-modules:
+      Paths_lore
+  hs-source-dirs:
+      src
+  default-extensions:
+      Haskell2010
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , co-log-core
+    , containers
+    , directory
+    , exceptions
+    , filepath
+    , ghc
+    , ghc-boot
+    , ghc-paths
+    , hpack
+    , mtl
+    , process
+    , text
+    , time
+    , transformers
+  default-language: Haskell2010
+
+executable lore-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_lore
+  autogen-modules:
+      Paths_lore
+  hs-source-dirs:
+      app
+  default-extensions:
+      Haskell2010
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , co-log-core
+    , containers
+    , directory
+    , exceptions
+    , filepath
+    , ghc
+    , ghc-boot
+    , ghc-paths
+    , hpack
+    , lore
+    , mtl
+    , process
+    , text
+    , time
+    , transformers
+  default-language: Haskell2010
+
+test-suite lore-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      SomeModule
+      Paths_lore
+  autogen-modules:
+      Paths_lore
+  hs-source-dirs:
+      test
+  default-extensions:
+      Haskell2010
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -Wno-incomplete-patterns
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , co-log-core
+    , containers
+    , directory
+    , exceptions
+    , filepath
+    , ghc
+    , ghc-boot
+    , ghc-paths
+    , hpack
+    , lore
+    , mtl
+    , process
+    , text
+    , time
+    , transformers
+  default-language: Haskell2010

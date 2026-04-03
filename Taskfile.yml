@@ -1,0 +1,15 @@
+version: "3"
+
+tasks:
+  build:
+    desc: Build the project with stack
+    cmds:
+      - stack build
+
+  format:
+    desc: Format Haskell sources with ormolu
+    cmds:
+      - |
+        ormolu --mode inplace \
+          Setup.hs \
+          $(find src app test -type f \( -name '*.hs' -o -name '*.hs-boot' \) | sort)
