@@ -29,6 +29,7 @@ dependencies:
 - directory
 - exceptions
 - filepath
+- deepseq
 - ghc
 - ghc-paths
 - ghc-boot
@@ -37,6 +38,7 @@ dependencies:
 - process
 - text
 - transformers
+- unliftio
 
 ghc-options:
 - -Werror

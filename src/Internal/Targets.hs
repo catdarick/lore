@@ -22,6 +22,7 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Unit.Module.Graph as GHC
 import Internal.Diagnostics (driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import qualified Internal.Logger as Log
+import Internal.Lookup.SymbolsMap (invalidateSymbolsMapCache)
 import Internal.Package (ComponentData (..), PackageData (..), defaultExtensions, extractDependencies, extractSourceDirs, prepareComponentsData)
 import Monad (MonadLore)
 import Session (SessionContext (..))
@@ -77,6 +78,7 @@ updateTargets = do
   Log.debug $ "Common GHC options: " <> show (Set.toList $ commonGhcOptions targetsPlan)
   Log.debug $ "Common extensions: " <> show (Set.toList $ commonExtensions targetsPlan)
   Log.debug $ "Dependencies to add: " <> show (Set.toList dependenciesToAdd)
+  invalidateSymbolsMapCache
   modifySessionDynFlagsM
     ( setGhcOptionsAndExtensions (Set.toList $ commonGhcOptions targetsPlan) (Set.toList $ commonExtensions targetsPlan)
         . setGhcSourceDirs (Set.toList sourceDirs)

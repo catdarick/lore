@@ -12,11 +12,21 @@ import qualified GHC.Utils.Exception as GHC
 import qualified GHC.Utils.Logger as GHC
 import Internal.Logger (MonadLogger (..))
 import Session (SessionContext (..))
+import UnliftIO (MonadUnliftIO (..))
 
-type MonadLore m = (MonadReader SessionContext m, MonadIO m, GHC.GhcMonad m, MonadLogger m)
+type MonadLore m = (MonadReader SessionContext m, MonadIO m, GHC.GhcMonad m, MonadLogger m, MonadUnliftIO m)
 
 newtype LoreMonadT m a = LoreMonad {runLore :: ReaderT SessionContext (GHC.GhcT m) a}
   deriving newtype (Functor, Applicative, Monad, MonadIO, MonadThrow, MonadCatch, MonadMask)
+
+instance (MonadUnliftIO m) => MonadUnliftIO (LoreMonadT m) where
+  withRunInIO inner =
+    LoreMonad $
+      ReaderT $ \ctx ->
+        GHC.GhcT $ \session ->
+          withRunInIO $ \runInBase ->
+            inner $ \(LoreMonad action) ->
+              runInBase (GHC.unGhcT (runReaderT action ctx) session)
 
 instance (MonadIO m) => GHC.HasDynFlags (LoreMonadT m) where
   getDynFlags = LoreMonad $ ReaderT $ const GHC.getDynFlags

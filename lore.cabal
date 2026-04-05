@@ -29,10 +29,12 @@ library
       Internal.Diagnostics
       Internal.File
       Internal.Logger
+      Internal.Lookup
+      Internal.Lookup.SymbolsMap
+      Internal.Lookup.Types
       Internal.Package
       Internal.PackageDB
       Internal.Targets
-      Internal.Types
       Lib
       Lore
       Monad
@@ -91,6 +93,7 @@ library
     , bytestring
     , co-log-core
     , containers
+    , deepseq
     , directory
     , exceptions
     , filepath
@@ -103,6 +106,7 @@ library
     , text
     , time
     , transformers
+    , unliftio
   default-language: Haskell2010
 
 executable lore-exe
@@ -161,6 +165,7 @@ executable lore-exe
     , bytestring
     , co-log-core
     , containers
+    , deepseq
     , directory
     , exceptions
     , filepath
@@ -174,6 +179,7 @@ executable lore-exe
     , text
     , time
     , transformers
+    , unliftio
   default-language: Haskell2010
 
 test-suite lore-test
@@ -234,6 +240,7 @@ test-suite lore-test
     , bytestring
     , co-log-core
     , containers
+    , deepseq
     , directory
     , exceptions
     , filepath
@@ -247,4 +254,5 @@ test-suite lore-test
     , text
     , time
     , transformers
+    , unliftio
   default-language: Haskell2010
