@@ -6,7 +6,7 @@ import GHC.DynFlags (ParallelWorkersCount (..))
 import GHC.MVar (MVar)
 import Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Internal.Logger (LoggerHandle, loggerHandle'Pretty)
-import Internal.Lookup.Types (SymbolsMap)
+import Internal.Lookup.Types (ModSummaries, NameToInstancesIndex, SymbolsMap)
 import Internal.PackageDB (resolvePackageDbPaths)
 
 data SessionContext = SessionContext
@@ -15,7 +15,9 @@ data SessionContext = SessionContext
     loggerHandle :: LoggerHandle,
     packageDbPaths :: [FilePath],
     ifaceCache :: GHC.ModIfaceCache,
-    externalPackagesSymbolsCache :: MVar (Maybe SymbolsMap)
+    externalPackagesSymbolsCache :: MVar (Maybe SymbolsMap),
+    modSummariesCache :: MVar (Maybe ModSummaries),
+    nameToInstancesIndexCache :: MVar (Maybe NameToInstancesIndex)
   }
 
 data SessionConfig = SessionConfig
@@ -40,6 +42,8 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle} = do
   eiPackageDbPaths <- resolvePackageDbPaths projectRoot
   ifaceCache <- GHC.newIfaceCache
   externalPackagesSymbolsCache <- GHC.newMVar Nothing
+  modSummariesCache <- GHC.newMVar Nothing
+  nameToInstancesIndexCache <- GHC.newMVar Nothing
   case eiPackageDbPaths of
     Left err -> pure $ Left $ "Failed to resolve package database paths: " <> err
     Right packageDbPaths -> do
@@ -51,5 +55,7 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle} = do
               loggerHandle,
               packageDbPaths = packageDbPaths,
               ifaceCache,
-              externalPackagesSymbolsCache
+              externalPackagesSymbolsCache,
+              modSummariesCache,
+              nameToInstancesIndexCache
             }

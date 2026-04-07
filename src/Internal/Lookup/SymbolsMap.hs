@@ -1,6 +1,3 @@
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
-{-# HLINT ignore "Use uncurry" #-}
 module Internal.Lookup.SymbolsMap (getSymbolsMap, invalidateSymbolsMapCache) where
 
 import Control.Exception (Exception (toException), SomeException)
@@ -12,7 +9,8 @@ import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Plugins as GHC
 import qualified Internal.Logger as Log
-import Internal.Lookup.Types (ExportedSymbol (..), SymbolsMap (..))
+import Internal.Lookup.ModSummaries (getModSummaries)
+import Internal.Lookup.Types (ExportedSymbol (..), ModSummaries (..), SymbolsMap (..))
 import Monad (MonadLore)
 import Session (SessionContext (..))
 import UnliftIO (modifyMVar)
@@ -66,10 +64,8 @@ prepareSymbolsMap = do
 
 enumerateHomeModules :: (MonadLore m) => m [GHC.Module]
 enumerateHomeModules = do
-  mg <- GHC.getModuleGraph
-  let summaries = GHC.mgModSummaries mg
-      mods = map GHC.ms_mod summaries
-  pure mods
+  ModSummaries summaries <- getModSummaries
+  pure $ map GHC.ms_mod (Map.elems summaries)
 
 enumerateVisiblePackageModules :: (MonadLore m) => m [GHC.Module]
 enumerateVisiblePackageModules = do

@@ -26,10 +26,13 @@ source-repository head
 library
   exposed-modules:
       GHC.DynFlags
+      Internal.Definition
       Internal.Diagnostics
       Internal.File
       Internal.Logger
       Internal.Lookup
+      Internal.Lookup.ModSummaries
+      Internal.Lookup.NameToInstances
       Internal.Lookup.SymbolsMap
       Internal.Lookup.Types
       Internal.Package

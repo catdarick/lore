@@ -1,7 +1,6 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Move filter" #-}
-{-# HLINT ignore "Use ++" #-}
 module Internal.Package where
 
 import Control.Monad (forM, unless)

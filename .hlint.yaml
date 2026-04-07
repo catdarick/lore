@@ -1,0 +1,9 @@
+- ignore:
+    name: Use uncurry
+- ignore:
+    name: Use ++
+- functions:
+    - name: GHC.mgModSummaries
+      within:
+        - Internal.Lookup.ModSummaries
+      message: Use Internal.Lookup.ModSummaries.getModSummaries

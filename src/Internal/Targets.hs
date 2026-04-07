@@ -1,6 +1,5 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
-{-# HLINT ignore "Use ++" #-}
 {-# HLINT ignore "Move filter" #-}
 module Internal.Targets where
 
@@ -22,6 +21,8 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Unit.Module.Graph as GHC
 import Internal.Diagnostics (driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import qualified Internal.Logger as Log
+import Internal.Lookup.ModSummaries (invalidateModSummaries)
+import Internal.Lookup.NameToInstances (invalidateNameToInstancesIndex)
 import Internal.Lookup.SymbolsMap (invalidateSymbolsMapCache)
 import Internal.Package (ComponentData (..), PackageData (..), defaultExtensions, extractDependencies, extractSourceDirs, prepareComponentsData)
 import Monad (MonadLore)
@@ -79,6 +80,8 @@ updateTargets = do
   Log.debug $ "Common extensions: " <> show (Set.toList $ commonExtensions targetsPlan)
   Log.debug $ "Dependencies to add: " <> show (Set.toList dependenciesToAdd)
   invalidateSymbolsMapCache
+  invalidateModSummaries
+  invalidateNameToInstancesIndex
   modifySessionDynFlagsM
     ( setGhcOptionsAndExtensions (Set.toList $ commonGhcOptions targetsPlan) (Set.toList $ commonExtensions targetsPlan)
         . setGhcSourceDirs (Set.toList sourceDirs)

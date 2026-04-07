@@ -3,10 +3,19 @@ module Internal.Lookup.Types where
 import Data.List (intercalate)
 import qualified Data.Map as Map
 import Data.Text (Text)
+import qualified GHC
 import qualified GHC.Plugins as GHC
 
 newtype SymbolsMap = SymbolsMap
   { unSymbolsMap :: Map.Map Text [ExportedSymbol]
+  }
+
+newtype ModSummaries = ModSummaries
+  { unModSummaries :: Map.Map GHC.Module GHC.ModSummary
+  }
+
+newtype NameToInstancesIndex = NameToInstancesIndex
+  { unNameToInstancesIndex :: GHC.NameEnv ([GHC.ClsInst], [GHC.FamInst])
   }
 
 data ExportedSymbol = ExportedSymbol
