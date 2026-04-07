@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Internal.Lookup (findSymbol, getSymbolInfo, getRootSymbolInfo, FooBar (..), SomeClass (..), resolveInstances, Instances (..), resolveInstancesDefinitions) where
+module Internal.Lookup (findSymbol, getSymbolInfo, getRootSymbolInfo, resolveInstances, Instances (..), resolveInstancesDefinitions) where
 
 import Control.Monad (forM)
 import Data.List (intercalate)
@@ -17,19 +17,6 @@ import Internal.Lookup.NameToInstances (getNameToInstancesIndex)
 import Internal.Lookup.SymbolsMap (getSymbolsMap)
 import Internal.Lookup.Types (ExportedSymbol (..), NameToInstancesIndex (..), SymbolsMap (..))
 import Monad (MonadLore)
-
-class SomeClass a where
-  someFunction :: a -> String
-
--- | Some FooBar data type to demonstrate instance lookup
-data FooBar
-  = Foo
-  | Bar
-  deriving (Show, Eq)
-
-instance SomeClass FooBar where
-  someFunction Foo = "This is Foo"
-  someFunction Bar = "This is Bar"
 
 findSymbol :: (MonadLore m) => Text -> m [ExportedSymbol]
 findSymbol needle = do
