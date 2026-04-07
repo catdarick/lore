@@ -25,37 +25,36 @@ source-repository head
 
 library
   exposed-modules:
-      GHC.DynFlags
-      Internal.AutoRefact
-      Internal.AutoRefact.CollapseImports
-      Internal.AutoRefact.Edit
-      Internal.AutoRefact.ImportDecl
-      Internal.AutoRefact.ImportNormalize
-      Internal.AutoRefact.ImportOps
-      Internal.AutoRefact.ImportRewrite
-      Internal.AutoRefact.MissingImports
-      Internal.AutoRefact.MissingImports.Diagnostic
-      Internal.AutoRefact.RedundantImports
-      Internal.Definition
-      Internal.Diagnostics
-      Internal.File
-      Internal.Logger
-      Internal.Lookup
-      Internal.Lookup.ModSummaries
-      Internal.Lookup.NameToInstances
-      Internal.Lookup.SymbolsMap
-      Internal.Lookup.Types
-      Internal.Package
-      Internal.PackageDB
-      Internal.Targets
-      Lib
       Lore
-      Monad
-      Session
+      Lore.Definition
+      Lore.Diagnostics
+      Lore.Logger
+      Lore.Lookup
+      Lore.Monad
+      Lore.Refactor.Imports
+      Lore.Session
+      Lore.Targets
   other-modules:
-      Paths_lore
-  autogen-modules:
-      Paths_lore
+      Lore.Internal.AutoRefactor
+      Lore.Internal.AutoRefactor.Edit
+      Lore.Internal.AutoRefactor.ImportDecl
+      Lore.Internal.AutoRefactor.ImportNormalize
+      Lore.Internal.AutoRefactor.ImportOps
+      Lore.Internal.AutoRefactor.ImportRewrite
+      Lore.Internal.AutoRefactor.MissingImports
+      Lore.Internal.AutoRefactor.MissingImports.Diagnostic
+      Lore.Internal.AutoRefactor.RedundantImports
+      Lore.Internal.File
+      Lore.Internal.Ghc.DynFlags
+      Lore.Internal.Lookup.ModSummaries
+      Lore.Internal.Lookup.NameToInstances
+      Lore.Internal.Lookup.SymbolsMap
+      Lore.Internal.Lookup.Types
+      Lore.Internal.Monad
+      Lore.Internal.Package
+      Lore.Internal.PackageDB
+      Lore.Internal.Session
+      Lore.Internal.Targets
   hs-source-dirs:
       src
   default-extensions:
@@ -114,79 +113,6 @@ library
     , ghc-boot
     , ghc-paths
     , hpack
-    , mtl
-    , process
-    , text
-    , time
-    , transformers
-    , unliftio
-  default-language: Haskell2010
-
-executable lore-exe
-  main-is: Main.hs
-  other-modules:
-      Paths_lore
-  autogen-modules:
-      Paths_lore
-  hs-source-dirs:
-      app
-  default-extensions:
-      Haskell2010
-      RecordWildCards
-      NamedFieldPuns
-      DuplicateRecordFields
-      OverloadedLabels
-      OverloadedStrings
-      FlexibleContexts
-      FlexibleInstances
-      StandaloneDeriving
-      ScopedTypeVariables
-      ExplicitForAll
-      TypeOperators
-      TypeApplications
-      DeriveGeneric
-      MonoLocalBinds
-      DerivingStrategies
-      BlockArguments
-      PostfixOperators
-      TupleSections
-      LambdaCase
-      NumericUnderscores
-      MultiWayIf
-      BangPatterns
-      ConstraintKinds
-      DataKinds
-      DefaultSignatures
-      DerivingVia
-      EmptyDataDecls
-      ExistentialQuantification
-      FunctionalDependencies
-      GADTs
-      KindSignatures
-      MultiParamTypeClasses
-      NumDecimals
-      PatternSynonyms
-      RankNTypes
-      TypeFamilies
-      ViewPatterns
-      PartialTypeSignatures
-      OverloadedRecordDot
-  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
-  build-depends:
-      aeson
-    , base >=4.7 && <5
-    , bytestring
-    , co-log-core
-    , containers
-    , deepseq
-    , directory
-    , exceptions
-    , filepath
-    , ghc
-    , ghc-boot
-    , ghc-paths
-    , hpack
-    , lore
     , mtl
     , process
     , text

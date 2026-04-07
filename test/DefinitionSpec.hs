@@ -4,10 +4,9 @@ import Data.List (find, sort)
 import Data.Text (pack)
 import qualified GHC
 import qualified GHC.Plugins
-import Internal.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice)
-import Internal.Lookup (findSymbol)
-import Internal.Lookup.Types (ExportedSymbol (..))
-import Internal.Targets (defaultUpdateTargetsOptions, updateTargets)
+import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice)
+import Lore.Lookup (ExportedSymbol (..), findSymbols)
+import Lore.Targets (defaultLoadTargetsOptions, loadTargets)
 import Test.Hspec
 import TestSupport (fixtureLore)
 
@@ -341,16 +340,16 @@ sliceRealSpan realSpan contents =
 fixtureDefinition :: String -> IO DefinitionSlice
 fixtureDefinition symbol =
   fixtureLore do
-    updateTargets defaultUpdateTargetsOptions
-    exportedSymbols <- findSymbol (pack symbol)
+    loadTargets defaultLoadTargetsOptions
+    exportedSymbols <- findSymbols (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
     maybe (error ("definition not found: " <> symbol)) pure =<< resolveDefinitionSlice targetName
 
 fixtureDefinitionClosure :: Int -> String -> IO [DefinitionSlice]
 fixtureDefinitionClosure depth symbol =
   fixtureLore do
-    updateTargets defaultUpdateTargetsOptions
-    exportedSymbols <- findSymbol (pack symbol)
+    loadTargets defaultLoadTargetsOptions
+    exportedSymbols <- findSymbols (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
     resolveDefinitionClosure depth targetName
 

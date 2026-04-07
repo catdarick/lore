@@ -53,17 +53,37 @@ ghc-options:
 
 library:
   source-dirs: src
-
-executables:
-  lore-exe:
-    main:                Main.hs
-    source-dirs:         app
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - lore
+  exposed-modules:
+  - Lore
+  - Lore.Definition
+  - Lore.Diagnostics
+  - Lore.Logger
+  - Lore.Lookup
+  - Lore.Monad
+  - Lore.Refactor.Imports
+  - Lore.Session
+  - Lore.Targets
+  other-modules:
+  - Lore.Internal.AutoRefactor
+  - Lore.Internal.AutoRefactor.Edit
+  - Lore.Internal.AutoRefactor.ImportDecl
+  - Lore.Internal.AutoRefactor.ImportNormalize
+  - Lore.Internal.AutoRefactor.ImportOps
+  - Lore.Internal.AutoRefactor.ImportRewrite
+  - Lore.Internal.AutoRefactor.MissingImports
+  - Lore.Internal.AutoRefactor.MissingImports.Diagnostic
+  - Lore.Internal.AutoRefactor.RedundantImports
+  - Lore.Internal.File
+  - Lore.Internal.Ghc.DynFlags
+  - Lore.Internal.Lookup.ModSummaries
+  - Lore.Internal.Lookup.NameToInstances
+  - Lore.Internal.Lookup.SymbolsMap
+  - Lore.Internal.Lookup.Types
+  - Lore.Internal.Monad
+  - Lore.Internal.Package
+  - Lore.Internal.PackageDB
+  - Lore.Internal.Session
+  - Lore.Internal.Targets
 
 tests:
   lore-test:

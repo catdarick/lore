@@ -1,4 +1,7 @@
-module SomeModule where
+module SomeModule
+  ( foo,
+  )
+where
 
 foo :: Int -> Bool
 foo = \case

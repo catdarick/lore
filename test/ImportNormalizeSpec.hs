@@ -1,15 +1,16 @@
 module ImportNormalizeSpec (spec) where
 
 import qualified Data.Text
-import Internal.AutoRefact.ImportDecl
+import Lore.Refactor.Imports
   ( ImportId (..),
     ImportItem (..),
     ImportList (..),
+    ImportOperation (..),
     NormalizedImport (..),
     QualifiedImportStyle (..),
+    applyImportOperations,
+    normalizeImports,
   )
-import Internal.AutoRefact.ImportNormalize (applyImportOperations, normalizeImports)
-import Internal.AutoRefact.ImportOps (ImportOperation (..))
 import Test.Hspec
 
 spec :: Spec

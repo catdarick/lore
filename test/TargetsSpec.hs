@@ -4,10 +4,10 @@ import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Internal.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (..), Span (..))
-import Internal.Logger (LogMessage (..), LoggerHandle (..))
-import Internal.Lookup (findSymbol)
-import Internal.Targets (UpdateTargetsOptions (..), defaultUpdateTargetsOptions, retainUnresolvedRollback, updateTargets)
+import Lore.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (..), Span (..))
+import Lore.Logger (LogMessage (..), LoggerHandle (..))
+import Lore.Lookup (findSymbols)
+import Lore.Targets (LoadTargetsOptions (..), defaultLoadTargetsOptions, loadTargets, retainUnresolvedRollback)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import Test.Hspec
@@ -15,7 +15,7 @@ import TestSupport (fixtureLoreAt, fixtureLoreAtWithLogger, withFixtureCopy)
 
 spec :: Spec
 spec =
-  describe "updateTargets auto-refact" do
+  describe "loadTargets auto-refact" do
     it "re-adds a missing unqualified import when the symbol has a unique module" do
       withFixtureCopy \fixtureRoot -> do
         let demoFile = fixtureRoot </> "src" </> "Demo.hs"
@@ -25,8 +25,8 @@ spec =
             . T.lines
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -41,8 +41,8 @@ spec =
             "explicitQualified ch =\n  Set.member ch (Set.fromList \"abc\") || Set.member ch (Set.empty :: Set.Set Char)"
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "explicitQualified"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "explicitQualified"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -68,8 +68,8 @@ spec =
                 modifyIORef' logsRef (<> [logMessage.content])
 
         loaded <- fixtureLoreAtWithLogger loggerHandle fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         logs <- readIORef logsRef
@@ -90,8 +90,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -111,8 +111,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -133,8 +133,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -153,8 +153,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -171,8 +171,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -189,8 +189,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -209,8 +209,8 @@ spec =
         originalSource <- TIO.readFile demoFile
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` False
@@ -229,8 +229,8 @@ spec =
         originalSource <- TIO.readFile demoFile
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` False
@@ -251,8 +251,8 @@ spec =
         originalSource <- TIO.readFile demoFile
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` False
@@ -285,8 +285,8 @@ spec =
             )
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -304,8 +304,8 @@ spec =
             )
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -324,8 +324,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -345,8 +345,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -363,8 +363,8 @@ spec =
             "import Data.Maybe (fromMaybe, maybe)"
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -381,8 +381,8 @@ spec =
             "import Data.Maybe (fromMaybe, maybe, listToMaybe)"
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -405,8 +405,8 @@ spec =
                 modifyIORef' logsRef (<> [logMessage.content])
 
         loaded <- fixtureLoreAtWithLogger loggerHandle fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         logs <- readIORef logsRef
@@ -429,8 +429,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -460,8 +460,8 @@ spec =
                 modifyIORef' logsRef (<> [logMessage.content])
 
         loaded <- fixtureLoreAtWithLogger loggerHandle fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         logs <- readIORef logsRef
@@ -492,8 +492,8 @@ spec =
                 modifyIORef' logsRef (<> [logMessage.content])
 
         loaded <- fixtureLoreAtWithLogger loggerHandle fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         logs <- readIORef logsRef
@@ -523,8 +523,8 @@ spec =
                 modifyIORef' logsRef (<> [logMessage.content])
 
         loaded <- fixtureLoreAtWithLogger loggerHandle fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         logs <- readIORef logsRef
@@ -548,8 +548,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -571,8 +571,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -592,8 +592,8 @@ spec =
           ]
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
@@ -617,8 +617,8 @@ spec =
             )
 
         loaded <- fixtureLoreAt fixtureRoot do
-          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
-          not . null <$> findSymbol "lookupOrZero"
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
 
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True

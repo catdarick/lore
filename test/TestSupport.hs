@@ -2,11 +2,10 @@ module TestSupport (fixtureLore, fixtureLoreAt, fixtureLoreAtWithLogger, withFix
 
 import Control.Exception (bracket)
 import Data.Time.Clock.POSIX (getPOSIXTime)
-import Internal.Logger (LoggerHandle, noLogHandle)
-import Lore (runLoreMonadT)
-import Monad (LoreMonadT)
-import Session (defaultSessionConfig)
-import qualified Session
+import Lore.Logger (LoggerHandle, noLogHandle)
+import Lore.Monad (LoreMonadT)
+import Lore.Session (defaultSessionConfig, runLore)
+import qualified Lore.Session as Session
 import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, listDirectory, makeAbsolute, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.FilePath ((</>))
@@ -24,7 +23,7 @@ fixtureLoreAt fixtureRoot action =
 fixtureLoreAtWithLogger :: LoggerHandle -> FilePath -> LoreMonadT IO a -> IO a
 fixtureLoreAtWithLogger loggerHandle fixtureRoot action =
   withClearedGhcEnvironment $
-    runLoreMonadT
+    runLore
       defaultSessionConfig
         { Session.projectRoot = fixtureRoot,
           Session.ghcWorkDir = fixtureRoot </> ".lore-work-test",
