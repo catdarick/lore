@@ -189,10 +189,9 @@ test-suite lore-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      DefinitionSpec
+      TestSupport
       SomeModule
-      Paths_lore
-  autogen-modules:
-      Paths_lore
   hs-source-dirs:
       test
   default-extensions:
@@ -251,6 +250,7 @@ test-suite lore-test
     , ghc-boot
     , ghc-paths
     , hpack
+    , hspec
     , lore
     , mtl
     , process

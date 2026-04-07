@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Internal.Lookup (findSymbol, getSymbolInfo, getRootSymbolInfo, resolveInstancesDefinitions) where
+module Internal.Lookup (findSymbol, getSymbolInfo, getRootSymbolInfo, FooBar (..), SomeClass (..), resolveInstances, Instances (..), resolveInstancesDefinitions) where
 
 import Control.Monad (forM)
 import Data.List (intercalate)
@@ -11,12 +11,25 @@ import qualified GHC
 import qualified GHC.Core.FamInstEnv as GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
-import Internal.Definition (DefinitionSpans (..), resolveDefinitionSpans)
+import Internal.Definition (DefinitionSlice (..), resolveDefinitionSlice)
 import qualified Internal.Logger as Log
 import Internal.Lookup.NameToInstances (getNameToInstancesIndex)
 import Internal.Lookup.SymbolsMap (getSymbolsMap)
 import Internal.Lookup.Types (ExportedSymbol (..), NameToInstancesIndex (..), SymbolsMap (..))
 import Monad (MonadLore)
+
+class SomeClass a where
+  someFunction :: a -> String
+
+-- | Some FooBar data type to demonstrate instance lookup
+data FooBar
+  = Foo
+  | Bar
+  deriving (Show, Eq)
+
+instance SomeClass FooBar where
+  someFunction Foo = "This is Foo"
+  someFunction Bar = "This is Bar"
 
 findSymbol :: (MonadLore m) => Text -> m [ExportedSymbol]
 findSymbol needle = do
@@ -110,14 +123,14 @@ resolveInstances name = do
     Nothing -> pure Nothing
     Just (clsInsts, famInsts) -> pure $ Just (Instances clsInsts famInsts)
 
-resolveInstancesDefinitions :: (MonadLore m) => GHC.Name -> m [DefinitionSpans]
+resolveInstancesDefinitions :: (MonadLore m) => GHC.Name -> m [DefinitionSlice]
 resolveInstancesDefinitions name = do
   NameToInstancesIndex nameToInstancesIndex <- getNameToInstancesIndex
   case GHC.lookupUFM nameToInstancesIndex name of
     Nothing -> pure []
     Just (clsInsts, famInsts) -> do
       let allNames = [GHC.getName clsInst | clsInst <- clsInsts] ++ [GHC.getName famInst | famInst <- famInsts]
-      resolved <- mapM resolveDefinitionSpans allNames
+      resolved <- mapM resolveDefinitionSlice allNames
       pure $ mapMaybe id resolved
 
 resolveRootName :: (MonadLore m) => GHC.Name -> m GHC.Name

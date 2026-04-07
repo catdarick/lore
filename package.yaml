@@ -69,6 +69,10 @@ tests:
   lore-test:
     main:                Spec.hs
     source-dirs:         test
+    other-modules:
+    - DefinitionSpec
+    - TestSupport
+    - SomeModule
     ghc-options:
     - -threaded
     - -rtsopts
@@ -76,6 +80,7 @@ tests:
     - -Wno-incomplete-patterns
     dependencies:
     - lore
+    - hspec
 
 default-extensions:
   - Haskell2010
