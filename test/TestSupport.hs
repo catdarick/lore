@@ -1,10 +1,10 @@
-module TestSupport (fixtureLore, fixtureLoreAt, fixtureLoreAtWithLogger, withFixtureCopy) where
+module TestSupport (fixtureLore, fixtureLoreAt, fixtureLoreAtWithConfig, fixtureLoreAtWithLogger, withFixtureCopy) where
 
 import Control.Exception (bracket)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Lore.Logger (LoggerHandle, noLogHandle)
 import Lore.Monad (LoreMonadT)
-import Lore.Session (defaultSessionConfig, runLore)
+import Lore.Session (SessionConfig, defaultSessionConfig, runLore)
 import qualified Lore.Session as Session
 import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, listDirectory, makeAbsolute, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
@@ -18,18 +18,44 @@ fixtureLore action = do
 
 fixtureLoreAt :: FilePath -> LoreMonadT IO a -> IO a
 fixtureLoreAt fixtureRoot action =
-  fixtureLoreAtWithLogger noLogHandle fixtureRoot action
+  fixtureLoreAtWithConfig
+    (sessionConfigWithLogger noLogHandle)
+    fixtureRoot
+    action
 
 fixtureLoreAtWithLogger :: LoggerHandle -> FilePath -> LoreMonadT IO a -> IO a
 fixtureLoreAtWithLogger loggerHandle fixtureRoot action =
+  fixtureLoreAtWithConfig
+    (sessionConfigWithLogger loggerHandle)
+    fixtureRoot
+    action
+
+fixtureLoreAtWithConfig :: SessionConfig -> FilePath -> LoreMonadT IO a -> IO a
+fixtureLoreAtWithConfig sessionConfig fixtureRoot action =
   withClearedGhcEnvironment $
     runLore
-      defaultSessionConfig
+      sessionConfig
         { Session.projectRoot = fixtureRoot,
-          Session.ghcWorkDir = fixtureRoot </> ".lore-work-test",
-          Session.loggerHandle = loggerHandle
+          Session.ghcWorkDir = fixtureRoot </> ".lore-work-test"
         }
       action
+
+sessionConfigWithLogger :: LoggerHandle -> SessionConfig
+sessionConfigWithLogger loggerHandle =
+  Session.SessionConfig
+    { Session.projectRoot = projectRoot,
+      Session.ghcWorkDir = ghcWorkDir,
+      Session.loggerHandle = loggerHandle,
+      Session.interpreterPreludeImportRule = interpreterPreludeImportRule,
+      Session.parallelWorkersLimit = parallelWorkersLimit
+    }
+  where
+    Session.SessionConfig
+      { Session.projectRoot,
+        Session.ghcWorkDir,
+        Session.interpreterPreludeImportRule,
+        Session.parallelWorkersLimit
+      } = defaultSessionConfig
 
 withFixtureCopy :: (FilePath -> IO a) -> IO a
 withFixtureCopy action = do

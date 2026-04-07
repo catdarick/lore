@@ -28,6 +28,7 @@ library
       Lore
       Lore.Definition
       Lore.Diagnostics
+      Lore.Interpreter
       Lore.Logger
       Lore.Lookup
       Lore.Monad
@@ -46,6 +47,7 @@ library
       Lore.Internal.AutoRefactor.RedundantImports
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags
+      Lore.Internal.Interpreter
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.NameToInstances
       Lore.Internal.Lookup.SymbolsMap
@@ -126,6 +128,7 @@ test-suite lore-test
   main-is: Spec.hs
   other-modules:
       DefinitionSpec
+      InterpreterSpec
       ImportNormalizeSpec
       TargetsSpec
       TestSupport

@@ -1,6 +1,7 @@
 module Lore
   ( SessionConfig (..),
     defaultSessionConfig,
+    PreludeImportRule (..),
     ParallelWorkersCount (..),
     LoreMonadT,
     MonadLore,
@@ -28,6 +29,9 @@ module Lore
     DiagnosticSpan (..),
     Span (..),
     DiagnosticCodeInfo (..),
+    loadInterpreterContext,
+    interpretExpression,
+    getTypeOfExpression,
     LoggerHandle (..),
     LogLevel (..),
     LogMessage (..),
@@ -38,6 +42,7 @@ where
 
 import Lore.Definition
 import Lore.Diagnostics
+import Lore.Interpreter
 import Lore.Logger
 import Lore.Lookup
 import Lore.Monad (LoreMonadT, MonadLore)

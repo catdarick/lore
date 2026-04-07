@@ -28,6 +28,7 @@ import qualified GHC.Unit.Module.Graph as GHC
 import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor, rollbackAutoRefactorEdits)
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
+import Lore.Internal.Interpreter (invalidateInterpreterContext, refreshInterpreterContext)
 import Lore.Internal.Lookup.ModSummaries (invalidateModSummaries)
 import Lore.Internal.Lookup.NameToInstances (invalidateNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (invalidateSymbolsMapCache)
@@ -98,6 +99,7 @@ loadTargets options = do
   Log.debug $ "Common GHC options: " <> show (Set.toList $ commonGhcOptions targetsPlan)
   Log.debug $ "Common extensions: " <> show (Set.toList $ commonExtensions targetsPlan)
   Log.debug $ "Dependencies to add: " <> show (Set.toList dependenciesToAdd)
+  invalidateInterpreterContext
   invalidateSymbolsMapCache
   invalidateModSummaries
   invalidateNameToInstancesIndex
@@ -109,6 +111,7 @@ loadTargets options = do
   let targets = map (mkModuleTarget homeUnitId) (Map.keys $ modulesWithComponentOptions targetsPlan)
   GHC.setTargets targets
   loadResult <- loadTargets' options targetsPlan
+  refreshInterpreterContext
   case loadResult of
     GHC.Succeeded -> do
       Log.debug "Successfully updated GHC targets based on package.yaml configurations"
