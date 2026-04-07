@@ -4,6 +4,16 @@ module Demo
     lookupWithWhere,
     isTrue,
     explicitQualified,
+    crossModuleValue,
+    crossModuleRecord,
+    crossModuleSeed,
+    crossModuleBundle,
+    seedValue,
+    bumpWithSeed,
+    derivedValue,
+    mkIndexed,
+    mutualLeft,
+    mutualRight,
     pairLeft,
     pairRight,
     NameSet,
@@ -18,6 +28,7 @@ import Data.Kind (Type)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set (Set, fromList, member)
+import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep)
 
 lookupOrZero :: [(String, Int)] -> String -> Int
 lookupOrZero pairs key =
@@ -42,6 +53,44 @@ isTrue _ = False
 explicitQualified :: Char -> Bool
 explicitQualified ch =
   Set.member ch (Set.fromList "abc")
+
+crossModuleValue :: Int
+crossModuleValue = Support.supportStep seedValue
+
+crossModuleRecord :: Int -> Support.SupportRecord
+crossModuleRecord value =
+  Support.mkSupportRecord (Support.supportStep value)
+
+crossModuleSeed :: Int
+crossModuleSeed = Support.supportSeed
+
+crossModuleBundle :: Int -> (Int, Support.SupportRecord)
+crossModuleBundle value =
+  (crossModuleSeed, crossModuleRecord value)
+
+seedValue :: Int
+seedValue = 40
+
+bumpWithSeed :: Int -> Int
+bumpWithSeed value = value + seedValue
+
+derivedValue :: Int
+derivedValue = bumpWithSeed 2
+
+mkIndexed :: NameSet -> Indexed Int
+mkIndexed names =
+  Indexed
+    { indexedNames = names,
+      indexedValues = Map.empty
+    }
+
+mutualLeft :: Int -> Bool
+mutualLeft 0 = True
+mutualLeft n = mutualRight (n - 1)
+
+mutualRight :: Int -> Bool
+mutualRight 0 = False
+mutualRight n = mutualLeft (n - 1)
 
 pairLeft, pairRight :: Int
 (pairLeft, pairRight) =

@@ -1,10 +1,10 @@
 module DefinitionSpec (spec) where
 
-import Data.List (find)
+import Data.List (find, sort)
 import Data.Text (pack)
 import qualified GHC
 import qualified GHC.Plugins as GHC.Plugins
-import Internal.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderImport, requiredImports, resolveDefinitionSlice)
+import Internal.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice)
 import Internal.Lookup (findSymbol)
 import Internal.Lookup.Types (ExportedSymbol (..))
 import Internal.Targets (updateTargets)
@@ -35,6 +35,17 @@ spec = do
         (Just "explicitQualified :: Char -> Bool")
       fmap renderImport slice.requiredImports
         `shouldBe` [ "import qualified Data.Set as Set (fromList, member)"
+                   ]
+
+    it "resolves imports for definitions that reference another module" do
+      slice <- fixtureDefinition "crossModuleRecord"
+
+      shouldHaveSingleDefinitionText
+        slice
+        "crossModuleRecord value =\n  Support.mkSupportRecord (Support.supportStep value)"
+        (Just "crossModuleRecord :: Int -> Support.SupportRecord")
+      fmap renderImport slice.requiredImports
+        `shouldBe` [ "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)"
                    ]
 
     it "includes references used inside a where block" do
@@ -156,6 +167,103 @@ spec = do
             "import Data.Maybe (fromMaybe)"
           ]
 
+  describe "resolveDefinitionClosure" do
+    it "respects the requested recursion depth for same-module function references" do
+      depthZero <- fixtureDefinitionClosure 0 "derivedValue"
+      depthOne <- fixtureDefinitionClosure 1 "derivedValue"
+      depthTwo <- fixtureDefinitionClosure 2 "derivedValue"
+
+      depthZero
+        `shouldHaveModuleDefinitions` [ ( "Demo",
+                                          ["derivedValue :: Int\nderivedValue = bumpWithSeed 2"],
+                                          []
+                                        )
+                                      ]
+      depthOne
+        `shouldHaveModuleDefinitions` [ ( "Demo",
+                                          [ "derivedValue :: Int\nderivedValue = bumpWithSeed 2",
+                                            "bumpWithSeed :: Int -> Int\nbumpWithSeed value = value + seedValue"
+                                          ],
+                                          []
+                                        )
+                                      ]
+      depthTwo
+        `shouldHaveModuleDefinitions` [ ( "Demo",
+                                          [ "derivedValue :: Int\nderivedValue = bumpWithSeed 2",
+                                            "bumpWithSeed :: Int -> Int\nbumpWithSeed value = value + seedValue",
+                                            "seedValue :: Int\nseedValue = 40"
+                                          ],
+                                          []
+                                        )
+                                      ]
+
+    it "includes referenced types when recursively resolving a function definition" do
+      closure <- fixtureDefinitionClosure 1 "mkIndexed"
+
+      closure
+        `shouldHaveModuleDefinitions` [ ( "Demo",
+                                          [ "mkIndexed :: NameSet -> Indexed Int\nmkIndexed names =\n  Indexed\n    { indexedNames = names,\n      indexedValues = Map.empty\n    }",
+                                            "type NameSet = Set.Set String",
+                                            "data Indexed a = Indexed\n  { indexedNames :: NameSet,\n    indexedValues :: Map.Map String a\n  }"
+                                          ],
+                                          [ "import qualified Data.Map.Strict as Map",
+                                            "import qualified Data.Set as Set (Set)"
+                                          ]
+                                        )
+                                      ]
+
+    it "stops on already visited definitions when recursion encounters a cycle" do
+      closure <- fixtureDefinitionClosure 4 "mutualLeft"
+
+      closure
+        `shouldHaveModuleDefinitions` [ ( "Demo",
+                                          [ "mutualLeft :: Int -> Bool\nmutualLeft 0 = True\nmutualLeft n = mutualRight (n - 1)",
+                                            "mutualRight :: Int -> Bool\nmutualRight 0 = False\nmutualRight n = mutualLeft (n - 1)"
+                                          ],
+                                          []
+                                        )
+                                      ]
+
+    it "recursively resolves referenced symbols across module boundaries" do
+      closure <- fixtureDefinitionClosure 2 "crossModuleRecord"
+
+      closure
+        `shouldHaveModuleDefinitions` [ ( "Demo",
+                                          [ "crossModuleRecord :: Int -> Support.SupportRecord\ncrossModuleRecord value =\n  Support.mkSupportRecord (Support.supportStep value)"
+                                          ],
+                                          ["import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)"]
+                                        ),
+                                        ( "Demo.Support",
+                                          [ "data SupportRecord = SupportRecord\n  { supportValues :: Map.Map String Int\n  }",
+                                            "mkSupportRecord :: Int -> SupportRecord\nmkSupportRecord value =\n  SupportRecord\n    { supportValues = Map.singleton \"value\" value\n    }",
+                                            "supportStep :: Int -> Int\nsupportStep value = value + supportSeed",
+                                            "supportSeed :: Int\nsupportSeed = 5"
+                                          ],
+                                          ["import qualified Data.Map.Strict as Map"]
+                                        )
+                                      ]
+
+    it "merges qualified explicit import lists when same-module declarations use different items" do
+      closure <- fixtureDefinitionClosure 2 "crossModuleBundle"
+
+      closure
+        `shouldHaveModuleDefinitions` [ ( "Demo",
+                                          [ "crossModuleBundle :: Int -> (Int, Support.SupportRecord)\ncrossModuleBundle value =\n  (crossModuleSeed, crossModuleRecord value)",
+                                            "crossModuleRecord :: Int -> Support.SupportRecord\ncrossModuleRecord value =\n  Support.mkSupportRecord (Support.supportStep value)",
+                                            "crossModuleSeed :: Int\ncrossModuleSeed = Support.supportSeed"
+                                          ],
+                                          ["import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep)"]
+                                        ),
+                                        ( "Demo.Support",
+                                          [ "data SupportRecord = SupportRecord\n  { supportValues :: Map.Map String Int\n  }",
+                                            "mkSupportRecord :: Int -> SupportRecord\nmkSupportRecord value =\n  SupportRecord\n    { supportValues = Map.singleton \"value\" value\n    }",
+                                            "supportStep :: Int -> Int\nsupportStep value = value + supportSeed",
+                                            "supportSeed :: Int\nsupportSeed = 5"
+                                          ],
+                                          ["import qualified Data.Map.Strict as Map"]
+                                        )
+                                      ]
+
 shouldHaveSingleDefinitionText ::
   DefinitionSlice ->
   String ->
@@ -169,6 +277,32 @@ shouldHaveSingleDefinitionText slice expectedDeclaration expectedSignature = do
   signatureText `shouldBe` expectedSignature
   where
     spans = head slice.declarationSpans
+
+shouldHaveModuleDefinitions :: [DefinitionSlice] -> [(String, [String], [String])] -> IO ()
+shouldHaveModuleDefinitions slices expectedDefinitions = do
+  actualDefinitions <- traverse renderedModuleDefinition slices
+  fmap normalizeModuleDefinition actualDefinitions
+    `shouldMatchList` fmap normalizeModuleDefinition expectedDefinitions
+
+renderedModuleDefinition :: DefinitionSlice -> IO (String, [String], [String])
+renderedModuleDefinition slice = do
+  texts <- traverse definitionTextFromSpans slice.declarationSpans
+  pure
+    ( GHC.moduleNameString (GHC.moduleName slice.definitionModule),
+      texts,
+      fmap renderImport slice.requiredImports
+    )
+
+normalizeModuleDefinition :: (String, [String], [String]) -> (String, [String], [String])
+normalizeModuleDefinition (moduleName, definitions, imports) =
+  (moduleName, sort definitions, sort imports)
+
+definitionTextFromSpans :: DeclarationSpans -> IO String
+definitionTextFromSpans spans = do
+  declarationText <- readSpanText spans.declarationSpan
+  signatureText <- traverse readSpanText spans.signatureSpan
+  pure $
+    maybe declarationText (<> "\n" <> declarationText) signatureText
 
 readSpanText :: GHC.SrcSpan -> IO String
 readSpanText = \case
@@ -211,6 +345,14 @@ fixtureDefinition symbol =
     exportedSymbols <- findSymbol (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
     maybe (error ("definition not found: " <> symbol)) pure =<< resolveDefinitionSlice targetName
+
+fixtureDefinitionClosure :: Int -> String -> IO [DefinitionSlice]
+fixtureDefinitionClosure depth symbol =
+  fixtureLore do
+    updateTargets
+    exportedSymbols <- findSymbol (pack symbol)
+    targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
+    resolveDefinitionClosure depth targetName
 
 findFixtureSymbol :: String -> [ExportedSymbol] -> Maybe GHC.Name
 findFixtureSymbol symbol =

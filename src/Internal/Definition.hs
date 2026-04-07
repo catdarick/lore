@@ -1,5 +1,6 @@
 module Internal.Definition
   ( resolveDefinitionSlice,
+    resolveDefinitionClosure,
     mergeDefinitionSlices,
     renderImport,
     DefinitionSlice (..),
@@ -14,6 +15,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
+import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Data.Bag as Bag
 import qualified GHC.Plugins as GHC
@@ -57,6 +59,21 @@ data DefinitionMatch = DefinitionMatch
     matchedSignature :: Maybe (GHC.LHsDecl GHC.GhcPs)
   }
 
+data ModuleContext = ModuleContext
+  { parsedModule :: GHC.ParsedModule,
+    typecheckedModule :: GHC.TypecheckedModule
+  }
+
+data DefinitionAnalysis = DefinitionAnalysis
+  { analysisSlice :: DefinitionSlice,
+    analysisReferences :: [GHC.Name]
+  }
+
+data ResolverCache = ResolverCache
+  { cachedModules :: Map.Map GHC.Module ModuleContext,
+    cachedAnalyses :: Map.Map GHC.Name (Maybe DefinitionAnalysis)
+  }
+
 newtype OccurrenceSyntax = OccurrenceSyntax
   { syntaxQualifier :: Maybe GHC.ModuleName
   }
@@ -69,20 +86,73 @@ data ReferencedOccurrence = ReferencedOccurrence
     occurrenceCandidates :: [Int]
   }
 
+data DefinitionKey = DefinitionKey
+  { definitionKeyModule :: GHC.Module,
+    definitionKeySpan :: Maybe GHC.RealSrcSpan
+  }
+  deriving stock (Eq, Ord)
+
+data SourceImport = SourceImport
+  { sourceImportId :: Int,
+    sourceImportDecl :: GHC.LImportDecl GHC.GhcRn
+  }
+
+data ClosureState = ClosureState
+  { closureCache :: ResolverCache,
+    closureSeen :: Set.Set DefinitionKey,
+    closureSlices :: [DefinitionSlice]
+  }
+
 resolveDefinitionSlice :: (MonadLore m) => GHC.Name -> m (Maybe DefinitionSlice)
-resolveDefinitionSlice inputName =
-  case GHC.nameModule_maybe inputName of
-    Nothing ->
-      pure Nothing
-    Just definingModule -> do
-      ModSummaries modSummaries <- getModSummaries
-      case Map.lookup definingModule modSummaries of
+resolveDefinitionSlice inputName = do
+  ModSummaries modSummaries <- getModSummaries
+  (_, analysis) <- resolveDefinitionAnalysis modSummaries emptyResolverCache inputName
+  pure (analysisSlice <$> analysis)
+
+resolveDefinitionClosure :: (MonadLore m) => Int -> GHC.Name -> m [DefinitionSlice]
+resolveDefinitionClosure maxDepth inputName = do
+  ModSummaries modSummaries <- getModSummaries
+  let depth = max 0 maxDepth
+  result <- go modSummaries depth inputName (ClosureState emptyResolverCache Set.empty [])
+  pure (mergeSlicesByModule result.closureSlices)
+  where
+    go modSummaries depth name state = do
+      (cache', analysis) <- resolveDefinitionAnalysis modSummaries state.closureCache name
+      case analysis of
         Nothing ->
-          pure Nothing
-        Just summary -> do
-          parsedModule <- GHC.parseModule summary
-          typecheckedModule <- GHC.typecheckModule parsedModule
-          pure $ buildDefinitionSlice definingModule inputName parsedModule typecheckedModule
+          pure state {closureCache = cache'}
+        Just definitionAnalysis ->
+          let slice = analysisSlice definitionAnalysis
+              key = definitionKey slice
+           in if Set.member key state.closureSeen
+                then pure state {closureCache = cache'}
+                else
+                  if depth == 0
+                    then
+                      pure
+                        state
+                          { closureCache = cache',
+                            closureSeen = Set.insert key state.closureSeen,
+                            closureSlices = state.closureSlices <> [slice]
+                          }
+                    else do
+                      result <-
+                        foldlM
+                          (go modSummaries (depth - 1))
+                          state
+                            { closureCache = cache',
+                              closureSeen = Set.insert key state.closureSeen,
+                              closureSlices = []
+                            }
+                          definitionAnalysis.analysisReferences
+                      pure result {closureSlices = state.closureSlices <> (slice : result.closureSlices)}
+
+    foldlM f = go'
+      where
+        go' acc [] = pure acc
+        go' acc (x : xs) = do
+          acc' <- f x acc
+          go' acc' xs
 
 mergeDefinitionSlices :: [DefinitionSlice] -> Maybe DefinitionSlice
 mergeDefinitionSlices [] = Nothing
@@ -92,7 +162,8 @@ mergeDefinitionSlices (slice : slices)
         DefinitionSlice
           { definitionModule = slice.definitionModule,
             declarationSpans =
-              concatMap declarationSpans allSlices,
+              sortDeclarationSpans $
+                concatMap declarationSpans allSlices,
             requiredImports =
               mergeImports $
                 concatMap requiredImports allSlices
@@ -101,6 +172,16 @@ mergeDefinitionSlices (slice : slices)
       Nothing
   where
     allSlices = slice : slices
+
+mergeSlicesByModule :: [DefinitionSlice] -> [DefinitionSlice]
+mergeSlicesByModule =
+  Map.elems . foldl insertSlice Map.empty
+  where
+    insertSlice acc slice =
+      Map.insertWith mergeTwo slice.definitionModule slice acc
+
+    mergeTwo new old =
+      fromMaybe old $ mergeDefinitionSlices [old, new]
 
 renderImport :: RequiredImport -> String
 renderImport RequiredImport {..} =
@@ -141,147 +222,269 @@ renderImport RequiredImport {..} =
     renderName =
       GHC.occNameString . GHC.nameOccName
 
-buildDefinitionSlice ::
+resolveDefinitionAnalysis ::
+  (MonadLore m) =>
+  Map.Map GHC.Module GHC.ModSummary ->
+  ResolverCache ->
+  GHC.Name ->
+  m (ResolverCache, Maybe DefinitionAnalysis)
+resolveDefinitionAnalysis modSummaries cache inputName =
+  case Map.lookup inputName cache.cachedAnalyses of
+    Just analysis ->
+      pure (cache, analysis)
+    Nothing ->
+      case GHC.nameModule_maybe inputName of
+        Nothing ->
+          pure (rememberAnalysis Nothing)
+        Just definingModule -> do
+          (cache', context) <- resolveModuleContext modSummaries cache definingModule
+          let analysis = context >>= analyzeDefinition definingModule inputName
+          pure
+            ( cache'
+                { cachedAnalyses =
+                    Map.insert inputName analysis cache'.cachedAnalyses
+                },
+              analysis
+            )
+  where
+    rememberAnalysis analysis =
+      ( cache
+          { cachedAnalyses =
+              Map.insert inputName analysis cache.cachedAnalyses
+          },
+        analysis
+      )
+
+resolveModuleContext ::
+  (MonadLore m) =>
+  Map.Map GHC.Module GHC.ModSummary ->
+  ResolverCache ->
+  GHC.Module ->
+  m (ResolverCache, Maybe ModuleContext)
+resolveModuleContext modSummaries cache definingModule =
+  case Map.lookup definingModule cache.cachedModules of
+    Just context ->
+      pure (cache, Just context)
+    Nothing ->
+      case Map.lookup definingModule modSummaries of
+        Nothing ->
+          pure (cache, Nothing)
+        Just summary -> do
+          parsedModule <- GHC.parseModule summary
+          typecheckedModule <- GHC.typecheckModule parsedModule
+          let context =
+                ModuleContext
+                  { parsedModule,
+                    typecheckedModule
+                  }
+          pure
+            ( cache
+                { cachedModules =
+                    Map.insert definingModule context cache.cachedModules
+                },
+              Just context
+            )
+
+analyzeDefinition ::
   GHC.Module ->
   GHC.Name ->
-  GHC.ParsedModule ->
-  GHC.TypecheckedModule ->
-  Maybe DefinitionSlice
-buildDefinitionSlice definingModule target parsedModule typecheckedModule = do
+  ModuleContext ->
+  Maybe DefinitionAnalysis
+analyzeDefinition definingModule target ModuleContext {parsedModule, typecheckedModule} = do
   DefinitionMatch {matchedDeclaration, matchedSignature} <-
     findDefinitionMatch target (GHC.pm_parsed_source parsedModule)
-  let spans =
+  let (tcg, _details) = GHC.tm_internals_ typecheckedModule
+      sourceImports =
+        [ SourceImport importId importDecl
+        | (importId, importDecl) <- zip [0 ..] (GHC.Tc.tcg_rn_imports tcg),
+          not (GHC.unLoc importDecl).ideclExt.ideclImplicit
+        ]
+      spans =
         DeclarationSpans
           { declarationSpan = GHC.getLocA matchedDeclaration,
             signatureSpan = GHC.getLocA <$> matchedSignature
           }
+      occurrences =
+        collectReferencedOccurrences
+          definingModule
+          spans
+          sourceImports
+          tcg
+          (GHC.pm_parsed_source parsedModule)
+          typecheckedModule
+      slice =
+        DefinitionSlice
+          { definitionModule = definingModule,
+            declarationSpans = [spans],
+            requiredImports = buildImports sourceImports occurrences
+          }
   pure
-    DefinitionSlice
-      { definitionModule = definingModule,
-        declarationSpans = [spans],
-        requiredImports =
-          buildImports
-            [spans]
-            (GHC.pm_parsed_source parsedModule)
-            typecheckedModule
+    DefinitionAnalysis
+      { analysisSlice = slice,
+        analysisReferences = collectReferencedNames target spans occurrences
       }
 
-buildImports ::
-  [DeclarationSpans] ->
+collectReferencedOccurrences ::
+  GHC.Module ->
+  DeclarationSpans ->
+  [SourceImport] ->
+  GHC.Tc.TcGblEnv ->
   GHC.ParsedSource ->
   GHC.TypecheckedModule ->
-  [RequiredImport]
-buildImports spans parsedSource typecheckedModule =
+  [ReferencedOccurrence]
+collectReferencedOccurrences definingModule spans sourceImports tcg parsedSource typecheckedModule =
   case GHC.tm_renamed_source typecheckedModule of
     Nothing ->
       []
     Just (renamedGroup, _imports, _exports, _docs) ->
-      mapMaybe buildRequiredImport $
-        IntMap.toAscList assignedOccurrences
+      dedupeOccurrences $
+        mapMaybe toReferencedOccurrence $
+          collectLocatedNames targetSpans renamedGroup
+  where
+    targetSpans =
+      declarationSpan spans
+        : maybeToList spans.signatureSpan
+
+    occurrenceSyntax =
+      collectOccurrenceSyntax targetSpans parsedSource
+
+    toReferencedOccurrence locatedName = do
+      gre <- GHC.lookupGRE_Name (GHC.Tc.tcg_rdr_env tcg) (GHC.unLoc locatedName)
+      let occurrenceName = GHC.unLoc locatedName
+          syntax =
+            fromMaybe (OccurrenceSyntax Nothing) $
+              lookup (locatedSpan locatedName) occurrenceSyntax
+      guardReference definingModule spans occurrenceName $
+        ReferencedOccurrence
+          { occurrenceName,
+            occurrenceParent =
+              case GHC.gre_par gre of
+                GHC.ParentIs parentName -> Just parentName
+                GHC.NoParent -> Nothing,
+            occurrenceSyntax = syntax,
+            occurrenceCandidates =
+              dedupeIds
+                [ importId
+                | importSpec <- Bag.bagToList (GHC.gre_imp gre),
+                  supportsOccurrence syntax (GHC.is_decl importSpec),
+                  Just importId <- [findImportId (GHC.is_dloc (GHC.is_decl importSpec))]
+                ]
+          }
+
+    findImportId importSpan =
+      sourceImportId <$> List.find ((== importSpan) . GHC.getLocA . sourceImportDecl) sourceImports
+
+buildImports ::
+  [SourceImport] ->
+  [ReferencedOccurrence] ->
+  [RequiredImport]
+buildImports sourceImports occurrences =
+  mapMaybe buildRequiredImport $
+    IntMap.toAscList assignedOccurrences
+  where
+    chosenImports =
+      chooseMinimalImports importedOccurrences
+
+    importedOccurrences =
+      filter (not . null . occurrenceCandidates) occurrences
+
+    assignedOccurrences =
+      IntMap.fromListWith
+        (<>)
+        [ (importId, [ref])
+        | ref <- importedOccurrences,
+          Just importId <- [List.find (`IntSet.member` chosenImports) ref.occurrenceCandidates]
+        ]
+
+    chooseMinimalImports =
+      go IntSet.empty
       where
-        targetSpans =
-          [ declarationSpan span'
-          | span' <- spans
-          ]
-            <> mapMaybe signatureSpan spans
+        go chosen [] = chosen
+        go chosen remaining =
+          let counts =
+                IntMap.fromListWith
+                  (+)
+                  [(c, 1 :: Int) | ref <- remaining, c <- ref.occurrenceCandidates]
+              bestImport =
+                fst $
+                  List.maximumBy (\a b -> compare (snd a) (snd b)) $
+                    IntMap.toList counts
+              chosen' = IntSet.insert bestImport chosen
+           in go chosen' (filter (not . coveredBy chosen') remaining)
 
-        (tcg, _details) = GHC.tm_internals_ typecheckedModule
+        coveredBy chosen ref =
+          any (`IntSet.member` chosen) ref.occurrenceCandidates
 
-        sourceImports =
-          [ (importId, importDecl)
-          | (importId, importDecl) <- zip [0 ..] (GHC.Tc.tcg_rn_imports tcg),
-            not (GHC.unLoc importDecl).ideclExt.ideclImplicit
-          ]
+    buildRequiredImport (importId, refs) = do
+      si <- List.find ((== importId) . sourceImportId) sourceImports
+      let decl = GHC.unLoc si.sourceImportDecl
+      pure
+        RequiredImport
+          { importKey = importId,
+            importModule = GHC.unLoc decl.ideclName,
+            importPackageQualifier = pkgQualString decl.ideclPkgQual,
+            importSource = decl.ideclSource == GHC.IsBoot,
+            importQualifiedStyle = decl.ideclQualified,
+            importAlias = GHC.unLoc <$> decl.ideclAs,
+            importOriginallyExplicit = decl.ideclImportList /= Nothing,
+            importItems = normalizeImportItems (concatMap occurrenceItems refs)
+          }
 
-        occurrenceSyntax =
-          collectOccurrenceSyntax targetSpans parsedSource
+    occurrenceItems ReferencedOccurrence {occurrenceName, occurrenceParent} =
+      case occurrenceParent of
+        Just parentName
+          | parentName /= occurrenceName ->
+              [ImportParent parentName [occurrenceName]]
+        _ ->
+          [ImportName occurrenceName]
 
-        occurrences =
-          dedupeOccurrences $
-            mapMaybe toReferencedOccurrence $
-              collectLocatedNames targetSpans renamedGroup
+collectReferencedNames ::
+  GHC.Name ->
+  DeclarationSpans ->
+  [ReferencedOccurrence] ->
+  [GHC.Name]
+collectReferencedNames target spans =
+  dedupeNames
+    . filter (isFollowableReference target spans)
+    . map (.occurrenceName)
 
-        chosenImports =
-          chooseMinimalImports occurrences
+isFollowableReference :: GHC.Name -> DeclarationSpans -> GHC.Name -> Bool
+isFollowableReference target spans name =
+  name /= target
+    && case GHC.nameModule_maybe name of
+      Nothing -> False
+      Just definingModule ->
+        not (definesName spans.declarationSpan definingModule name)
 
-        assignedOccurrences =
-          IntMap.fromListWith
-            (<>)
-            [ (importId, [ref])
-            | ref <- occurrences,
-              Just importId <- [List.find (`IntSet.member` chosenImports) ref.occurrenceCandidates]
-            ]
+guardReference ::
+  GHC.Module ->
+  DeclarationSpans ->
+  GHC.Name ->
+  ReferencedOccurrence ->
+  Maybe ReferencedOccurrence
+guardReference definingModule spans occurrenceName occurrence
+  | definesName spans.declarationSpan definingModule occurrenceName = Nothing
+  | otherwise = Just occurrence
 
-        toReferencedOccurrence locatedName = do
-          gre <- GHC.lookupGRE_Name (GHC.Tc.tcg_rdr_env tcg) (GHC.unLoc locatedName)
-          let syntax =
-                fromMaybe (OccurrenceSyntax Nothing) $
-                  lookup (locatedSpan locatedName) occurrenceSyntax
-              candidates =
-                dedupeIds
-                  [ importId
-                  | importSpec <- Bag.bagToList (GHC.gre_imp gre),
-                    supportsOccurrence syntax (GHC.is_decl importSpec),
-                    Just importId <- [findImportId (GHC.is_dloc (GHC.is_decl importSpec))]
-                  ]
-          if null candidates
-            then Nothing
-            else
-              Just
-                ReferencedOccurrence
-                  { occurrenceName = GHC.unLoc locatedName,
-                    occurrenceParent =
-                      case GHC.gre_par gre of
-                        GHC.ParentIs parentName -> Just parentName
-                        GHC.NoParent -> Nothing,
-                    occurrenceSyntax = syntax,
-                    occurrenceCandidates = candidates
-                  }
+definesName :: GHC.SrcSpan -> GHC.Module -> GHC.Name -> Bool
+definesName declarationSpan definingModule name =
+  GHC.nameModule_maybe name == Just definingModule
+    && GHC.nameSrcSpan name `GHC.isSubspanOf` declarationSpan
 
-        findImportId importSpan =
-          fst <$> List.find ((== importSpan) . GHC.getLocA . snd) sourceImports
+definitionKey :: DefinitionSlice -> DefinitionKey
+definitionKey slice =
+  DefinitionKey
+    { definitionKeyModule = slice.definitionModule,
+      definitionKeySpan =
+        GHC.srcSpanToRealSrcSpan . declarationSpan . head $ slice.declarationSpans
+    }
 
-        chooseMinimalImports =
-          go IntSet.empty
-          where
-            go chosen [] = chosen
-            go chosen remaining =
-              let counts =
-                    IntMap.fromListWith
-                      (+)
-                      [(c, 1 :: Int) | r <- remaining, c <- r.occurrenceCandidates]
-                  bestImport =
-                    fst $
-                      List.maximumBy (\a b -> compare (snd a) (snd b)) $
-                        IntMap.toList counts
-                  chosen' = IntSet.insert bestImport chosen
-               in go chosen' (filter (not . coveredBy chosen') remaining)
-
-            coveredBy chosen ref =
-              any (`IntSet.member` chosen) ref.occurrenceCandidates
-
-        buildRequiredImport (importId, refs) = do
-          importDecl <- lookup importId sourceImports
-          let decl = GHC.unLoc importDecl
-          pure
-            RequiredImport
-              { importKey = importId,
-                importModule = GHC.unLoc decl.ideclName,
-                importPackageQualifier = pkgQualString decl.ideclPkgQual,
-                importSource = decl.ideclSource == GHC.IsBoot,
-                importQualifiedStyle = decl.ideclQualified,
-                importAlias = GHC.unLoc <$> decl.ideclAs,
-                importOriginallyExplicit = decl.ideclImportList /= Nothing,
-                importItems = normalizeImportItems (concatMap occurrenceItems refs)
-              }
-
-        occurrenceItems ReferencedOccurrence {occurrenceName, occurrenceParent} =
-          case occurrenceParent of
-            Just parentName
-              | parentName /= occurrenceName ->
-                  [ImportParent parentName [occurrenceName]]
-            _ ->
-              [ImportName occurrenceName]
+emptyResolverCache :: ResolverCache
+emptyResolverCache =
+  ResolverCache
+    { cachedModules = Map.empty,
+      cachedAnalyses = Map.empty
+    }
 
 findDefinitionMatch :: GHC.Name -> GHC.ParsedSource -> Maybe DefinitionMatch
 findDefinitionMatch target parsedSource = do
@@ -441,6 +644,10 @@ dedupeNames =
 
 isQualifiedImport :: GHC.ImportDeclQualifiedStyle -> Bool
 isQualifiedImport = (/= GHC.NotQualified)
+
+sortDeclarationSpans :: [DeclarationSpans] -> [DeclarationSpans]
+sortDeclarationSpans =
+  List.sortOn (GHC.srcSpanToRealSrcSpan . declarationSpan)
 
 pkgQualString :: GHC.PkgQual -> Maybe String
 pkgQualString = \case

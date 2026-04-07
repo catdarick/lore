@@ -11,6 +11,7 @@ build-type:     Simple
 library
   exposed-modules:
       Demo
+      Demo.Support
   other-modules:
       Paths_demo_fixture
   hs-source-dirs:
