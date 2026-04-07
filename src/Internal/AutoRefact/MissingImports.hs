@@ -8,63 +8,56 @@ module Internal.AutoRefact.MissingImports
 where
 
 import Control.Applicative ((<|>))
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad (foldM)
 import Data.Char (isSpace, toLower)
-import Data.List (nubBy, sortBy)
+import Data.List (find, foldl', nubBy, sortBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe, mapMaybe, maybeToList)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import qualified GHC as Ghc
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as TyThing
 import Internal.AutoRefact.Edit (FileEdit (..))
+import Internal.AutoRefact.ImportDecl
+  ( ImportShape (..),
+    ParsedImport (..),
+    parseImports,
+    parsedImportEffectiveQualifier,
+    parsedImportModuleName,
+    parsedImportQualified,
+    renderImportDecl,
+  )
 import Internal.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..))
 import Internal.Lookup.Types (ExportedSymbol (..))
 import Monad (MonadLore)
 import System.FilePath (normalise)
 
-suggestMissingImportEdits :: (MonadLore m) => Map Text [ExportedSymbol] -> Diagnostic -> m [FileEdit]
-suggestMissingImportEdits symbolsMap Diagnostic {diagnosticSpan, diagnosticMessage} =
-  case diagnosticSpan of
-    RealDiagnosticSpan Span {spanFile} -> do
-      source <- liftIO $ TIO.readFile spanFile
-      let moduleExportDiagnostic = parseModuleDoesNotExport diagnosticMessage
-          maybeMissingSymbol =
-            parseMissingSymbol diagnosticMessage
-              <|> fmap fst moduleExportDiagnostic
-          matchingExportedSymbols missingSymbol =
-            filter (matchesMissingKind missingSymbol) $
-              Map.findWithDefault [] missingSymbol.missingName symbolsMap
-      case do
-        missingSymbol <- maybeMissingSymbol
-        let preferredModules =
-              parseDiagnosticImportTargets diagnosticMessage
-                <> preferredImportedModules missingSymbol source
-                <> maybe [] snd moduleExportDiagnostic
-        moduleName <-
-          selectModuleForMissingSymbol
-            missingSymbol
-            preferredModules
-            (matchingExportedSymbols missingSymbol)
-        pure (missingSymbol, moduleName) of
+suggestMissingImportEdits :: (MonadLore m) => Map FilePath GHC.ModSummary -> Map Text [ExportedSymbol] -> [Diagnostic] -> m [FileEdit]
+suggestMissingImportEdits modSummariesByFile symbolsMap diagnostics =
+  concat <$> mapM suggestForFile (Map.toList groupedDiagnostics)
+  where
+    groupedDiagnostics =
+      Map.fromListWith
+        (<>)
+        [ (normalise spanFile, [diagnostic])
+        | diagnostic@Diagnostic {diagnosticSpan = RealDiagnosticSpan Span {spanFile}} <- diagnostics
+        ]
+
+    suggestForFile (filePath, fileDiagnostics) =
+      case Map.lookup filePath modSummariesByFile of
         Nothing ->
           pure []
-        Just (missingSymbol, moduleName) -> do
-          maybeImportItem <- renderImportItem missingSymbol (listToMaybe (matchingExportedSymbols missingSymbol))
-          let existingImportStyle = findExistingImportStyle moduleName source
-              renderedImport =
-                (\importItem -> renderImportStatement moduleName importItem missingSymbol existingImportStyle)
-                  <$> maybeImportItem
-          pure $
-            maybeToList $
-              AddImportEdit
-                (normalise spanFile)
-                <$> renderedImport
-    UnhelpfulDiagnosticSpan {} ->
-      pure []
+        Just summary ->
+          Ghc.handleSourceError
+            (const (pure []))
+            do
+              parsedModule <- Ghc.parseModule summary
+              let parsedImports = parseImports parsedModule
+                  requests = mapMaybe missingImportRequest fileDiagnostics
+              plan <- foldM (applyMissingImportRequest parsedImports symbolsMap) emptyImportPlan requests
+              pure (renderImportPlan filePath plan)
 
 data MissingSymbolKind
   = MissingThing
@@ -79,27 +72,171 @@ data MissingSymbol = MissingSymbol
   }
   deriving (Eq, Ord, Show)
 
-selectModuleForMissingSymbol :: MissingSymbol -> [Text] -> [ExportedSymbol] -> Maybe Text
-selectModuleForMissingSymbol missingSymbol preferredModules exportedSymbols = do
-  let candidateModules =
-        deduplicateTexts $
-          concatMap
-            (map (T.pack . GHC.moduleNameString . GHC.moduleName) . exportedFrom)
-            (filter (matchesMissingKind missingSymbol) exportedSymbols)
+data MissingImportRequest = MissingImportRequest
+  { requestMissingSymbol :: MissingSymbol,
+    requestPreferredModules :: [Text],
+    requestSuggestedImportTargets :: [Text]
+  }
+
+data ModuleSelectionDecision
+  = SelectModule Text ModuleSelectionReason
+  | RejectSelection ModuleRejectionReason
+
+data ModuleSelectionReason
+  = UniqueCandidate
+  | QualifierMatched
+  | ExistingUnqualifiedImportMatched
+  | ShortestReexportModule
+
+data ModuleRejectionReason
+  = AmbiguousQualifiedCandidates
+  | AmbiguousUnqualifiedCandidates
+  | NoReexportHeuristicMatch
+
+data ImportRequirement
+  = RequireUnqualifiedImport Text Text
+  | RequireQualifiedImport Text Text
+
+data PlannedImportUpdate = PlannedImportUpdate
+  { updateSpan :: Span,
+    updateImport :: ParsedImport,
+    updateShape :: ImportShape
+  }
+
+data NewImportKey
+  = NewUnqualifiedImportKey Text
+  | NewQualifiedImportKey Text Text
+  deriving (Eq, Ord, Show)
+
+data NewImport = NewImport
+  { newImportModule :: Text,
+    newImportQualifier :: Maybe Text,
+    newImportItems :: [Text]
+  }
+
+data ImportPlan = ImportPlan
+  { planUpdates :: Map ExistingImportId PlannedImportUpdate,
+    planInsertions :: Map NewImportKey NewImport
+  }
+
+type ExistingImportId = (Int, Int, Int, Int)
+
+emptyImportPlan :: ImportPlan
+emptyImportPlan =
+  ImportPlan
+    { planUpdates = Map.empty,
+      planInsertions = Map.empty
+    }
+
+selectModuleForMissingSymbol :: MissingSymbol -> [Text] -> [Text] -> [ParsedImport] -> [ExportedSymbol] -> Maybe Text
+selectModuleForMissingSymbol missingSymbol preferredModules suggestedImportTargets parsedImports exportedSymbols =
+  selectionToMaybe $
+    decideModuleSelection missingSymbol preferredModules suggestedImportTargets parsedImports exportedSymbols
+
+decideModuleSelection :: MissingSymbol -> [Text] -> [Text] -> [ParsedImport] -> [ExportedSymbol] -> ModuleSelectionDecision
+decideModuleSelection missingSymbol preferredModules suggestedImportTargets parsedImports exportedSymbols =
+  let matchingExportedSymbols =
+        filter (matchesMissingKind missingSymbol) exportedSymbols
+      candidateModules =
+        candidateModulesForSymbols matchingExportedSymbols
       preferredMatches = deduplicateTexts $ filter (`elem` candidateModules) preferredModules
       baseCandidates =
         if null preferredMatches
           then candidateModules
           else preferredMatches
-  case baseCandidates of
-    [moduleName] ->
-      Just moduleName
+   in decideAmongCandidates missingSymbol suggestedImportTargets parsedImports matchingExportedSymbols baseCandidates
+
+decideAmongCandidates :: MissingSymbol -> [Text] -> [ParsedImport] -> [ExportedSymbol] -> [Text] -> ModuleSelectionDecision
+decideAmongCandidates missingSymbol suggestedImportTargets parsedImports matchingExportedSymbols = \case
+  [moduleName] ->
+    SelectModule moduleName UniqueCandidate
+  candidateModules ->
+    case missingSymbol.missingQualifier of
+      Just qualifier ->
+        maybe
+          (RejectSelection AmbiguousQualifiedCandidates)
+          (\moduleName -> SelectModule moduleName QualifierMatched)
+          (selectByQualifier qualifier candidateModules)
+      Nothing ->
+        decideUnqualifiedReexportSelection suggestedImportTargets parsedImports matchingExportedSymbols
+
+decideUnqualifiedReexportSelection :: [Text] -> [ParsedImport] -> [ExportedSymbol] -> ModuleSelectionDecision
+decideUnqualifiedReexportSelection suggestedImportTargets parsedImports exportedSymbols =
+  case sameSymbolReexportCandidates exportedSymbols of
+    Nothing ->
+      RejectSelection AmbiguousUnqualifiedCandidates
+    Just candidateModules ->
+      case existingUnqualifiedImportCandidate parsedImports candidateModules of
+        Just moduleName ->
+          SelectModule moduleName ExistingUnqualifiedImportMatched
+        Nothing
+          | null suggestedImportTargets ->
+              maybe
+                (RejectSelection NoReexportHeuristicMatch)
+                (\moduleName -> SelectModule moduleName ShortestReexportModule)
+                (shortestModuleName candidateModules)
+          | otherwise ->
+              RejectSelection AmbiguousUnqualifiedCandidates
+
+selectionToMaybe :: ModuleSelectionDecision -> Maybe Text
+selectionToMaybe = \case
+  SelectModule moduleName _ -> Just moduleName
+  RejectSelection _ -> Nothing
+
+candidateModulesForSymbols :: [ExportedSymbol] -> [Text]
+candidateModulesForSymbols =
+  deduplicateTexts
+    . concatMap candidateModulesForSymbol
+
+candidateModulesForSymbol :: ExportedSymbol -> [Text]
+candidateModulesForSymbol =
+  map (T.pack . GHC.moduleNameString . GHC.moduleName) . exportedFrom
+
+existingUnqualifiedImportCandidate :: [ParsedImport] -> [Text] -> Maybe Text
+existingUnqualifiedImportCandidate parsedImports candidateModules =
+  case filter (hasCompatibleUnqualifiedImport parsedImports) candidateModules of
+    [moduleName] -> Just moduleName
+    _ -> Nothing
+
+sameSymbolReexportCandidates :: [ExportedSymbol] -> Maybe [Text]
+sameSymbolReexportCandidates exportedSymbols =
+  case exportedSymbols of
+    [exportedSymbol] ->
+      let candidateModules =
+            candidateModulesForSymbol exportedSymbol
+       in if length candidateModules > 1
+            then Just candidateModules
+            else Nothing
     _ ->
-      case missingSymbol.missingQualifier of
-        Just qualifier ->
-          selectByQualifier qualifier baseCandidates
-        Nothing ->
-          Nothing
+      Nothing
+
+hasCompatibleUnqualifiedImport :: [ParsedImport] -> Text -> Bool
+hasCompatibleUnqualifiedImport parsedImports moduleName =
+  any isCompatible parsedImports
+  where
+    isCompatible parsedImport =
+      parsedImportModuleName parsedImport == moduleName
+        && not (parsedImportQualified parsedImport)
+        && parsedImport.parsedImportShape /= HidingImport
+
+shortestModuleName :: [Text] -> Maybe Text
+shortestModuleName [] = Nothing
+shortestModuleName modules =
+  Just $
+    foldl1 shorterModule modules
+  where
+    shorterModule left right =
+      compareModuleLength left right
+        `pickModule` (left, right)
+
+    compareModuleLength left right =
+      compare (T.length left) (T.length right)
+        <> compare left right
+
+    pickModule ordering (left, right) =
+      case ordering of
+        GT -> right
+        _ -> left
 
 matchesMissingKind :: MissingSymbol -> ExportedSymbol -> Bool
 matchesMissingKind MissingSymbol {missingKind = MissingThing} _ = True
@@ -120,35 +257,6 @@ selectByQualifier qualifier modules =
           Just best
     _ ->
       Nothing
-
-data ExistingImportStyle = ExistingImportStyle
-  { existingImportQualified :: Bool,
-    existingImportAlias :: Maybe Text
-  }
-
-renderImportStatement :: Text -> Text -> MissingSymbol -> Maybe ExistingImportStyle -> Text
-renderImportStatement moduleText importItem MissingSymbol {missingQualifier} existingImportStyle =
-  case preferredQualifiedAlias of
-    Nothing ->
-      "import " <> moduleText <> " (" <> importItem <> ")"
-    Just alias ->
-      "import qualified "
-        <> moduleText
-        <> renderAlias alias
-  where
-    preferredQualifiedAlias =
-      case missingQualifier of
-        Just qualifier -> Just qualifier
-        Nothing ->
-          case existingImportStyle of
-            Just ExistingImportStyle {existingImportQualified = False} ->
-              Nothing
-            _ ->
-              Nothing
-
-    renderAlias qualifier
-      | qualifier == moduleText = ""
-      | otherwise = " as " <> qualifier
 
 renderImportItem :: (MonadLore m) => MissingSymbol -> Maybe ExportedSymbol -> m (Maybe Text)
 renderImportItem MissingSymbol {missingName, missingKind} maybeExportedSymbol =
@@ -259,22 +367,6 @@ isLikelyQualifier qualifier =
         || isAlphaLike ch
     isAlphaLike ch = ch == toLower ch || isUpperLike ch
 
-parseDiagnosticImportTargets :: Text -> [Text]
-parseDiagnosticImportTargets rawMessage =
-  deduplicateTexts $
-    maybeToList singleImportTarget <> multipleImportTargets
-  where
-    message = unifySpaces rawMessage
-
-    singleImportTarget = do
-      (_, suffix) <- nonEmptyBreak "in the import of " message
-      parseMissingSymbolAfterPrefix "in the import of " suffix
-
-    multipleImportTargets =
-      case nonEmptyBreak "one of these import lists:" message of
-        Nothing -> []
-        Just (_, suffix) -> quotedSegments suffix
-
 parseModuleDoesNotExport :: Text -> Maybe (MissingSymbol, [Text])
 parseModuleDoesNotExport rawMessage = do
   let message = unifySpaces rawMessage
@@ -293,6 +385,22 @@ guardText :: Text -> Text -> Maybe ()
 guardText needle haystack
   | needle `T.isInfixOf` haystack = Just ()
   | otherwise = Nothing
+
+parseDiagnosticImportTargets :: Text -> [Text]
+parseDiagnosticImportTargets rawMessage =
+  deduplicateTexts $
+    maybeToList singleImportTarget <> multipleImportTargets
+  where
+    message = unifySpaces rawMessage
+
+    singleImportTarget = do
+      (_, suffix) <- nonEmptyBreak "in the import of " message
+      parseMissingSymbolAfterPrefix "in the import of " suffix
+
+    multipleImportTargets =
+      case nonEmptyBreak "one of these import lists:" message of
+        Nothing -> []
+        Just (_, suffix) -> quotedSegments suffix
 
 nonEmptyBreak :: Text -> Text -> Maybe (Text, Text)
 nonEmptyBreak needle haystack =
@@ -395,89 +503,195 @@ firstJust f (value : rest) =
     Just result -> Just result
     Nothing -> firstJust f rest
 
-findExistingImportStyle :: Text -> Text -> Maybe ExistingImportStyle
-findExistingImportStyle moduleText =
-  listToMaybe
-    . mapMaybe parseImportLine
-    . T.lines
-  where
-    parseImportLine line
-      | not ("import " `T.isPrefixOf` T.stripStart line) = Nothing
-      | moduleText `notElem` tokens = Nothing
-      | otherwise =
-          Just
-            ExistingImportStyle
-              { existingImportQualified = "qualified" `elem` tokens,
-                existingImportAlias = parseAlias tokens
-              }
-      where
-        tokens = T.words line
-
-    parseAlias ("as" : alias : _) = Just (T.takeWhile (/= '(') alias)
-    parseAlias (_ : rest) = parseAlias rest
-    parseAlias [] = Nothing
-
 sortOnDescending :: (Ord b) => (a -> b) -> [a] -> [a]
 sortOnDescending score =
   sortBy (\left right -> compare (score right) (score left))
 
-parseImportedModules :: Text -> [Text]
-parseImportedModules =
-  deduplicateTexts
-    . mapMaybe parseImportedModule
-    . T.lines
-  where
-    parseImportedModule line = do
-      guardText "import " (T.stripStart line)
-      findFirst isLikelyModuleName (drop 1 (T.words line))
+missingImportRequest :: Diagnostic -> Maybe MissingImportRequest
+missingImportRequest Diagnostic {diagnosticMessage} = do
+  let moduleExportDiagnostic = parseModuleDoesNotExport diagnosticMessage
+      maybeMissingSymbol =
+        parseMissingSymbol diagnosticMessage
+          <|> fmap fst moduleExportDiagnostic
+  missingSymbol <- maybeMissingSymbol
+  pure
+    MissingImportRequest
+      { requestMissingSymbol = missingSymbol,
+        requestPreferredModules =
+          maybe [] snd moduleExportDiagnostic,
+        requestSuggestedImportTargets =
+          parseDiagnosticImportTargets diagnosticMessage
+      }
 
-    isLikelyModuleName token =
-      case T.uncons token of
-        Just (firstChar, _) ->
-          firstChar /= '('
-            && firstChar /= '"'
-            && firstChar /= '\''
-            && firstChar /= '{'
-            && firstChar /= '#'
-            && firstChar /= '-'
-            && firstChar /= ','
-            && firstChar /= ')'
-            && firstChar /= '_'
-            && firstChar /= '['
-            && firstChar /= ']'
-            && firstChar /= '='
-            && firstChar /= ':'
-            && firstChar /= ';'
-            && firstChar /= '`'
-            && firstChar /= '.'
-            && firstChar /= '/'
-            && firstChar /= '\\'
-            && firstChar /= '@'
-            && firstChar /= '!'
-            && firstChar /= '?'
-            && firstChar /= '&'
-            && firstChar /= '|'
-            && firstChar /= '+'
-            && firstChar /= '*'
-            && firstChar /= '<'
-            && firstChar /= '>'
-            && firstChar /= '~'
-            && firstChar /= '$'
-            && firstChar /= '%'
-            && firstChar /= '^'
-            && (firstChar == '_' || firstChar /= toLower firstChar)
-            && token `notElem` ["qualified", "safe", "as", "hiding", "import"]
+applyMissingImportRequest ::
+  (MonadLore m) =>
+  [ParsedImport] ->
+  Map Text [ExportedSymbol] ->
+  ImportPlan ->
+  MissingImportRequest ->
+  m ImportPlan
+applyMissingImportRequest parsedImports symbolsMap plan MissingImportRequest {requestMissingSymbol, requestPreferredModules, requestSuggestedImportTargets} = do
+  let matchingExportedSymbols =
+        filter (matchesMissingKind requestMissingSymbol) $
+          Map.findWithDefault [] requestMissingSymbol.missingName symbolsMap
+  case selectModuleForMissingSymbol requestMissingSymbol requestPreferredModules requestSuggestedImportTargets parsedImports matchingExportedSymbols of
+    Nothing ->
+      pure plan
+    Just moduleName -> do
+      let selectedSymbol =
+            listToMaybe
+              [ symbol
+              | symbol <- matchingExportedSymbols,
+                moduleName `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
+              ]
+      maybeImportItem <- renderImportItem requestMissingSymbol selectedSymbol
+      case buildImportRequirement requestMissingSymbol moduleName maybeImportItem of
         Nothing ->
-          False
+          pure plan
+        Just requirement ->
+          pure (applyImportRequirement parsedImports plan requirement)
 
-findFirst :: (a -> Bool) -> [a] -> Maybe a
-findFirst _ [] = Nothing
-findFirst predicate (value : rest)
-  | predicate value = Just value
-  | otherwise = findFirst predicate rest
+buildImportRequirement :: MissingSymbol -> Text -> Maybe Text -> Maybe ImportRequirement
+buildImportRequirement MissingSymbol {missingQualifier = Just qualifier} moduleName _ =
+  Just (RequireQualifiedImport moduleName qualifier)
+buildImportRequirement MissingSymbol {missingQualifier = Nothing} moduleName maybeImportItem =
+  RequireUnqualifiedImport moduleName <$> maybeImportItem
 
-preferredImportedModules :: MissingSymbol -> Text -> [Text]
-preferredImportedModules MissingSymbol {missingQualifier = Just _} _ =
-  []
-preferredImportedModules MissingSymbol {missingQualifier = Nothing} source =
-  parseImportedModules source
+applyImportRequirement :: [ParsedImport] -> ImportPlan -> ImportRequirement -> ImportPlan
+applyImportRequirement parsedImports plan = \case
+  RequireUnqualifiedImport moduleName importItem ->
+    applyUnqualifiedImportRequirement parsedImports plan moduleName importItem
+  RequireQualifiedImport moduleName qualifier ->
+    applyQualifiedImportRequirement parsedImports plan moduleName qualifier
+
+applyUnqualifiedImportRequirement :: [ParsedImport] -> ImportPlan -> Text -> Text -> ImportPlan
+applyUnqualifiedImportRequirement parsedImports plan moduleName importItem =
+  case Map.lookup insertionKey plan.planInsertions of
+    Just newImport ->
+      plan
+        { planInsertions =
+            Map.insert
+              insertionKey
+              newImport {newImportItems = appendUnique newImport.newImportItems [importItem]}
+              plan.planInsertions
+        }
+    Nothing ->
+      case findCompatibleUnqualifiedImport parsedImports plan moduleName of
+        Just parsedImport ->
+          case currentImportShape plan parsedImport of
+            OpenImport ->
+              plan
+            ExplicitImport items ->
+              updateExistingImport parsedImport (ExplicitImport (appendUnique items [importItem])) plan
+            HidingImport ->
+              insertNewImport insertionKey (NewImport moduleName Nothing [importItem]) plan
+        Nothing ->
+          insertNewImport insertionKey (NewImport moduleName Nothing [importItem]) plan
+  where
+    insertionKey = NewUnqualifiedImportKey moduleName
+
+applyQualifiedImportRequirement :: [ParsedImport] -> ImportPlan -> Text -> Text -> ImportPlan
+applyQualifiedImportRequirement parsedImports plan moduleName qualifier =
+  case Map.lookup insertionKey plan.planInsertions of
+    Just _ ->
+      plan
+    Nothing ->
+      case findCompatibleQualifiedImport parsedImports plan moduleName qualifier of
+        Just parsedImport ->
+          case currentImportShape plan parsedImport of
+            OpenImport ->
+              plan
+            ExplicitImport _ ->
+              updateExistingImport parsedImport OpenImport plan
+            HidingImport ->
+              insertNewImport insertionKey (NewImport moduleName (Just qualifier) []) plan
+        Nothing ->
+          insertNewImport insertionKey (NewImport moduleName (Just qualifier) []) plan
+  where
+    insertionKey = NewQualifiedImportKey moduleName qualifier
+
+findCompatibleUnqualifiedImport :: [ParsedImport] -> ImportPlan -> Text -> Maybe ParsedImport
+findCompatibleUnqualifiedImport parsedImports plan moduleName =
+  find isCompatible parsedImports
+  where
+    isCompatible parsedImport =
+      parsedImportModuleName parsedImport == moduleName
+        && not (parsedImportQualified parsedImport)
+        && currentImportShape plan parsedImport /= HidingImport
+
+findCompatibleQualifiedImport :: [ParsedImport] -> ImportPlan -> Text -> Text -> Maybe ParsedImport
+findCompatibleQualifiedImport parsedImports plan moduleName qualifier =
+  find isCompatible parsedImports
+  where
+    isCompatible parsedImport =
+      parsedImportModuleName parsedImport == moduleName
+        && parsedImportQualified parsedImport
+        && parsedImportEffectiveQualifier parsedImport == Just qualifier
+        && currentImportShape plan parsedImport /= HidingImport
+
+renderImportPlan :: FilePath -> ImportPlan -> [FileEdit]
+renderImportPlan filePath ImportPlan {planUpdates, planInsertions} =
+  renderUpdates <> renderInsertions
+  where
+    renderUpdates =
+      [ ReplaceSpanEdit filePath updateSpan (renderImportDecl updateImport.parsedImportDecl updateShape)
+      | PlannedImportUpdate {updateSpan, updateImport, updateShape} <- Map.elems planUpdates
+      ]
+    renderInsertions =
+      [ AddImportEdit filePath (renderNewImport newImport)
+      | newImport <- Map.elems planInsertions
+      ]
+
+renderNewImport :: NewImport -> Text
+renderNewImport NewImport {newImportModule, newImportQualifier = Just qualifier} =
+  "import qualified "
+    <> newImportModule
+    <> renderAlias qualifier
+  where
+    renderAlias alias
+      | alias == newImportModule = ""
+      | otherwise = " as " <> alias
+renderNewImport NewImport {newImportModule, newImportItems} =
+  "import " <> newImportModule <> " (" <> T.intercalate ", " newImportItems <> ")"
+
+currentImportShape :: ImportPlan -> ParsedImport -> ImportShape
+currentImportShape plan parsedImport =
+  maybe parsedImport.parsedImportShape (.updateShape) (Map.lookup (existingImportId parsedImport) plan.planUpdates)
+
+updateExistingImport :: ParsedImport -> ImportShape -> ImportPlan -> ImportPlan
+updateExistingImport parsedImport updateShape plan =
+  plan
+    { planUpdates =
+        Map.insert
+          (existingImportId parsedImport)
+          PlannedImportUpdate
+            { updateSpan = parsedImport.parsedImportSpan,
+              updateImport = parsedImport,
+              updateShape
+            }
+          plan.planUpdates
+    }
+
+insertNewImport :: NewImportKey -> NewImport -> ImportPlan -> ImportPlan
+insertNewImport newImportKey newImport plan =
+  plan
+    { planInsertions =
+        Map.insertWith mergeNewImport newImportKey newImport plan.planInsertions
+    }
+
+mergeNewImport :: NewImport -> NewImport -> NewImport
+mergeNewImport newer older =
+  older
+    { newImportItems = appendUnique older.newImportItems newer.newImportItems
+    }
+
+existingImportId :: ParsedImport -> ExistingImportId
+existingImportId ParsedImport {parsedImportSpan = Span {spanStartLine, spanStartCol, spanEndLine, spanEndCol}} =
+  (spanStartLine, spanStartCol, spanEndLine, spanEndCol)
+
+appendUnique :: [Text] -> [Text] -> [Text]
+appendUnique existing additions =
+  foldl'
+    (\acc value -> if value `elem` acc then acc else acc <> [value])
+    existing
+    additions

@@ -29,6 +29,7 @@ library
       Internal.AutoRefact
       Internal.AutoRefact.CollapseImports
       Internal.AutoRefact.Edit
+      Internal.AutoRefact.ImportDecl
       Internal.AutoRefact.MissingImports
       Internal.AutoRefact.RedundantImports
       Internal.Definition

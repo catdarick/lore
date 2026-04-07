@@ -1,11 +1,13 @@
 module TargetsSpec (spec) where
 
 import Data.IORef (modifyIORef', newIORef, readIORef)
+import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Internal.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (..), Span (..))
 import Internal.Logger (LogMessage (..), LoggerHandle (..))
 import Internal.Lookup (findSymbol)
-import Internal.Targets (UpdateTargetsOptions (..), defaultUpdateTargetsOptions, updateTargets)
+import Internal.Targets (UpdateTargetsOptions (..), defaultUpdateTargetsOptions, retainUnresolvedRollback, updateTargets)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import Test.Hspec
@@ -97,6 +99,49 @@ spec =
         importHeaderFor "import AutoRefactFixture.Imports" demoSource
           `shouldSatisfy` maybe False (\line -> "FixtureType" `T.isInfixOf` line && "fixtureValue" `T.isInfixOf` line)
 
+    it "extends an existing unqualified import for a uniquely matching reexported symbol" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+        ensureReexportFixtureModules fixtureRoot
+        addImportAndKeepDefinition
+          demoFile
+          "import AutoRefactFixture.ReexportLongName (ReexportTag)\n"
+          [ "reexportedViaExistingImport :: Int",
+            "reexportedViaExistingImport = reexportedValue"
+          ]
+
+        loaded <- fixtureLoreAt fixtureRoot do
+          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
+          not . null <$> findSymbol "lookupOrZero"
+
+        demoSource <- TIO.readFile demoFile
+        loaded `shouldBe` True
+        countImportHeaders "import AutoRefactFixture.ReexportLongName" demoSource `shouldBe` 1
+        importHeaderFor "import AutoRefactFixture.ReexportLongName" demoSource
+          `shouldSatisfy` maybe False (\line -> "ReexportTag" `T.isInfixOf` line && "reexportedValue" `T.isInfixOf` line)
+        countImportHeaders "import AutoRefactFixture.ReA" demoSource `shouldBe` 0
+        countImportHeaders "import AutoRefactFixture.ReexportedBase" demoSource `shouldBe` 0
+
+    it "uses the shortest module name for a uniquely matching reexported symbol when no import exists" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+        ensureReexportFixtureModules fixtureRoot
+        appendDemoDefinitions
+          demoFile
+          [ "reexportedViaShortestModule :: Int",
+            "reexportedViaShortestModule = reexportedValue"
+          ]
+
+        loaded <- fixtureLoreAt fixtureRoot do
+          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
+          not . null <$> findSymbol "lookupOrZero"
+
+        demoSource <- TIO.readFile demoFile
+        loaded `shouldBe` True
+        T.isInfixOf "import AutoRefactFixture.ReA (reexportedValue)\n" demoSource `shouldBe` True
+        countImportHeaders "import AutoRefactFixture.ReexportLongName" demoSource `shouldBe` 0
+        countImportHeaders "import AutoRefactFixture.ReexportedBase" demoSource `shouldBe` 0
+
     it "adds an import for a missing type constructor" do
       withFixtureCopy \fixtureRoot -> do
         let demoFile = fixtureRoot </> "src" </> "Demo.hs"
@@ -170,6 +215,63 @@ spec =
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` False
         demoSource `shouldBe` originalSource
+
+    it "does not use an existing import to disambiguate a bare missing symbol" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+        enableTextDependency fixtureRoot
+        addImportAndKeepDefinition
+          demoFile
+          "import Data.Text (Text)\n"
+          [ "ambiguousFind :: Maybe Char",
+            "ambiguousFind = find (== 'a') \"abc\""
+          ]
+        originalSource <- TIO.readFile demoFile
+
+        loaded <- fixtureLoreAt fixtureRoot do
+          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
+          not . null <$> findSymbol "lookupOrZero"
+
+        demoSource <- TIO.readFile demoFile
+        loaded `shouldBe` False
+        demoSource `shouldBe` originalSource
+
+    it "rolls back unresolved auto-refact edits when the build still fails" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+        rewriteDemo demoFile $
+          \source ->
+            T.unlines
+              (filter (/= "import Data.Maybe (fromMaybe)") (T.lines source))
+              <> "\n"
+              <> T.unlines
+                [ "stillBroken :: Int",
+                  "stillBroken = doesNotExistAnywhere"
+                ]
+        originalSource <- TIO.readFile demoFile
+
+        loaded <- fixtureLoreAt fixtureRoot do
+          updateTargets defaultUpdateTargetsOptions {enableAutoRefact = True}
+          not . null <$> findSymbol "lookupOrZero"
+
+        demoSource <- TIO.readFile demoFile
+        loaded `shouldBe` False
+        demoSource `shouldBe` originalSource
+
+    it "preserves rollback state only for files that still fail" do
+      let rollbackState :: Map.Map FilePath T.Text
+          rollbackState =
+            Map.fromList
+              [ ("src/Demo.hs", T.pack "demo-original"),
+                ("src/Demo/Support.hs", T.pack "support-original")
+              ]
+          diagnostics =
+            [ diagnosticIn "src/Demo/Support.hs",
+              diagnosticIn "src/Demo/Support.hs"
+            ]
+
+      retainUnresolvedRollback rollbackState diagnostics
+        `shouldBe` Map.fromList [("src/Demo/Support.hs", T.pack "support-original")]
 
     it "removes a whole redundant import" do
       withFixtureCopy \fixtureRoot -> do
@@ -586,6 +688,14 @@ ensureAmbiguousFixtureModules fixtureRoot = do
   TIO.writeFile (moduleDir </> "AmbiguousA.hs") (ambiguousFixtureModuleSource "AutoRefactFixture.AmbiguousA")
   TIO.writeFile (moduleDir </> "AmbiguousB.hs") (ambiguousFixtureModuleSource "AutoRefactFixture.AmbiguousB")
 
+ensureReexportFixtureModules :: FilePath -> IO ()
+ensureReexportFixtureModules fixtureRoot = do
+  let moduleDir = fixtureRoot </> "src" </> "AutoRefactFixture"
+  createDirectoryIfMissing True moduleDir
+  TIO.writeFile (moduleDir </> "ReexportedBase.hs") reexportedBaseModuleSource
+  TIO.writeFile (moduleDir </> "ReA.hs") reexportedShortModuleSource
+  TIO.writeFile (moduleDir </> "ReexportLongName.hs") reexportedLongModuleSource
+
 autoRefactFixtureModuleSource :: T.Text
 autoRefactFixtureModuleSource =
   T.unlines
@@ -637,6 +747,51 @@ ambiguousFixtureModuleSource moduleName =
       "ambiguousFixtureValue = 1"
     ]
 
+reexportedBaseModuleSource :: T.Text
+reexportedBaseModuleSource =
+  T.unlines
+    [ "module AutoRefactFixture.ReexportedBase",
+      "  ( reexportedValue,",
+      "    ReexportTag(..)",
+      "  )",
+      "where",
+      "",
+      "reexportedValue :: Int",
+      "reexportedValue = 7",
+      "",
+      "data ReexportTag = ReexportTag"
+    ]
+
+reexportedShortModuleSource :: T.Text
+reexportedShortModuleSource =
+  T.unlines
+    [ "module AutoRefactFixture.ReA",
+      "  ( reexportedValue,",
+      "    ReexportTag(..)",
+      "  )",
+      "where",
+      "",
+      "import AutoRefactFixture.ReexportedBase",
+      "  ( reexportedValue,",
+      "    ReexportTag(..)",
+      "  )"
+    ]
+
+reexportedLongModuleSource :: T.Text
+reexportedLongModuleSource =
+  T.unlines
+    [ "module AutoRefactFixture.ReexportLongName",
+      "  ( reexportedValue,",
+      "    ReexportTag(..)",
+      "  )",
+      "where",
+      "",
+      "import AutoRefactFixture.ReexportedBase",
+      "  ( reexportedValue,",
+      "    ReexportTag(..)",
+      "  )"
+    ]
+
 countImportHeaders :: T.Text -> T.Text -> Int
 countImportHeaders prefix =
   length . filter (prefix `T.isPrefixOf`) . T.lines
@@ -653,3 +808,22 @@ findLine predicate =
     go (value : rest)
       | predicate value = Just value
       | otherwise = go rest
+
+diagnosticIn :: FilePath -> Diagnostic
+diagnosticIn filePath =
+  Diagnostic
+    { diagnosticClass = DiagCompiler,
+      diagnosticSeverity = Nothing,
+      diagnosticReason = Nothing,
+      diagnosticCode = Nothing,
+      diagnosticSpan =
+        RealDiagnosticSpan
+          Span
+            { spanFile = filePath,
+              spanStartLine = 1,
+              spanStartCol = 1,
+              spanEndLine = 1,
+              spanEndCol = 1
+            },
+      diagnosticMessage = T.pack "test"
+    }

@@ -10,6 +10,7 @@ import Data.List (intercalate)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified GHC
 import qualified GHC.Data.StringBuffer as GHC
 import qualified GHC.Driver.Config.Parser as GHC
@@ -19,8 +20,8 @@ import GHC.DynFlags (Extension (..), GhcOption (..), modifySessionDynFlagsM, set
 import qualified GHC.Parser.Header as GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Unit.Module.Graph as GHC
-import Internal.AutoRefact (applyAutoRefact)
-import Internal.Diagnostics (Diagnostic, driverMessagesToDiagnostics, withDiagnosticsCapturing)
+import Internal.AutoRefact (AutoRefactResult (..), applyAutoRefact, rollbackAutoRefactEdits)
+import Internal.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import qualified Internal.Logger as Log
 import Internal.Lookup.ModSummaries (invalidateModSummaries)
 import Internal.Lookup.NameToInstances (invalidateNameToInstancesIndex)
@@ -28,6 +29,7 @@ import Internal.Lookup.SymbolsMap (invalidateSymbolsMapCache)
 import Internal.Package (ComponentData (..), PackageData (..), defaultExtensions, extractDependencies, extractSourceDirs, prepareComponentsData)
 import Monad (MonadLore)
 import Session (SessionContext (..))
+import System.FilePath (normalise)
 
 data TargetsPlan = TargetsPlan
   { commonExtensions :: Set.Set Extension,
@@ -123,29 +125,54 @@ data LoadAttempt = LoadAttempt
 
 loadTargets :: (MonadLore m) => UpdateTargetsOptions -> TargetsPlan -> m GHC.SuccessFlag
 loadTargets options targetsPlan =
-  go 0
+  go 0 Map.empty
   where
     maxAutoRefactAttempts = 3 :: Int
 
-    go attemptNo = do
+    go attemptNo pendingRollback = do
       LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <- loadTargetsOnce targetsPlan
+      let unresolvedRollback =
+            retainUnresolvedRollback pendingRollback loadAttemptDiagnostics
       case loadAttemptResult of
         GHC.Succeeded ->
           pure GHC.Succeeded
         GHC.Failed
           | options.enableAutoRefact && attemptNo < maxAutoRefactAttempts -> do
-              appliedFixes <- applyAutoRefact loadAttemptDiagnostics
-              if appliedFixes
+              AutoRefactResult {autoRefactApplied, autoRefactOriginalContents} <- applyAutoRefact loadAttemptDiagnostics
+              if autoRefactApplied
                 then do
                   Log.info "Auto-refact applied import fixes. Retrying target load."
                   invalidateSymbolsMapCache
                   invalidateModSummaries
                   invalidateNameToInstancesIndex
-                  go (attemptNo + 1)
+                  go (attemptNo + 1) (Map.union unresolvedRollback autoRefactOriginalContents)
                 else
-                  pure GHC.Failed
+                  rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback
         GHC.Failed ->
-          pure GHC.Failed
+          rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback
+
+retainUnresolvedRollback :: Map.Map FilePath a -> [Diagnostic] -> Map.Map FilePath a
+retainUnresolvedRollback rollbackState diagnostics =
+  Map.filterWithKey (\filePath _ -> normalise filePath `Set.member` failingFiles) rollbackState
+  where
+    failingFiles =
+      Set.fromList
+        [ normalise spanFile
+        | Diagnostic {diagnosticSpan = RealDiagnosticSpan Span {spanFile}} <- diagnostics
+        ]
+
+rollbackUnresolvedAutoRefact :: (MonadLore m) => TargetsPlan -> Map.Map FilePath Text -> m GHC.SuccessFlag
+rollbackUnresolvedAutoRefact targetsPlan rollbackState
+  | Map.null rollbackState =
+      pure GHC.Failed
+  | otherwise = do
+      Log.info "Auto-refact: rolling back unresolved edits."
+      rollbackAutoRefactEdits rollbackState
+      invalidateSymbolsMapCache
+      invalidateModSummaries
+      invalidateNameToInstancesIndex
+      _ <- loadTargetsOnce targetsPlan
+      pure GHC.Failed
 
 loadTargetsOnce :: (MonadLore m) => TargetsPlan -> m LoadAttempt
 loadTargetsOnce targetsPlan = do

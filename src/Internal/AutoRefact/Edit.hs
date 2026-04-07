@@ -3,11 +3,13 @@
 
 module Internal.AutoRefact.Edit
   ( FileEdit (..),
+    AppliedFileEdits (..),
     applyFileEdits,
+    restoreFileContents,
   )
 where
 
-import Control.Monad (forM, unless)
+import Control.Monad (forM, forM_, unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.List (foldl', nubBy, sort, sortBy)
 import qualified Data.Map.Strict as Map
@@ -24,7 +26,12 @@ data FileEdit
   | ReplaceSpanEdit FilePath Span Text
   deriving (Eq, Show)
 
-applyFileEdits :: (MonadLore m) => [FileEdit] -> m [FilePath]
+data AppliedFileEdits = AppliedFileEdits
+  { appliedChangedFiles :: [FilePath],
+    appliedOriginalContents :: Map.Map FilePath Text
+  }
+
+applyFileEdits :: (MonadLore m) => [FileEdit] -> m AppliedFileEdits
 applyFileEdits edits = do
   results <- forM (Map.toList groupedEdits) \(filePath, fileEdits) -> do
     source <- liftIO $ TIO.readFile filePath
@@ -38,12 +45,19 @@ applyFileEdits edits = do
     unless (updatedSource == source) do
       Log.info $ "Auto-refact: applying edits to " <> filePath
       liftIO $ TIO.writeFile filePath updatedSource
-    pure (updatedSource /= source)
+    pure
+      if updatedSource == source
+        then Nothing
+        else Just source
+  let changedEntries =
+        [ (filePath, originalContents)
+        | ((filePath, _), Just originalContents) <- zip (Map.toList groupedEdits) results
+        ]
   pure
-    [ filePath
-    | ((filePath, _), changed) <- zip (Map.toList groupedEdits) results,
-      changed
-    ]
+    AppliedFileEdits
+      { appliedChangedFiles = map fst changedEntries,
+        appliedOriginalContents = Map.fromList changedEntries
+      }
   where
     groupedEdits =
       Map.fromListWith
@@ -51,6 +65,12 @@ applyFileEdits edits = do
         [ (editFilePath edit, [edit])
         | edit <- edits
         ]
+
+restoreFileContents :: (MonadLore m) => Map.Map FilePath Text -> m ()
+restoreFileContents originals =
+  forM_ (Map.toList originals) \(filePath, originalContents) -> do
+    Log.info $ "Auto-refact: restoring " <> filePath
+    liftIO $ TIO.writeFile filePath originalContents
 
 collectImportEdits :: [FileEdit] -> Set.Set Text
 collectImportEdits =
