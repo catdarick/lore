@@ -30,7 +30,11 @@ library
       Internal.AutoRefact.CollapseImports
       Internal.AutoRefact.Edit
       Internal.AutoRefact.ImportDecl
+      Internal.AutoRefact.ImportNormalize
+      Internal.AutoRefact.ImportOps
+      Internal.AutoRefact.ImportRewrite
       Internal.AutoRefact.MissingImports
+      Internal.AutoRefact.MissingImports.Diagnostic
       Internal.AutoRefact.RedundantImports
       Internal.Definition
       Internal.Diagnostics
@@ -196,6 +200,7 @@ test-suite lore-test
   main-is: Spec.hs
   other-modules:
       DefinitionSpec
+      ImportNormalizeSpec
       TargetsSpec
       TestSupport
       SomeModule

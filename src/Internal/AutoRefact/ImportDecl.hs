@@ -4,15 +4,18 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Internal.AutoRefact.ImportDecl
-  ( ImportKey (..),
-    ImportShape (..),
+  ( ImportId (..),
+    QualifiedImportStyle (..),
+    ImportItem (..),
+    ImportList (..),
     ParsedImport (..),
+    NormalizedImport (..),
     parseImports,
-    renderImportDecl,
-    renderImportItem,
+    normalizedImportFromParsed,
+    renderNormalizedImport,
     parsedImportEffectiveQualifier,
-    parsedImportModuleName,
     parsedImportQualified,
+    parsedImportContainsSpan,
     srcSpanToSpan,
   )
 where
@@ -25,109 +28,163 @@ import GHC.Hs (GhcPs, HsModule (..), IE, ImportDecl (..), LImportDecl)
 import qualified GHC.Utils.Outputable as Outputable
 import Internal.Diagnostics (Span (..))
 
-data ImportKey = ImportKey
-  { importModuleName :: Text,
-    importQualified :: Bool,
-    importAlias :: Maybe Text,
-    importSource :: Bool,
-    importPackageQualifier :: Maybe Text
-  }
+newtype ImportId = ImportId Int
   deriving (Eq, Ord, Show)
 
-data ImportShape
+data QualifiedImportStyle
+  = ImportUnqualified
+  | ImportQualifiedPrefix
+  | ImportQualifiedPostfix
+  deriving (Eq, Ord, Show)
+
+data ImportItem = ImportItem
+  { importItemText :: Text,
+    importItemSpan :: Maybe Span
+  }
+  deriving (Eq, Show)
+
+data ImportList
   = OpenImport
-  | ExplicitImport [Text]
-  | HidingImport
+  | ExplicitImport [ImportItem]
+  | HidingImport [ImportItem]
   deriving (Eq, Show)
 
 data ParsedImport = ParsedImport
-  { parsedImportDecl :: ImportDecl GhcPs,
+  { parsedImportId :: ImportId,
+    parsedImportOrder :: Int,
+    parsedImportDecl :: ImportDecl GhcPs,
     parsedImportSpan :: Span,
-    parsedImportKey :: ImportKey,
-    parsedImportShape :: ImportShape
+    parsedImportListSpan :: Maybe Span,
+    parsedImportModuleName :: Text,
+    parsedImportQualifiedStyle :: QualifiedImportStyle,
+    parsedImportAlias :: Maybe Text,
+    parsedImportSource :: Bool,
+    parsedImportSafe :: Bool,
+    parsedImportPackageQualifier :: Maybe Text,
+    parsedImportList :: ImportList
   }
+
+data NormalizedImport = NormalizedImport
+  { normalizedImportId :: Maybe ImportId,
+    normalizedImportOrder :: Int,
+    normalizedImportSpan :: Maybe Span,
+    normalizedImportModuleName :: Text,
+    normalizedImportQualifiedStyle :: QualifiedImportStyle,
+    normalizedImportAlias :: Maybe Text,
+    normalizedImportSource :: Bool,
+    normalizedImportSafe :: Bool,
+    normalizedImportPackageQualifier :: Maybe Text,
+    normalizedImportList :: ImportList
+  }
+  deriving (Eq, Show)
 
 parseImports :: GHC.ParsedModule -> [ParsedImport]
 parseImports parsedModule =
-  mapMaybeToList parseImport hsmodImports
+  mapMaybeToList (uncurry parseImport) (zip [0 ..] hsmodImports)
   where
     GHC.L _ HsModule {hsmodImports} = GHC.pm_parsed_source parsedModule
 
-parseImport :: LImportDecl GhcPs -> Maybe ParsedImport
-parseImport locatedImport = do
+parseImport :: Int -> LImportDecl GhcPs -> Maybe ParsedImport
+parseImport importIndex locatedImport = do
   parsedImportSpan <- srcSpanToSpan (GHC.locA (GHC.getLoc locatedImport))
   let parsedImportDecl = GHC.unLoc locatedImport
-      moduleNameText = T.pack (GHC.moduleNameString (GHC.unLoc parsedImportDecl.ideclName))
-      aliasText = fmap (T.pack . GHC.moduleNameString . GHC.unLoc) parsedImportDecl.ideclAs
-      parsedImportKey =
-        ImportKey
-          { importModuleName = moduleNameText,
-            importQualified = parsedImportDecl.ideclQualified /= GHC.NotQualified,
-            importAlias = aliasText,
-            importSource = parsedImportDecl.ideclSource == GHC.IsBoot,
-            importPackageQualifier = Nothing
-          }
-      parsedImportShape =
+      parsedImportId = ImportId importIndex
+      parsedImportOrder = importIndex
+      parsedImportModuleName = T.pack (GHC.moduleNameString (GHC.unLoc parsedImportDecl.ideclName))
+      parsedImportAlias = fmap (T.pack . GHC.moduleNameString . GHC.unLoc) parsedImportDecl.ideclAs
+      parsedImportQualifiedStyle =
+        case parsedImportDecl.ideclQualified of
+          GHC.NotQualified -> ImportUnqualified
+          GHC.QualifiedPre -> ImportQualifiedPrefix
+          GHC.QualifiedPost -> ImportQualifiedPostfix
+      parsedImportSource = parsedImportDecl.ideclSource == GHC.IsBoot
+      parsedImportSafe = parsedImportDecl.ideclSafe
+      parsedImportPackageQualifier = Nothing
+      parsedImportListSpan =
+        parsedImportDecl.ideclImportList >>= \(importListKind, GHC.L locatedItems _) ->
+          case importListKind of
+            GHC.Exactly -> srcSpanToSpan (GHC.locA locatedItems)
+            GHC.EverythingBut -> srcSpanToSpan (GHC.locA locatedItems)
+      parsedImportList =
         case parsedImportDecl.ideclImportList of
           Nothing -> OpenImport
           Just (GHC.Exactly, GHC.L _ lies) ->
-            ExplicitImport (map (renderImportItem . GHC.unLoc) lies)
-          Just (GHC.EverythingBut, _) ->
-            HidingImport
+            ExplicitImport (map renderLocatedImportItem lies)
+          Just (GHC.EverythingBut, GHC.L _ lies) ->
+            HidingImport (map renderLocatedImportItem lies)
   pure ParsedImport {..}
 
-renderImportDecl :: ImportDecl GhcPs -> ImportShape -> Text
-renderImportDecl importDecl importShape =
-  case importShape of
-    HidingImport ->
-      T.pack (Outputable.showSDocUnsafe (Outputable.ppr importDecl))
-    OpenImport ->
-      renderOpenOrExplicit importDecl []
-    ExplicitImport items ->
-      renderOpenOrExplicit importDecl items
+renderLocatedImportItem :: GHC.LIE GhcPs -> ImportItem
+renderLocatedImportItem locatedItem =
+  ImportItem
+    { importItemText = renderImportItem (GHC.unLoc locatedItem),
+      importItemSpan = srcSpanToSpan (GHC.locA (GHC.getLoc locatedItem))
+    }
 
-renderOpenOrExplicit :: ImportDecl GhcPs -> [Text] -> Text
-renderOpenOrExplicit importDecl items =
+normalizedImportFromParsed :: ParsedImport -> NormalizedImport
+normalizedImportFromParsed ParsedImport {..} =
+  NormalizedImport
+    { normalizedImportId = Just parsedImportId,
+      normalizedImportOrder = parsedImportOrder,
+      normalizedImportSpan = Just parsedImportSpan,
+      normalizedImportModuleName = parsedImportModuleName,
+      normalizedImportQualifiedStyle = parsedImportQualifiedStyle,
+      normalizedImportAlias = parsedImportAlias,
+      normalizedImportSource = parsedImportSource,
+      normalizedImportSafe = parsedImportSafe,
+      normalizedImportPackageQualifier = parsedImportPackageQualifier,
+      normalizedImportList = parsedImportList
+    }
+
+renderNormalizedImport :: NormalizedImport -> Text
+renderNormalizedImport NormalizedImport {..} =
   T.unwords $
     ["import"]
-      <> ["{-# SOURCE #-}" | importDecl.ideclSource == GHC.IsBoot]
-      <> ["qualified" | importDecl.ideclQualified == GHC.QualifiedPre]
+      <> ["{-# SOURCE #-}" | normalizedImportSource]
+      <> ["safe" | normalizedImportSafe]
+      <> maybeToList normalizedImportPackageQualifier
+      <> ["qualified" | normalizedImportQualifiedStyle == ImportQualifiedPrefix]
       <> [modulePart]
-      <> maybe [] (\alias -> ["as", alias]) aliasPart
-      <> case items of
-        [] -> []
-        xs -> ["(" <> T.intercalate ", " xs <> ")"]
+      <> maybe [] (\alias -> ["as", alias]) normalizedImportAlias
+      <> renderImportList normalizedImportList
   where
-    aliasPart =
-      fmap (T.pack . GHC.moduleNameString . GHC.unLoc) importDecl.ideclAs
     modulePart =
-      T.pack (GHC.moduleNameString (GHC.unLoc importDecl.ideclName))
-        <> case importDecl.ideclQualified of
-          GHC.QualifiedPost -> " qualified"
+      normalizedImportModuleName
+        <> case normalizedImportQualifiedStyle of
+          ImportQualifiedPostfix -> " qualified"
           _ -> ""
+
+renderImportList :: ImportList -> [Text]
+renderImportList = \case
+  OpenImport ->
+    []
+  ExplicitImport items ->
+    ["(" <> T.intercalate ", " (map (.importItemText) items) <> ")"]
+  HidingImport items ->
+    ["hiding", "(" <> T.intercalate ", " (map (.importItemText) items) <> ")"]
 
 renderImportItem :: IE GhcPs -> Text
 renderImportItem =
+  renderOutputable
+
+renderOutputable :: (Outputable.Outputable a) => a -> Text
+renderOutputable =
   T.pack . Outputable.showSDocUnsafe . Outputable.ppr
 
 parsedImportQualified :: ParsedImport -> Bool
 parsedImportQualified =
-  (/= GHC.NotQualified) . ideclQualified . parsedImportDecl
-
-parsedImportModuleName :: ParsedImport -> Text
-parsedImportModuleName =
-  T.pack . GHC.moduleNameString . GHC.unLoc . ideclName . parsedImportDecl
+  (/= ImportUnqualified) . parsedImportQualifiedStyle
 
 parsedImportEffectiveQualifier :: ParsedImport -> Maybe Text
 parsedImportEffectiveQualifier parsedImport
   | parsedImportQualified parsedImport =
-      Just $
-        maybe
-          (parsedImportModuleName parsedImport)
-          id
-          parsedImport.parsedImportKey.importAlias
+      Just (maybe parsedImport.parsedImportModuleName id parsedImport.parsedImportAlias)
   | otherwise =
       Nothing
+
+parsedImportContainsSpan :: ParsedImport -> Span -> Bool
+parsedImportContainsSpan parsedImport targetSpan =
+  spanContains parsedImport.parsedImportSpan targetSpan
 
 srcSpanToSpan :: GHC.SrcSpan -> Maybe Span
 srcSpanToSpan = \case
@@ -142,6 +199,23 @@ srcSpanToSpan = \case
         }
   GHC.UnhelpfulSpan {} ->
     Nothing
+
+spanContains :: Span -> Span -> Bool
+spanContains outer inner =
+  outer.spanFile == inner.spanFile
+    && spanStartKey outer <= spanStartKey inner
+    && spanEndKey outer >= spanEndKey inner
+
+spanStartKey :: Span -> (Int, Int)
+spanStartKey Span {spanStartLine, spanStartCol} = (spanStartLine, spanStartCol)
+
+spanEndKey :: Span -> (Int, Int)
+spanEndKey Span {spanEndLine, spanEndCol} = (spanEndLine, spanEndCol)
+
+maybeToList :: Maybe a -> [a]
+maybeToList = \case
+  Just value -> [value]
+  Nothing -> []
 
 mapMaybeToList :: (a -> Maybe b) -> [a] -> [b]
 mapMaybeToList f =

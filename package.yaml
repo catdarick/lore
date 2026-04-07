@@ -71,6 +71,7 @@ tests:
     source-dirs:         test
     other-modules:
     - DefinitionSpec
+    - ImportNormalizeSpec
     - TargetsSpec
     - TestSupport
     - SomeModule
