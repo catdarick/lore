@@ -19,7 +19,8 @@ import GHC.DynFlags (Extension (..), GhcOption (..), modifySessionDynFlagsM, set
 import qualified GHC.Parser.Header as GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Unit.Module.Graph as GHC
-import Internal.Diagnostics (driverMessagesToDiagnostics, withDiagnosticsCapturing)
+import Internal.AutoRefact (applyAutoRefact)
+import Internal.Diagnostics (Diagnostic, driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import qualified Internal.Logger as Log
 import Internal.Lookup.ModSummaries (invalidateModSummaries)
 import Internal.Lookup.NameToInstances (invalidateNameToInstancesIndex)
@@ -39,6 +40,16 @@ data ComponentSpecificOptions = ComponentSpecificOptions
     ghcOptions :: Set.Set GhcOption,
     baseDynFlags :: GHC.DynFlags
   }
+
+data UpdateTargetsOptions = UpdateTargetsOptions
+  { enableAutoRefact :: Bool
+  }
+
+defaultUpdateTargetsOptions :: UpdateTargetsOptions
+defaultUpdateTargetsOptions =
+  UpdateTargetsOptions
+    { enableAutoRefact = False
+    }
 
 prepareTargetsPlan :: (MonadLore m) => [ComponentData] -> m TargetsPlan
 prepareTargetsPlan components = do
@@ -64,8 +75,8 @@ prepareTargetsPlan components = do
         modulesWithComponentOptions = Map.unions modulesWithComponentOptions
       }
 
-updateTargets :: (MonadLore m) => m ()
-updateTargets = do
+updateTargets :: (MonadLore m) => UpdateTargetsOptions -> m ()
+updateTargets options = do
   dflags <- GHC.getSessionDynFlags
   let homeUnitId = GHC.homeUnitId_ dflags
   packages <- prepareComponentsData
@@ -89,7 +100,7 @@ updateTargets = do
     )
   let targets = map (mkModuleTarget homeUnitId) (Map.keys $ modulesWithComponentOptions targetsPlan)
   GHC.setTargets targets
-  loadResult <- loadTargets targetsPlan
+  loadResult <- loadTargets options targetsPlan
   case loadResult of
     GHC.Succeeded -> do
       Log.debug "Successfully updated GHC targets based on package.yaml configurations"
@@ -105,13 +116,44 @@ mkModuleTarget unitId modName =
       GHC.targetContents = Nothing
     }
 
-loadTargets :: (MonadLore m) => TargetsPlan -> m GHC.SuccessFlag
-loadTargets targetsPlan = do
+data LoadAttempt = LoadAttempt
+  { loadAttemptDiagnostics :: [Diagnostic],
+    loadAttemptResult :: GHC.SuccessFlag
+  }
+
+loadTargets :: (MonadLore m) => UpdateTargetsOptions -> TargetsPlan -> m GHC.SuccessFlag
+loadTargets options targetsPlan =
+  go 0
+  where
+    maxAutoRefactAttempts = 3 :: Int
+
+    go attemptNo = do
+      LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <- loadTargetsOnce targetsPlan
+      case loadAttemptResult of
+        GHC.Succeeded ->
+          pure GHC.Succeeded
+        GHC.Failed
+          | options.enableAutoRefact && attemptNo < maxAutoRefactAttempts -> do
+              appliedFixes <- applyAutoRefact loadAttemptDiagnostics
+              if appliedFixes
+                then do
+                  Log.info "Auto-refact applied import fixes. Retrying target load."
+                  invalidateSymbolsMapCache
+                  invalidateModSummaries
+                  invalidateNameToInstancesIndex
+                  go (attemptNo + 1)
+                else
+                  pure GHC.Failed
+        GHC.Failed ->
+          pure GHC.Failed
+
+loadTargetsOnce :: (MonadLore m) => TargetsPlan -> m LoadAttempt
+loadTargetsOnce targetsPlan = do
   Log.debug "Starting dependency analysis and target loading..."
   (errs, modGraph) <- GHC.depanalE [] False
+  let dependencyDiagnostics = driverMessagesToDiagnostics errs
   unless (null errs) $ do
-    let diagnostics = driverMessagesToDiagnostics errs
-    Log.err $ "Errors during dependency analysis: " <> intercalate "\n" (map show diagnostics)
+    Log.err $ "Errors during dependency analysis: " <> intercalate "\n" (map show dependencyDiagnostics)
   Log.debug "Patching module graph with component-specific GHC options..."
   patchedModGraph <- applyModuleScopedArgs targetsPlan modGraph
   ifaceCache <- asks ifaceCache
@@ -119,7 +161,11 @@ loadTargets targetsPlan = do
   (diagnostics, r) <- withDiagnosticsCapturing do
     GHC.load' (Just ifaceCache) GHC.LoadAllTargets Nothing patchedModGraph
   Log.debug $ "GHC load completed with the following diagnostics:\n" <> intercalate "\n" (map show diagnostics)
-  pure r
+  pure
+    LoadAttempt
+      { loadAttemptDiagnostics = dependencyDiagnostics <> diagnostics,
+        loadAttemptResult = r
+      }
 
 applyModuleScopedArgs ::
   (MonadLore m) =>

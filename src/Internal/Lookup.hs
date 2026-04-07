@@ -11,12 +11,13 @@ import qualified GHC
 import qualified GHC.Core.FamInstEnv as GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
-import Internal.Definition (DefinitionSlice (..), resolveDefinitionSlice)
 import qualified Internal.Logger as Log
 import Internal.Lookup.NameToInstances (getNameToInstancesIndex)
 import Internal.Lookup.SymbolsMap (getSymbolsMap)
 import Internal.Lookup.Types (ExportedSymbol (..), NameToInstancesIndex (..), SymbolsMap (..))
 import Monad (MonadLore)
+import Internal.Definition (resolveDefinitionSlice, DefinitionSlice)
+
 
 class SomeClass a where
   someFunction :: a -> String

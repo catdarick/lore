@@ -71,6 +71,7 @@ tests:
     source-dirs:         test
     other-modules:
     - DefinitionSpec
+    - TargetsSpec
     - TestSupport
     - SomeModule
     ghc-options:
