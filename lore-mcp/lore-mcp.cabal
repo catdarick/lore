@@ -24,13 +24,67 @@ source-repository head
 executable lore-mcp
   main-is: Main.hs
   other-modules:
+      Lore.JsonRpc.Server
+      Lore.Mcp.Internal.Annotated
+      Lore.Mcp.Internal.Tool
+      Lore.Mcp.Protocol.Request
+      Lore.Mcp.Protocol.Server
+      Lore.Mcp.Server
+      Lore.Mcp.Tools.LoadTargets
       Paths_lore_mcp
   autogen-modules:
       Paths_lore_mcp
   hs-source-dirs:
       app
+      src
+  default-extensions:
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
   ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , lens
     , lore
+    , openapi3
+    , text
+    , vector
   default-language: Haskell2010

@@ -3,6 +3,7 @@ module Main
   )
 where
 
+import Lore.Mcp.Server (runLoreMcpServer)
+
 main :: IO ()
-main =
-  putStrLn "lore-mcp: scaffold executable"
+main = runLoreMcpServer
