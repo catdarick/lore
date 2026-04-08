@@ -108,7 +108,6 @@ tests:
     - hspec
 
 default-extensions:
-  - Haskell2010
   - RecordWildCards
   - NamedFieldPuns
   - DuplicateRecordFields
@@ -148,3 +147,5 @@ default-extensions:
   - ViewPatterns
   - PartialTypeSignatures
   - OverloadedRecordDot
+
+language: Haskell2010

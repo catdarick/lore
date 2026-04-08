@@ -2,7 +2,7 @@ version: "3"
 
 tasks:
   build:
-    desc: Build the project with stack
+    desc: Build the workspace with stack
     cmds:
       - stack build
 
@@ -11,5 +11,4 @@ tasks:
     cmds:
       - |
         ormolu --mode inplace \
-          Setup.hs \
-          $(find src app test -type f \( -name '*.hs' -o -name '*.hs-boot' \) | sort)
+          $(find lore lore-mcp -type f \( -name '*.hs' -o -name '*.hs-boot' \) | sort)

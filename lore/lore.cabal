@@ -60,7 +60,6 @@ library
   hs-source-dirs:
       src
   default-extensions:
-      Haskell2010
       RecordWildCards
       NamedFieldPuns
       DuplicateRecordFields
@@ -136,7 +135,6 @@ test-suite lore-test
   hs-source-dirs:
       test
   default-extensions:
-      Haskell2010
       RecordWildCards
       NamedFieldPuns
       DuplicateRecordFields
