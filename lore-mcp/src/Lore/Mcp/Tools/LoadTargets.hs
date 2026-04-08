@@ -1,13 +1,17 @@
 module Lore.Mcp.Tools.LoadTargets where
 
-import Data.Char (toLower)
-import Data.List (intercalate)
+import Control.Applicative ((<|>))
+import Control.Exception (IOException, try)
+import Control.Monad.IO.Class (liftIO)
+import Data.Char (isSpace, toLower)
+import Data.List (foldl')
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Lore
   ( Diagnostic (..),
     DiagnosticClass (..),
-    DiagnosticCodeInfo (..),
     DiagnosticSpan (..),
     LoadTargetsOptions (..),
     LoadTargetsResult (..),
@@ -29,93 +33,188 @@ loadTargetsTool =
 loadTargetsHandler :: (MonadLore m) => m Text
 loadTargetsHandler = do
   loadResult <- loadTargets LoadTargetsOptions {enableAutoRefactor = True}
-  pure (renderLoadTargetsResult loadResult)
+  renderLoadTargetsResult loadResult
 
-renderLoadTargetsResult :: LoadTargetsResult -> Text
+renderLoadTargetsResult :: (MonadLore m) => LoadTargetsResult -> m Text
 renderLoadTargetsResult loadResult@LoadTargetsResult {loadTargetsDiagnostics}
   | null loadTargetsDiagnostics =
-      T.pack $
-        unlines
-          [ summaryLine,
-            moduleCountsLine
-          ]
+      pure $
+        T.pack $
+          unlines
+            [ statusLine ]
   | otherwise =
-      T.pack . unlines $
-        [ summaryLine,
-          moduleCountsLine,
-          "Diagnostics: " <> show (length loadTargetsDiagnostics),
-          ""
-        ]
-          <> concatMap (\(index, diagnostic) -> renderDiagnosticBlock index diagnostic <> [""]) (zip [1 :: Int ..] loadTargetsDiagnostics)
+      do
+        let (visibleDiagnostics, hiddenDiagnostics) = splitAt maxRenderedDiagnostics loadTargetsDiagnostics
+            visibleGroups = groupDiagnostics visibleDiagnostics
+        renderedGroups <- mapM renderDiagnosticGroup visibleGroups
+        pure $
+          T.pack . unlines $
+            [ statusLine,
+              ""
+            ]
+              <> concatMap (<> [""]) renderedGroups
+              <> hiddenDiagnosticsSummary hiddenDiagnostics
   where
-    summaryLine
-      | not loadResult.loadTargetsSucceeded = "Targets loaded with errors."
-      | any isErrorLikeDiagnostic loadTargetsDiagnostics = "Targets loaded with errors."
-      | null loadTargetsDiagnostics = "Targets loaded successfully."
-      | otherwise = "Targets loaded with diagnostics."
-    moduleCountsLine =
-      "Modules: loaded "
-        <> show loadResult.loadTargetsModulesLoaded
-        <> ", failed "
-        <> show loadResult.loadTargetsModulesFailed
-        <> ", auto-fixed "
-        <> show loadResult.loadTargetsModulesAutofixed
-        <> ", total "
-        <> show loadResult.loadTargetsModulesTotal
+    maxRenderedDiagnostics = 5
+    statusLine
+      | loadResult.loadTargetsModulesFailed > 0 =
+          "Failed to load "
+            <> show loadResult.loadTargetsModulesFailed
+            <> " of "
+            <> show loadResult.loadTargetsModulesTotal
+            <> " modules."
+      | loadResult.loadTargetsModulesAutofixed > 0 =
+          "Successfully loaded all "
+            <> show loadResult.loadTargetsModulesTotal
+            <> " modules after auto-fixing "
+            <> show loadResult.loadTargetsModulesAutofixed
+            <> ". No errors left."
+      | otherwise =
+          "Successfully loaded all "
+            <> show loadResult.loadTargetsModulesTotal
+            <> " modules. No errors found."
 
-renderDiagnosticBlock :: Int -> Diagnostic -> [String]
-renderDiagnosticBlock index Diagnostic {diagnosticClass, diagnosticSeverity, diagnosticReason, diagnosticCode, diagnosticSpan, diagnosticMessage, diagnosticHints} =
-  [ show index <> ". " <> locationLine,
-    "   " <> headline,
-    "   " <> codeLine
+hiddenDiagnosticsSummary :: [Diagnostic] -> [String]
+hiddenDiagnosticsSummary [] = []
+hiddenDiagnosticsSummary hiddenDiagnostics =
+  [ "and "
+      <> show hiddenCount
+      <> " more diagnostics in "
+      <> show hiddenModuleCount
+      <> " modules."
   ]
-    <> map ("   " <>) (messageLines diagnosticMessage)
-    <> hintLines diagnosticHints
   where
-    locationLine = renderDiagnosticSpan diagnosticSpan
-    headline =
-      intercalate
-        " | "
-        ( [renderDiagnosticClass diagnosticClass]
-            <> maybe [] (\severity -> [renderSeverity severity]) diagnosticSeverity
-            <> maybe [] (\reason -> [T.unpack reason]) diagnosticReason
-        )
-    codeLine = maybe "code: none" (("code: " <>) . renderDiagnosticCodeInfo) diagnosticCode
+    hiddenCount = length hiddenDiagnostics
+    hiddenModuleCount = length (groupDiagnostics hiddenDiagnostics)
 
-messageLines :: Text -> [String]
-messageLines rawMessage =
-  case filter (not . null) (map T.unpack (T.lines rawMessage)) of
-    [] -> ["message: <empty>"]
-    firstLine : otherLines -> ("message: " <> firstLine) : otherLines
+data DiagnosticGroupKey
+  = DiagnosticFileGroup FilePath
+  | DiagnosticOtherGroup Text
+  deriving (Eq, Show)
+
+type DiagnosticGroup = (DiagnosticGroupKey, [Diagnostic])
+
+groupDiagnostics :: [Diagnostic] -> [DiagnosticGroup]
+groupDiagnostics =
+  foldl' insertDiagnosticGroup []
+  where
+    insertDiagnosticGroup [] diagnostic =
+      [(diagnosticGroupKey diagnostic, [diagnostic])]
+    insertDiagnosticGroup ((groupKey, groupedDiagnostics) : rest) diagnostic
+      | groupKey == diagnosticKey =
+          (groupKey, groupedDiagnostics <> [diagnostic]) : rest
+      | otherwise =
+          (groupKey, groupedDiagnostics) : insertDiagnosticGroup rest diagnostic
+      where
+        diagnosticKey = diagnosticGroupKey diagnostic
+
+diagnosticGroupKey :: Diagnostic -> DiagnosticGroupKey
+diagnosticGroupKey Diagnostic {diagnosticSpan} =
+  case diagnosticSpan of
+    RealDiagnosticSpan Span {spanFile} ->
+      DiagnosticFileGroup spanFile
+    UnhelpfulDiagnosticSpan spanText ->
+      DiagnosticOtherGroup spanText
+
+renderDiagnosticGroup :: (MonadLore m) => DiagnosticGroup -> m [String]
+renderDiagnosticGroup (groupKey, diagnostics) = do
+  snippetContext <- loadSnippetContext groupKey
+  pure $
+    diagnosticGroupHeader groupKey
+      : concatMap (\(index, diagnostic) -> renderDiagnosticBlock snippetContext groupKey index diagnostic) (zip [1 :: Int ..] diagnostics)
+
+type SnippetContext = Maybe [Text]
+
+renderDiagnosticBlock :: SnippetContext -> DiagnosticGroupKey -> Int -> Diagnostic -> [String]
+renderDiagnosticBlock snippetContext _groupKey index diagnostic@Diagnostic {diagnosticSeverity, diagnosticMessage, diagnosticHints} =
+  [ "  " <> show index <> ". " <> summaryLine
+  ]
+    <> map ("      " <>) detailLines
+    <> hintLines diagnosticHints
+    <> snippetLines snippetContext diagnostic
+  where
+    compactLines = compactDiagnosticMessage diagnosticMessage
+    summaryLine =
+      renderSummaryLine diagnosticSeverity compactLines
+    detailLines = tailOrEmpty compactLines
 
 hintLines :: [Text] -> [String]
 hintLines [] = []
 hintLines hints =
-  "   hints:" : map (("     - " <>) . T.unpack) hints
+  "      hints:" : map (("        - " <>) . T.unpack) hints
 
-renderDiagnosticSpan :: DiagnosticSpan -> String
-renderDiagnosticSpan = \case
-  RealDiagnosticSpan Span {spanFile, spanStartLine, spanStartCol, spanEndLine, spanEndCol} ->
-    spanFile
-      <> ":"
-      <> show spanStartLine
-      <> ":"
-      <> show spanStartCol
-      <> "-"
-      <> show spanEndLine
-      <> ":"
-      <> show spanEndCol
-  UnhelpfulDiagnosticSpan spanText ->
-    T.unpack spanText
+diagnosticGroupHeader :: DiagnosticGroupKey -> String
+diagnosticGroupHeader = \case
+  DiagnosticFileGroup filePath -> filePath
+  DiagnosticOtherGroup spanText -> T.unpack spanText
 
-renderDiagnosticClass :: DiagnosticClass -> String
-renderDiagnosticClass = \case
-  DiagOutput -> "output"
-  DiagFatal -> "fatal"
-  DiagInteractive -> "interactive"
-  DiagDump -> "dump"
-  DiagInfo -> "info"
-  DiagCompiler -> "compiler"
+loadSnippetContext :: (MonadLore m) => DiagnosticGroupKey -> m SnippetContext
+loadSnippetContext = \case
+  DiagnosticFileGroup filePath -> do
+    maybeFileContents <- liftIO (try @IOException (TIO.readFile filePath))
+    pure $
+      case maybeFileContents of
+        Right fileContents -> Just (T.lines fileContents)
+        Left _ -> Nothing
+  DiagnosticOtherGroup {} ->
+    pure Nothing
+
+snippetLines :: SnippetContext -> Diagnostic -> [String]
+snippetLines Nothing _ = []
+snippetLines (Just fileLines) Diagnostic {diagnosticSpan = RealDiagnosticSpan span'} =
+  case renderSnippet fileLines span' of
+    [] -> []
+    renderedLines -> map ("      " <>) renderedLines
+snippetLines (Just _) Diagnostic {diagnosticSpan = UnhelpfulDiagnosticSpan {}} = []
+
+renderSnippet :: [Text] -> Span -> [String]
+renderSnippet fileLines Span {spanStartLine, spanStartCol, spanEndLine, spanEndCol}
+  | spanStartLine <= 0 = []
+  | spanEndLine < spanStartLine = []
+  | otherwise =
+      concatMap renderLineWithCaret [snippetStartLine .. snippetEndLine]
+  where
+    snippetStartLine = max 1 (spanStartLine - 2)
+    snippetEndLine = min (length fileLines) spanEndLine
+
+    renderLineWithCaret lineNumber =
+      case safeLine fileLines lineNumber of
+        Nothing -> []
+        Just sourceLine ->
+          [ renderSnippetLine lineNumber sourceLine ]
+            <> maybe [] (\caretLine -> [caretLine]) (renderCaretLine lineNumber sourceLine)
+
+    renderSnippetLine lineNumber sourceLine =
+      padLeft 4 (show lineNumber) <> " | " <> T.unpack sourceLine
+
+    renderCaretLine lineNumber sourceLine
+      | lineNumber < spanStartLine || lineNumber > spanEndLine = Nothing
+      | otherwise =
+          let sourceLength = T.length sourceLine
+              startColumn
+                | lineNumber == spanStartLine = max 1 spanStartCol
+                | otherwise = 1
+              endColumnExclusive
+                | lineNumber == spanEndLine = max startColumn spanEndCol
+                | otherwise = sourceLength + 1
+              caretOffset = max 0 (startColumn - 1)
+              caretWidth = max 1 (min (sourceLength + 1) endColumnExclusive - startColumn)
+           in Just $
+                "     | "
+                  <> replicate caretOffset ' '
+                  <> replicate caretWidth '^'
+
+safeLine :: [a] -> Int -> Maybe a
+safeLine values lineNumber
+  | lineNumber <= 0 = Nothing
+  | otherwise =
+      case drop (lineNumber - 1) values of
+        value : _ -> Just value
+        [] -> Nothing
+
+padLeft :: Int -> String -> String
+padLeft width value =
+  replicate (max 0 (width - length value)) ' ' <> value
 
 renderSeverity :: (Show a) => a -> String
 renderSeverity severity =
@@ -126,9 +225,69 @@ renderSeverity severity =
     "SevInfo" -> "info"
     other -> map toLower (dropWhile (== ' ') other)
 
-renderDiagnosticCodeInfo :: DiagnosticCodeInfo -> String
-renderDiagnosticCodeInfo DiagnosticCodeInfo {diagnosticCodeNamespace, diagnosticCodeNumber} =
-  T.unpack diagnosticCodeNamespace <> "-" <> show diagnosticCodeNumber
+renderSummaryLine :: (Show a) => Maybe a -> [String] -> String
+renderSummaryLine diagnosticSeverity compactLines =
+  renderSeverityLabel diagnosticSeverity
+    <> ": "
+    <> case compactLines of
+      firstLine : _ -> firstLine
+      [] -> "<empty>"
+
+renderSeverityLabel :: (Show a) => Maybe a -> String
+renderSeverityLabel =
+  maybe "diagnostic" renderSeverity
+
+tailOrEmpty :: [a] -> [a]
+tailOrEmpty [] = []
+tailOrEmpty (_ : rest) = rest
+
+compactDiagnosticMessage :: Text -> [String]
+compactDiagnosticMessage rawMessage =
+  go [] normalizedLines
+  where
+    normalizedLines =
+      filter (not . T.null . T.strip) (T.lines rawMessage)
+
+    go acc [] =
+      reverse acc
+    go acc (line : rest)
+      | isContextBoundary cleanedLine =
+          reverse acc
+      | isContinuationLine line && not (null acc) =
+          go (appendToHead (T.unpack cleanedLine) acc) rest
+      | T.null cleanedLine =
+          go acc rest
+      | otherwise =
+          go (T.unpack cleanedLine : acc) rest
+      where
+        cleanedLine = stripBulletPrefix (T.stripStart line)
+
+appendToHead :: String -> [String] -> [String]
+appendToHead extra = \case
+  current : rest -> (current <> " " <> extra) : rest
+  [] -> [extra]
+
+stripBulletPrefix :: Text -> Text
+stripBulletPrefix text =
+  fromMaybe text $
+    T.stripPrefix "* " text
+      <|> T.stripPrefix "• " text
+
+isContextBoundary :: Text -> Bool
+isContextBoundary text =
+  any (`T.isPrefixOf` text)
+    [ "In the ",
+      "In a ",
+      "In an "
+    ]
+
+isContinuationLine :: Text -> Bool
+isContinuationLine line =
+  case T.uncons line of
+    Just (firstChar, _) ->
+      isSpace firstChar && not ("* " `T.isPrefixOf` T.stripStart line)
+    Nothing ->
+      False
 
 isErrorLikeDiagnostic :: Diagnostic -> Bool
 isErrorLikeDiagnostic Diagnostic {diagnosticClass, diagnosticSeverity} =
