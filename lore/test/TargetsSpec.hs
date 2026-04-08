@@ -11,12 +11,12 @@ import Lore.Lookup (findSymbols)
 import Lore.Monad (MonadLore)
 import Lore.Targets (LoadTargetsOptions (..), defaultLoadTargetsOptions, retainUnresolvedRollback)
 import qualified Lore.Targets as Targets
-import System.Directory (createDirectoryIfMissing)
+import System.Directory (createDirectoryIfMissing, makeAbsolute)
 import System.FilePath ((</>))
 import Test.Hspec
 import TestSupport (fixtureLoreAt, fixtureLoreAtWithLogger, withFixtureCopy)
 
-loadTargets :: MonadLore m => LoadTargetsOptions -> m ()
+loadTargets :: (MonadLore m) => LoadTargetsOptions -> m ()
 loadTargets options = void (Targets.loadTargets options)
 
 spec :: Spec
@@ -31,12 +31,22 @@ spec =
               "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
               "lookupOrZero pairs key ="
 
-          diagnostics <- fixtureLoreAt fixtureRoot $
-            Targets.loadTargets defaultLoadTargetsOptions
+          diagnostics <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions
 
           diagnostics `shouldSatisfy` (not . null)
           fmap diagnosticMessage diagnostics
             `shouldSatisfy` any (T.isInfixOf "parse error")
+
+      it "MULTIPKG_LANGUAGE respects the configured default language in the multipackage workspace" do
+        repoRoot <- makeAbsolute ".."
+
+        diagnostics <-
+          fixtureLoreAt repoRoot $
+            Targets.loadTargets defaultLoadTargetsOptions
+
+        diagnostics `shouldBe` []
 
     describe "loadTargets auto-refact" do
       it "re-adds a missing unqualified import when the symbol has a unique module" do
@@ -500,6 +510,7 @@ spec =
       withFixtureCopy \fixtureRoot -> do
         let demoFile = fixtureRoot </> "src" </> "Demo.hs"
         ensureAutoRefactFixtureModule fixtureRoot
+        enableImportQualifiedPost fixtureRoot
         addImportAndKeepDefinition
           demoFile
           "import AutoRefactFixture.Imports qualified as Fixture\n"
@@ -703,6 +714,16 @@ enablePatternSynonyms demoFile =
 enableOverloadedStrings :: FilePath -> IO ()
 enableOverloadedStrings demoFile =
   rewriteDemo demoFile ("{-# LANGUAGE OverloadedStrings #-}\n" <>)
+
+enableImportQualifiedPost :: FilePath -> IO ()
+enableImportQualifiedPost fixtureRoot = do
+  let packageFile = fixtureRoot </> "package.yaml"
+  packageSource <- TIO.readFile packageFile
+  TIO.writeFile packageFile $
+    T.replace
+      "- KindSignatures\n"
+      "- KindSignatures\n- ImportQualifiedPost\n"
+      packageSource
 
 ensureAmbiguousFixtureModules :: FilePath -> IO ()
 ensureAmbiguousFixtureModules fixtureRoot = do

@@ -94,7 +94,7 @@ renderDiagnosticClass = \case
   DiagInfo -> "info"
   DiagCompiler -> "compiler"
 
-renderSeverity :: Show a => a -> String
+renderSeverity :: (Show a) => a -> String
 renderSeverity severity =
   case show severity of
     "SevFatal" -> "fatal"

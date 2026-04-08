@@ -2,6 +2,7 @@
 
 module Lore.Internal.Ghc.DynFlags
   ( ParallelWorkersCount (..),
+    Language (..),
     GhcOption (..),
     Extension (..),
     modifySessionDynFlags,
@@ -9,6 +10,7 @@ module Lore.Internal.Ghc.DynFlags
     setGhciLikeDynFlags,
     setGhcWorkDirs,
     setGhcOptionsAndExtensions,
+    addGhcOptionsAndExtensions,
     setGhcSourceDirs,
     setDependencies,
     setPackageDbs,
@@ -72,17 +74,27 @@ newtype GhcOption = GhcOption
   }
   deriving newtype (Eq, Ord, Show)
 
+newtype Language = Language
+  { unLanguage :: String
+  }
+  deriving newtype (Eq, Ord, Show)
+
 newtype Extension = Extension
   { unGhcExtension :: String
   }
   deriving newtype (Eq, Ord, Show)
 
-setGhcOptionsAndExtensions :: (MonadIO m, GHC.HasLogger m) => [GhcOption] -> [Extension] -> GHC.DynFlags -> m GHC.DynFlags
-setGhcOptionsAndExtensions ghcOptions extensions dflags = do
+setGhcOptionsAndExtensions :: (MonadIO m, GHC.HasLogger m) => Maybe Language -> [GhcOption] -> [Extension] -> GHC.DynFlags -> m GHC.DynFlags
+setGhcOptionsAndExtensions language ghcOptions extensions dflags = do
+  addGhcOptionsAndExtensions language ghcOptions extensions (resetExtensions dflags)
+
+addGhcOptionsAndExtensions :: (MonadIO m, GHC.HasLogger m) => Maybe Language -> [GhcOption] -> [Extension] -> GHC.DynFlags -> m GHC.DynFlags
+addGhcOptionsAndExtensions language ghcOptions extensions dflags = do
   logger <- GHC.getLogger
-  (dflags', _, _) <- GHC.parseDynamicFlags logger (resetExtensions dflags) (map GHC.noLoc (ghcOptionsToOpts <> extensionsToOpts))
+  (dflags', _, _) <- GHC.parseDynamicFlags logger dflags (map GHC.noLoc (languageToOpts <> ghcOptionsToOpts <> extensionsToOpts))
   pure dflags'
   where
+    languageToOpts = maybe [] (\lang -> ["-X" <> unLanguage lang]) language
     ghcOptionsToOpts = map unGhcOption ghcOptions
     extensionsToOpts = map (("-X" <>) . unGhcExtension) extensions
 

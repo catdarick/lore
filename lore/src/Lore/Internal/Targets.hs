@@ -14,7 +14,7 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.RWS (asks)
 import Data.List (intercalate)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC
@@ -27,7 +27,7 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Unit.Module.Graph as GHC
 import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor, rollbackAutoRefactorEdits)
-import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
+import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
 import Lore.Internal.Interpreter (invalidateInterpreterContext, refreshInterpreterContext)
 import Lore.Internal.Lookup.ModSummaries (invalidateModSummaries)
 import Lore.Internal.Lookup.NameToInstances (invalidateNameToInstancesIndex)
@@ -39,13 +39,15 @@ import Lore.Monad (MonadLore)
 import System.FilePath (normalise)
 
 data TargetsPlan = TargetsPlan
-  { commonExtensions :: Set.Set Extension,
+  { commonLanguage :: Maybe Language,
+    commonExtensions :: Set.Set Extension,
     commonGhcOptions :: Set.Set GhcOption,
     modulesWithComponentOptions :: Map.Map GHC.ModuleName ComponentSpecificOptions
   }
 
 data ComponentSpecificOptions = ComponentSpecificOptions
-  { extensions :: Set.Set Extension,
+  { language :: Maybe Language,
+    extensions :: Set.Set Extension,
     ghcOptions :: Set.Set GhcOption,
     baseDynFlags :: GHC.DynFlags
   }
@@ -63,23 +65,27 @@ defaultLoadTargetsOptions =
 prepareTargetsPlan :: (MonadLore m) => [ComponentData] -> m TargetsPlan
 prepareTargetsPlan components = do
   sessionDynFlags <- GHC.getSessionDynFlags
-  let commonExtensions = foldr1 Set.intersection (map defaultExtensions components)
+  let commonLanguage = commonComponentLanguage components
+      commonExtensions = foldr1 Set.intersection (map defaultExtensions components)
       commonGhcOptions = foldr1 Set.intersection (map (.ghcOptions) components)
 
   modulesWithComponentOptions <- forM components \component -> do
-    componentFlags <- setGhcOptionsAndExtensions (Set.toList component.ghcOptions) (Set.toList component.defaultExtensions) sessionDynFlags
+    componentFlags <- setGhcOptionsAndExtensions component.language (Set.toList component.ghcOptions) (Set.toList component.defaultExtensions) sessionDynFlags
     let componentSpecificExtensions = component.defaultExtensions Set.\\ commonExtensions
         componentSpecificGhcOptions = component.ghcOptions Set.\\ commonGhcOptions
+        componentSpecificLanguage = if component.language == commonLanguage then Nothing else component.language
         componentSpecificOptions =
           ComponentSpecificOptions
-            { extensions = componentSpecificExtensions,
+            { language = componentSpecificLanguage,
+              extensions = componentSpecificExtensions,
               ghcOptions = componentSpecificGhcOptions,
               baseDynFlags = componentFlags
             }
     pure $ Map.fromSet (const componentSpecificOptions) component.modules
   pure
     TargetsPlan
-      { commonExtensions = commonExtensions,
+      { commonLanguage = commonLanguage,
+        commonExtensions = commonExtensions,
         commonGhcOptions = commonGhcOptions,
         modulesWithComponentOptions = Map.unions modulesWithComponentOptions
       }
@@ -96,6 +102,7 @@ loadTargets options = do
       sourceDirs = Set.unions $ map extractSourceDirs packages
   targetsPlan <- prepareTargetsPlan allComponents
   Log.debug $ "Source directories to add: " <> show (Set.toList sourceDirs)
+  Log.debug $ "Common language: " <> show targetsPlan.commonLanguage
   Log.debug $ "Common GHC options: " <> show (Set.toList $ commonGhcOptions targetsPlan)
   Log.debug $ "Common extensions: " <> show (Set.toList $ commonExtensions targetsPlan)
   Log.debug $ "Dependencies to add: " <> show (Set.toList dependenciesToAdd)
@@ -104,7 +111,7 @@ loadTargets options = do
   invalidateModSummaries
   invalidateNameToInstancesIndex
   modifySessionDynFlagsM
-    ( setGhcOptionsAndExtensions (Set.toList $ commonGhcOptions targetsPlan) (Set.toList $ commonExtensions targetsPlan)
+    ( setGhcOptionsAndExtensions targetsPlan.commonLanguage (Set.toList $ commonGhcOptions targetsPlan) (Set.toList $ commonExtensions targetsPlan)
         . setGhcSourceDirs (Set.toList sourceDirs)
         . setDependencies (Set.toList dependenciesToAdd)
     )
@@ -224,9 +231,11 @@ applyModuleScopedArgs TargetsPlan {modulesWithComponentOptions} modGraph = do
               (GHC.ml_hs_file (GHC.ms_location summary))
           moduleName = GHC.moduleName (GHC.ms_mod summary)
        in case Map.lookup moduleName modulesWithComponentOptions of
-            Just componentOptions | length componentOptions.ghcOptions + length componentOptions.extensions > 0 -> do
-              dynFlags <- applySourcePragmas summary componentOptions summaryFile
-              pure summary {GHC.ms_hspp_opts = dynFlags}
+            Just componentOptions
+              | isJust componentOptions.language
+                  || length componentOptions.ghcOptions + length componentOptions.extensions > 0 -> do
+                  dynFlags <- applySourcePragmas summary componentOptions summaryFile
+                  pure summary {GHC.ms_hspp_opts = dynFlags}
             _ -> pure summary
 
 applySourcePragmas ::
@@ -243,3 +252,9 @@ applySourcePragmas summary compOptions summaryFile = do
   let (_warnings, options) = GHC.getOptions (GHC.initParserOpts compOptions.baseDynFlags) contents summaryFile
   (dynFlags, _, _) <- liftIO (GHC.parseDynamicFilePragma compOptions.baseDynFlags options)
   pure dynFlags
+
+commonComponentLanguage :: [ComponentData] -> Maybe Language
+commonComponentLanguage [] = Nothing
+commonComponentLanguage (component : restComponents)
+  | all ((== component.language) . (.language)) restComponents = component.language
+  | otherwise = Nothing

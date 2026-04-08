@@ -20,7 +20,7 @@ import Data.Maybe (maybeToList)
 import qualified Data.Set as Set
 import qualified GHC
 import qualified Hpack.Config as Hpack
-import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..))
+import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..))
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
@@ -28,6 +28,7 @@ import System.FilePath (takeDirectory, (</>))
 
 data ComponentData = ComponentData
   { mainModulePath :: Maybe FilePath,
+    language :: Maybe Language,
     ghcOptions :: Set.Set GhcOption,
     defaultExtensions :: Set.Set Extension,
     dependencies :: Set.Set String,
@@ -87,6 +88,7 @@ prepareComponentsData = do
     extractComponentData moduleExtractor extractMainModule section =
       ComponentData
         { mainModulePath = extractMainModule (Hpack.sectionData section),
+          language = (\(Hpack.Language lang) -> Language lang) <$> Hpack.sectionLanguage section,
           ghcOptions = Set.fromList $ map GhcOption $ Hpack.sectionGhcOptions section,
           defaultExtensions = Set.fromList $ map Extension $ Hpack.sectionDefaultExtensions section,
           dependencies = getSectionDependencies section,

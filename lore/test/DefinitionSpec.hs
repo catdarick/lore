@@ -13,7 +13,7 @@ import qualified Lore.Targets as Targets
 import Test.Hspec
 import TestSupport (fixtureLore)
 
-loadTargets :: MonadLore m => Targets.LoadTargetsOptions -> m ()
+loadTargets :: (MonadLore m) => Targets.LoadTargetsOptions -> m ()
 loadTargets options = void (Targets.loadTargets options)
 
 spec :: Spec
