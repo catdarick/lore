@@ -84,7 +84,7 @@ prepareTargetsPlan components = do
         modulesWithComponentOptions = Map.unions modulesWithComponentOptions
       }
 
-loadTargets :: (MonadLore m) => LoadTargetsOptions -> m ()
+loadTargets :: (MonadLore m) => LoadTargetsOptions -> m [Diagnostic]
 loadTargets options = do
   dflags <- GHC.getSessionDynFlags
   let homeUnitId = GHC.homeUnitId_ dflags
@@ -110,13 +110,14 @@ loadTargets options = do
     )
   let targets = map (mkModuleTarget homeUnitId) (Map.keys $ modulesWithComponentOptions targetsPlan)
   GHC.setTargets targets
-  loadResult <- loadTargets' options targetsPlan
+  LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <- loadTargets' options targetsPlan
   refreshInterpreterContext
-  case loadResult of
+  case loadAttemptResult of
     GHC.Succeeded -> do
       Log.debug "Successfully updated GHC targets based on package.yaml configurations"
     GHC.Failed -> do
       Log.err "Failed to load GHC targets after updating. Please check the provided GHC options, source directories, and dependencies for correctness."
+  pure loadAttemptDiagnostics
 
 mkModuleTarget :: GHC.UnitId -> GHC.ModuleName -> GHC.Target
 mkModuleTarget unitId modName =
@@ -132,19 +133,19 @@ data LoadAttempt = LoadAttempt
     loadAttemptResult :: GHC.SuccessFlag
   }
 
-loadTargets' :: (MonadLore m) => LoadTargetsOptions -> TargetsPlan -> m GHC.SuccessFlag
+loadTargets' :: (MonadLore m) => LoadTargetsOptions -> TargetsPlan -> m LoadAttempt
 loadTargets' options targetsPlan =
   go 0 Map.empty
   where
     maxAutoRefactorAttempts = 3 :: Int
 
     go attemptNo pendingRollback = do
-      LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <- loadTargetsOnce targetsPlan
+      currentAttempt@LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <- loadTargetsOnce targetsPlan
       let unresolvedRollback =
             retainUnresolvedRollback pendingRollback loadAttemptDiagnostics
       case loadAttemptResult of
         GHC.Succeeded ->
-          pure GHC.Succeeded
+          pure currentAttempt
         GHC.Failed
           | options.enableAutoRefactor && attemptNo < maxAutoRefactorAttempts -> do
               AutoRefactorResult {autoRefactorApplied, autoRefactorOriginalContents} <- applyAutoRefactor loadAttemptDiagnostics
@@ -156,9 +157,9 @@ loadTargets' options targetsPlan =
                   invalidateNameToInstancesIndex
                   go (attemptNo + 1) (Map.union unresolvedRollback autoRefactorOriginalContents)
                 else
-                  rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback
+                  rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
         GHC.Failed ->
-          rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback
+          rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
 
 retainUnresolvedRollback :: Map.Map FilePath a -> [Diagnostic] -> Map.Map FilePath a
 retainUnresolvedRollback rollbackState diagnostics =
@@ -170,18 +171,17 @@ retainUnresolvedRollback rollbackState diagnostics =
         | Diagnostic {diagnosticSpan = RealDiagnosticSpan Span {spanFile}} <- diagnostics
         ]
 
-rollbackUnresolvedAutoRefact :: (MonadLore m) => TargetsPlan -> Map.Map FilePath Text -> m GHC.SuccessFlag
-rollbackUnresolvedAutoRefact targetsPlan rollbackState
+rollbackUnresolvedAutoRefact :: (MonadLore m) => TargetsPlan -> Map.Map FilePath Text -> LoadAttempt -> m LoadAttempt
+rollbackUnresolvedAutoRefact targetsPlan rollbackState failedAttempt
   | Map.null rollbackState =
-      pure GHC.Failed
+      pure failedAttempt
   | otherwise = do
       Log.info "Auto-refact: rolling back unresolved edits."
       rollbackAutoRefactorEdits rollbackState
       invalidateSymbolsMapCache
       invalidateModSummaries
       invalidateNameToInstancesIndex
-      _ <- loadTargetsOnce targetsPlan
-      pure GHC.Failed
+      loadTargetsOnce targetsPlan
 
 loadTargetsOnce :: (MonadLore m) => TargetsPlan -> m LoadAttempt
 loadTargetsOnce targetsPlan = do

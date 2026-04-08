@@ -5,6 +5,7 @@ module Lore.Interpreter
   )
 where
 
+import Control.Monad (void)
 import Data.Text (Text)
 import qualified GHC
 import qualified Lore.Internal.Interpreter as Internal
@@ -16,7 +17,7 @@ loadInterpreterContext = do
   contextReady <- Internal.interpreterContextIsReady
   if contextReady
     then pure ()
-    else loadTargets defaultLoadTargetsOptions
+    else void (loadTargets defaultLoadTargetsOptions)
 
 interpretExpression :: (MonadLore m) => Text -> m String
 interpretExpression source = do

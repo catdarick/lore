@@ -6,6 +6,17 @@ tasks:
     cmds:
       - stack build
 
+  mcp-inspector:
+    desc: Run MCP Inspector for lore-mcp; set MCP_HOST_IP for remote browser access
+    cmds:
+      - stack build lore-mcp
+      - |
+        HOST=0.0.0.0 \
+        ALLOWED_ORIGINS="http://localhost:6274,http://127.0.0.1:6274${MCP_HOST_IP:+,http://$MCP_HOST_IP:6274}" \
+        npx @modelcontextprotocol/inspector \
+          --config "$PWD/mcp.json" \
+          --server lore-mcp
+
   format:
     desc: Format Haskell sources with ormolu
     cmds:

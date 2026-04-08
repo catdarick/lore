@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "lore-mcp": {
+      "command": "stack",
+      "args": [
+        "--stack-yaml",
+        "/home/darick/lore/lore/stack.yaml",
+        "exec",
+        "--",
+        "lore-mcp"
+      ]
+    }
+  }
+}

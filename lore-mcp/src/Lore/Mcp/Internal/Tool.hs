@@ -44,5 +44,10 @@ getSomeToolSpec someTool =
     ]
   where
     toolInputSchema = case someTool of
-      SomeToolWithArgs (_tool :: ToolWithArgs m r) -> Just $ J.toJSON (toInlinedSchema @(r 'MetadataType) Proxy)
-      SomeToolWithoutArgs _ -> Nothing
+      SomeToolWithArgs (_tool :: ToolWithArgs m r) -> J.toJSON (toInlinedSchema @(r 'MetadataType) Proxy)
+      SomeToolWithoutArgs _ ->
+        J.object
+          [ "type" J..= ("object" :: Text),
+            "properties" J..= J.object [],
+            "additionalProperties" J..= False
+          ]

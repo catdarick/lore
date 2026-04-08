@@ -1,14 +1,20 @@
 module DefinitionSpec (spec) where
 
+import Control.Monad (void)
 import Data.List (find, sort)
 import Data.Text (pack)
 import qualified GHC
 import qualified GHC.Plugins
 import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice)
 import Lore.Lookup (ExportedSymbol (..), findSymbols)
-import Lore.Targets (defaultLoadTargetsOptions, loadTargets)
+import Lore.Monad (MonadLore)
+import Lore.Targets (defaultLoadTargetsOptions)
+import qualified Lore.Targets as Targets
 import Test.Hspec
 import TestSupport (fixtureLore)
+
+loadTargets :: MonadLore m => Targets.LoadTargetsOptions -> m ()
+loadTargets options = void (Targets.loadTargets options)
 
 spec :: Spec
 spec = do

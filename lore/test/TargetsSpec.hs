@@ -1,5 +1,6 @@
 module TargetsSpec (spec) where
 
+import Control.Monad (void)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Map as Map
 import qualified Data.Text as T
@@ -7,30 +8,52 @@ import qualified Data.Text.IO as TIO
 import Lore.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (..), Span (..))
 import Lore.Logger (LogMessage (..), LoggerHandle (..))
 import Lore.Lookup (findSymbols)
-import Lore.Targets (LoadTargetsOptions (..), defaultLoadTargetsOptions, loadTargets, retainUnresolvedRollback)
+import Lore.Monad (MonadLore)
+import Lore.Targets (LoadTargetsOptions (..), defaultLoadTargetsOptions, retainUnresolvedRollback)
+import qualified Lore.Targets as Targets
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import Test.Hspec
 import TestSupport (fixtureLoreAt, fixtureLoreAtWithLogger, withFixtureCopy)
 
+loadTargets :: MonadLore m => LoadTargetsOptions -> m ()
+loadTargets options = void (Targets.loadTargets options)
+
 spec :: Spec
 spec =
-  describe "loadTargets auto-refact" do
-    it "re-adds a missing unqualified import when the symbol has a unique module" do
-      withFixtureCopy \fixtureRoot -> do
-        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
-        rewriteDemo demoFile $
-          T.unlines
-            . filter (/= "import Data.Maybe (fromMaybe)")
-            . T.lines
+  do
+    describe "loadTargets diagnostics" do
+      it "returns final diagnostics when loading fails" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+          rewriteDemo demoFile $
+            T.replace
+              "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
+              "lookupOrZero pairs key ="
 
-        loaded <- fixtureLoreAt fixtureRoot do
-          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
-          not . null <$> findSymbols "lookupOrZero"
+          diagnostics <- fixtureLoreAt fixtureRoot $
+            Targets.loadTargets defaultLoadTargetsOptions
 
-        demoSource <- TIO.readFile demoFile
-        loaded `shouldBe` True
-        T.isInfixOf "import Data.Maybe (fromMaybe)\n" demoSource `shouldBe` True
+          diagnostics `shouldSatisfy` (not . null)
+          fmap diagnosticMessage diagnostics
+            `shouldSatisfy` any (T.isInfixOf "parse error")
+
+    describe "loadTargets auto-refact" do
+      it "re-adds a missing unqualified import when the symbol has a unique module" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+          rewriteDemo demoFile $
+            T.unlines
+              . filter (/= "import Data.Maybe (fromMaybe)")
+              . T.lines
+
+          loaded <- fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+            not . null <$> findSymbols "lookupOrZero"
+
+          demoSource <- TIO.readFile demoFile
+          loaded `shouldBe` True
+          T.isInfixOf "import Data.Maybe (fromMaybe)\n" demoSource `shouldBe` True
 
     it "opens a qualified aliased import when a used item is missing" do
       withFixtureCopy \fixtureRoot -> do
