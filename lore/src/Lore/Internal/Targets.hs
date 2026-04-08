@@ -27,6 +27,7 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Unit.Module.Graph as GHC
 import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor, rollbackAutoRefactorEdits)
+import Lore.Internal.AutoRefactor.Issue (classifyAutoRefactorIssues)
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
 import Lore.Internal.Interpreter (invalidateInterpreterContext, refreshInterpreterContext)
 import Lore.Internal.Lookup.ModSummaries (invalidateModSummaries)
@@ -155,15 +156,20 @@ loadTargets' options targetsPlan =
           pure currentAttempt
         GHC.Failed
           | options.enableAutoRefactor && attemptNo < maxAutoRefactorAttempts -> do
-              AutoRefactorResult {autoRefactorApplied, autoRefactorOriginalContents} <- applyAutoRefactor loadAttemptDiagnostics
-              if autoRefactorApplied
-                then do
-                  Log.info "Auto-refact applied import fixes. Retrying target load."
-                  invalidateSymbolsMapCache
-                  invalidateModSummaries
-                  invalidateNameToInstancesIndex
-                  go (attemptNo + 1) (Map.union unresolvedRollback autoRefactorOriginalContents)
-                else
+              case classifyAutoRefactorIssues loadAttemptDiagnostics of
+                Just autoRefactorIssues -> do
+                  AutoRefactorResult {autoRefactorApplied, autoRefactorOriginalContents} <- applyAutoRefactor autoRefactorIssues
+                  if autoRefactorApplied
+                    then do
+                      Log.info "Auto-refact applied import fixes. Retrying target load."
+                      invalidateSymbolsMapCache
+                      invalidateModSummaries
+                      invalidateNameToInstancesIndex
+                      go (attemptNo + 1) (Map.union unresolvedRollback autoRefactorOriginalContents)
+                    else
+                      rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
+                Nothing -> do
+                  Log.debug "Auto-refact: no fixable import diagnostics found; skipping."
                   rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
         GHC.Failed ->
           rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt

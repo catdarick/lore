@@ -41,6 +41,7 @@ library
       Lore.Internal.AutoRefactor.ImportDecl
       Lore.Internal.AutoRefactor.ImportNormalize
       Lore.Internal.AutoRefactor.ImportOps
+      Lore.Internal.AutoRefactor.Issue
       Lore.Internal.AutoRefactor.ImportRewrite
       Lore.Internal.AutoRefactor.MissingImports
       Lore.Internal.AutoRefactor.MissingImports.Diagnostic

@@ -35,6 +35,7 @@ data MissingImportRequest = MissingImportRequest
     requestPreferredModules :: [Text],
     requestSuggestedImportTargets :: [Text]
   }
+  deriving (Eq, Show)
 
 missingImportRequestFromDiagnostic :: Diagnostic -> Maybe MissingImportRequest
 missingImportRequestFromDiagnostic Diagnostic {diagnosticMessage} = do

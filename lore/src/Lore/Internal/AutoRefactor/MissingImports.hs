@@ -8,15 +8,16 @@ module Lore.Internal.AutoRefactor.MissingImports
 where
 
 import Data.List (nubBy, sortBy)
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (listToMaybe, mapMaybe)
+import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC as Ghc
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as TyThing
-import Lore.Diagnostics (Diagnostic)
 import Lore.Internal.AutoRefactor.ImportDecl
   ( ImportList (..),
     ParsedImport (..),
@@ -27,18 +28,15 @@ import Lore.Internal.AutoRefactor.MissingImports.Diagnostic
   ( MissingImportRequest (..),
     MissingSymbol (..),
     MissingSymbolKind (..),
-    missingImportRequestFromDiagnostic,
   )
 import Lore.Internal.Lookup.Types (ExportedSymbol (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 
-suggestMissingImportOperations :: (MonadLore m) => [ParsedImport] -> Map Text [ExportedSymbol] -> [Diagnostic] -> m [ImportOperation]
-suggestMissingImportOperations parsedImports symbolsMap diagnostics =
-  concat <$> mapM suggestForRequest requests
+suggestMissingImportOperations :: (MonadLore m) => [ParsedImport] -> Map Text [ExportedSymbol] -> NonEmpty MissingImportRequest -> m [ImportOperation]
+suggestMissingImportOperations parsedImports symbolsMap requests =
+  concat <$> mapM suggestForRequest (NE.toList requests)
   where
-    requests = mapMaybe missingImportRequestFromDiagnostic diagnostics
-
     suggestForRequest request@MissingImportRequest {requestMissingSymbol} = do
       let matchingExportedSymbols =
             filter (matchesMissingKind requestMissingSymbol) $

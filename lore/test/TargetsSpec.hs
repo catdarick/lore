@@ -291,6 +291,30 @@ spec =
         loaded `shouldBe` False
         demoSource `shouldBe` originalSource
 
+    it "skips auto-refact entirely when diagnostics are not import-fixable" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+        rewriteDemo demoFile $
+          T.replace
+            "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
+            "lookupOrZero pairs key ="
+        originalSource <- TIO.readFile demoFile
+
+        logsRef <- newIORef []
+        let loggerHandle =
+              LoggerHandle \logMessage ->
+                modifyIORef' logsRef (<> [logMessage.content])
+
+        loaded <- fixtureLoreAtWithLogger loggerHandle fixtureRoot do
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
+
+        demoSource <- TIO.readFile demoFile
+        logs <- readIORef logsRef
+        loaded `shouldBe` False
+        demoSource `shouldBe` originalSource
+        logs `shouldSatisfy` any (== "Auto-refact: no fixable import diagnostics found; skipping.")
+
     it "preserves rollback state only for files that still fail" do
       let rollbackState :: Map.Map FilePath T.Text
           rollbackState =

@@ -1,45 +1,60 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module Lore.Internal.AutoRefactor.RedundantImports
-  ( suggestRedundantImportOperations,
+  ( RedundantImportRequest (..),
+    redundantImportRequestFromDiagnostic,
+    suggestRedundantImportOperations,
   )
 where
 
 import Control.Applicative ((<|>))
 import Data.List (find)
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
-import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..))
+import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span)
 import Lore.Internal.AutoRefactor.ImportDecl (ParsedImport (..), parsedImportContainsSpan)
 import Lore.Internal.AutoRefactor.ImportOps (ImportOperation (..))
 
-suggestRedundantImportOperations :: [ParsedImport] -> [Diagnostic] -> [ImportOperation]
+data RedundantImportRequest
+  = RemoveBindingsRequest Span (NonEmpty T.Text)
+  | RemoveWholeImportRequest Span
+  deriving (Eq, Show)
+
+redundantImportRequestFromDiagnostic :: Diagnostic -> Maybe RedundantImportRequest
+redundantImportRequestFromDiagnostic Diagnostic {diagnosticSpan = RealDiagnosticSpan diagnosticSpan, diagnosticMessage} =
+  case parseRedundantImportDiagnostic diagnosticMessage of
+    Just RemoveWholeImportDiagnostic ->
+      Just (RemoveWholeImportRequest diagnosticSpan)
+    Just (RemoveBindings bindings) ->
+      Just (RemoveBindingsRequest diagnosticSpan bindings)
+    Nothing ->
+      Nothing
+redundantImportRequestFromDiagnostic Diagnostic {diagnosticSpan = UnhelpfulDiagnosticSpan {}} =
+  Nothing
+
+suggestRedundantImportOperations :: [ParsedImport] -> NonEmpty RedundantImportRequest -> [ImportOperation]
 suggestRedundantImportOperations parsedImports =
-  concatMap suggestForDiagnostic
+  concatMap suggestForRequest . NE.toList
   where
-    suggestForDiagnostic Diagnostic {diagnosticSpan = RealDiagnosticSpan diagnosticSpan, diagnosticMessage} =
-      case parseRedundantImportDiagnostic diagnosticMessage of
-        Just RemoveWholeImportDiagnostic ->
-          case find (`parsedImportContainsSpan` diagnosticSpan) parsedImports of
-            Just parsedImport ->
-              [RemoveWholeImport parsedImport.parsedImportId]
-            Nothing ->
-              []
-        Just (RemoveBindings bindingsText) ->
-          case find (`parsedImportContainsSpan` diagnosticSpan) parsedImports of
-            Just parsedImport ->
-              [ RemoveImportItem parsedImport.parsedImportId bindingText
-              | bindingText <- T.splitOn ", " bindingsText
-              ]
-            Nothing ->
-              []
-        Nothing ->
-          []
-    suggestForDiagnostic Diagnostic {diagnosticSpan = UnhelpfulDiagnosticSpan {}} =
-      []
+    suggestForRequest = \case
+      RemoveWholeImportRequest diagnosticSpan ->
+        case find (`parsedImportContainsSpan` diagnosticSpan) parsedImports of
+          Just parsedImport ->
+            [RemoveWholeImport parsedImport.parsedImportId]
+          Nothing ->
+            []
+      RemoveBindingsRequest diagnosticSpan bindings ->
+        case find (`parsedImportContainsSpan` diagnosticSpan) parsedImports of
+          Just parsedImport ->
+            [ RemoveImportItem parsedImport.parsedImportId bindingText
+            | bindingText <- NE.toList bindings
+            ]
+          Nothing ->
+            []
 
 data ParsedRedundantImportDiagnostic
-  = RemoveBindings T.Text
+  = RemoveBindings (NonEmpty T.Text)
   | RemoveWholeImportDiagnostic
   deriving (Eq, Show)
 
@@ -58,7 +73,7 @@ parseSpecificRedundantImport message = do
   quoted <- extractQuoted suffix
   afterQuoted <- snd <$> nonEmptyBreak " from module " suffix
   if " is redundant" `T.isInfixOf` afterQuoted
-    then Just (RemoveBindings quoted)
+    then RemoveBindings <$> splitBindings quoted
     else Nothing
 
 parseWholeImport :: T.Text -> Maybe ParsedRedundantImportDiagnostic
@@ -86,3 +101,7 @@ nonEmptyBreak needle haystack =
 unifySpaces :: T.Text -> T.Text
 unifySpaces =
   T.unwords . T.words
+
+splitBindings :: T.Text -> Maybe (NonEmpty T.Text)
+splitBindings =
+  NE.nonEmpty . T.splitOn ", "
