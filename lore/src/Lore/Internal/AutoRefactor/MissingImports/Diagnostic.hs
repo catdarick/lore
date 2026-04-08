@@ -5,6 +5,9 @@ module Lore.Internal.AutoRefactor.MissingImports.Diagnostic
   ( MissingSymbolKind (..),
     MissingSymbol (..),
     MissingImportRequest (..),
+    MissingImportRequestKind (..),
+    ResolveMissingImportDetails (..),
+    ExtendExistingImportDetails (..),
     missingImportRequestFromDiagnostic,
   )
 where
@@ -30,10 +33,27 @@ data MissingSymbol = MissingSymbol
   }
   deriving (Eq, Ord, Show)
 
-data MissingImportRequest = MissingImportRequest
+data MissingImportRequest
+  = MissingImportRequest
   { requestMissingSymbol :: MissingSymbol,
-    requestPreferredModules :: [Text],
+    requestKind :: MissingImportRequestKind
+  }
+  deriving (Eq, Show)
+
+data MissingImportRequestKind
+  = ResolveMissingImport ResolveMissingImportDetails
+  | ExtendExistingImport ExtendExistingImportDetails
+  deriving (Eq, Show)
+
+data ResolveMissingImportDetails = ResolveMissingImportDetails
+  { requestPreferredModules :: [Text],
     requestSuggestedImportTargets :: [Text]
+  }
+  deriving (Eq, Show)
+
+data ExtendExistingImportDetails = ExtendExistingImportDetails
+  { requestTargetModule :: Text,
+    requestImportItemOverride :: Maybe Text
   }
   deriving (Eq, Show)
 
@@ -43,15 +63,85 @@ missingImportRequestFromDiagnostic Diagnostic {diagnosticMessage} = do
       maybeMissingSymbol =
         parseMissingSymbol diagnosticMessage
           <|> fmap fst moduleExportDiagnostic
+  parseExtendExistingImportRequest diagnosticMessage maybeMissingSymbol
+    <|> do
+      missingSymbol <- maybeMissingSymbol
+      pure
+        MissingImportRequest
+          { requestMissingSymbol = missingSymbol,
+            requestKind =
+              ResolveMissingImport $
+                ResolveMissingImportDetails
+                  { requestPreferredModules = maybe [] snd moduleExportDiagnostic,
+                    requestSuggestedImportTargets = parseDiagnosticImportTargets diagnosticMessage
+                  }
+          }
+
+parseExtendExistingImportRequest :: Text -> Maybe MissingSymbol -> Maybe MissingImportRequest
+parseExtendExistingImportRequest diagnosticMessage maybeMissingSymbol =
+  parseMissingHasFieldImport diagnosticMessage
+    <|> parseGenericImportListExtension diagnosticMessage maybeMissingSymbol
+
+parseMissingHasFieldImport :: Text -> Maybe MissingImportRequest
+parseMissingHasFieldImport rawMessage = do
+  let message = unifySpaces rawMessage
+  guardText "HasField" message
+  guardText "Perhaps you want to add" message
+  requestedField <- parseRequestedImportItem message
+  parentType <- parseHasFieldParentType message requestedField
+  importTarget <- parseSingleDiagnosticImportTarget message
+  pure
+    MissingImportRequest
+      { requestMissingSymbol =
+          MissingSymbol
+            { missingName = requestedField,
+              missingQualifier = Nothing,
+              missingKind = MissingThing
+            },
+        requestKind =
+          ExtendExistingImport $
+            ExtendExistingImportDetails
+              { requestTargetModule = importTarget,
+                requestImportItemOverride = Just (parentType <> "(..)")
+              }
+      }
+
+parseGenericImportListExtension :: Text -> Maybe MissingSymbol -> Maybe MissingImportRequest
+parseGenericImportListExtension rawMessage maybeMissingSymbol = do
+  let message = unifySpaces rawMessage
+  guardText "Perhaps you want to add" message
+  importTarget <- parseSingleDiagnosticImportTarget message
   missingSymbol <- maybeMissingSymbol
   pure
     MissingImportRequest
       { requestMissingSymbol = missingSymbol,
-        requestPreferredModules =
-          maybe [] snd moduleExportDiagnostic,
-        requestSuggestedImportTargets =
-          parseDiagnosticImportTargets diagnosticMessage
+        requestKind =
+          ExtendExistingImport $
+            ExtendExistingImportDetails
+              { requestTargetModule = importTarget,
+                requestImportItemOverride = Nothing
+              }
       }
+
+parseRequestedImportItem :: Text -> Maybe Text
+parseRequestedImportItem message = do
+  (_, suffix) <- nonEmptyBreak "Perhaps you want to add " message
+  parseMissingSymbolAfterPrefix "Perhaps you want to add " suffix
+
+parseSingleDiagnosticImportTarget :: Text -> Maybe Text
+parseSingleDiagnosticImportTarget =
+  listToMaybe . parseDiagnosticImportTargets
+
+parseHasFieldParentType :: Text -> Text -> Maybe Text
+parseHasFieldParentType message requestedField = do
+  (_, suffix) <- nonEmptyBreak "HasField " message
+  hasFieldSuffix <- T.stripPrefix "HasField " suffix
+  fieldToken : parentTypeToken : _ <- pure (T.words hasFieldSuffix)
+  guardText ("\"" <> requestedField <> "\"") fieldToken
+  let parentType = stripTrailingPunctuation parentTypeToken
+  if T.null parentType
+    then Nothing
+    else Just parentType
 
 parseMissingSymbol :: Text -> Maybe MissingSymbol
 parseMissingSymbol rawMessage =

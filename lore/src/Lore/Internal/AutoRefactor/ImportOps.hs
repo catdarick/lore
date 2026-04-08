@@ -10,6 +10,7 @@ import Lore.Internal.AutoRefactor.ImportDecl (ImportId)
 
 data ImportOperation
   = AddUnqualifiedItem Text Text
+  | AddUnqualifiedItemToExistingImport Text Text
   | EnsureQualifiedImport Text Text
   | RemoveImportItem ImportId Text
   | RemoveWholeImport ImportId

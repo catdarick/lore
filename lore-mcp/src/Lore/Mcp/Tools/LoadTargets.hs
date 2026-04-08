@@ -10,6 +10,7 @@ import Lore
     DiagnosticCodeInfo (..),
     DiagnosticSpan (..),
     LoadTargetsOptions (..),
+    LoadTargetsResult (..),
     MonadLore,
     Span (..),
     loadTargets,
@@ -27,24 +28,40 @@ loadTargetsTool =
 
 loadTargetsHandler :: (MonadLore m) => m Text
 loadTargetsHandler = do
-  diagnostics <- loadTargets LoadTargetsOptions {enableAutoRefactor = True}
-  pure (renderLoadTargetsDiagnostics diagnostics)
+  loadResult <- loadTargets LoadTargetsOptions {enableAutoRefactor = True}
+  pure (renderLoadTargetsResult loadResult)
 
-renderLoadTargetsDiagnostics :: [Diagnostic] -> Text
-renderLoadTargetsDiagnostics diagnostics
-  | null diagnostics =
-      "Targets loaded successfully with no diagnostics."
+renderLoadTargetsResult :: LoadTargetsResult -> Text
+renderLoadTargetsResult loadResult@LoadTargetsResult {loadTargetsDiagnostics}
+  | null loadTargetsDiagnostics =
+      T.pack $
+        unlines
+          [ summaryLine,
+            moduleCountsLine
+          ]
   | otherwise =
       T.pack . unlines $
         [ summaryLine,
+          moduleCountsLine,
+          "Diagnostics: " <> show (length loadTargetsDiagnostics),
           ""
         ]
-          <> concatMap (\(index, diagnostic) -> renderDiagnosticBlock index diagnostic <> [""]) (zip [1 :: Int ..] diagnostics)
+          <> concatMap (\(index, diagnostic) -> renderDiagnosticBlock index diagnostic <> [""]) (zip [1 :: Int ..] loadTargetsDiagnostics)
   where
-    summaryLine =
-      if any isErrorLikeDiagnostic diagnostics
-        then "Targets loaded with errors:"
-        else "Targets loaded with diagnostics:"
+    summaryLine
+      | not loadResult.loadTargetsSucceeded = "Targets loaded with errors."
+      | any isErrorLikeDiagnostic loadTargetsDiagnostics = "Targets loaded with errors."
+      | null loadTargetsDiagnostics = "Targets loaded successfully."
+      | otherwise = "Targets loaded with diagnostics."
+    moduleCountsLine =
+      "Modules: loaded "
+        <> show loadResult.loadTargetsModulesLoaded
+        <> ", failed "
+        <> show loadResult.loadTargetsModulesFailed
+        <> ", auto-fixed "
+        <> show loadResult.loadTargetsModulesAutofixed
+        <> ", total "
+        <> show loadResult.loadTargetsModulesTotal
 
 renderDiagnosticBlock :: Int -> Diagnostic -> [String]
 renderDiagnosticBlock index Diagnostic {diagnosticClass, diagnosticSeverity, diagnosticReason, diagnosticCode, diagnosticSpan, diagnosticMessage} =

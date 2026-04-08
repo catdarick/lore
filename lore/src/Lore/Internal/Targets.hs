@@ -2,7 +2,8 @@
 
 {-# HLINT ignore "Move filter" #-}
 module Lore.Internal.Targets
-  ( LoadTargetsOptions (..),
+  ( LoadTargetsResult (..),
+    LoadTargetsOptions (..),
     defaultLoadTargetsOptions,
     loadTargets,
     retainUnresolvedRollback,
@@ -25,14 +26,16 @@ import qualified GHC.Driver.Session as GHC
 import qualified GHC.Parser.Header as GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Unit.Module.Graph as GHC
+import GHC.Utils.Monad (mapMaybeM)
 import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor, rollbackAutoRefactorEdits)
 import Lore.Internal.AutoRefactor.Issue (classifyAutoRefactorIssues)
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
 import Lore.Internal.Interpreter (invalidateInterpreterContext, refreshInterpreterContext)
-import Lore.Internal.Lookup.ModSummaries (invalidateModSummaries)
+import Lore.Internal.Lookup.ModSummaries (getModSummaries, invalidateModSummaries)
 import Lore.Internal.Lookup.NameToInstances (invalidateNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (invalidateSymbolsMapCache)
+import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Package (ComponentData (..), PackageData (..), defaultExtensions, extractDependencies, extractSourceDirs, prepareComponentsData)
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
@@ -56,6 +59,16 @@ data ComponentSpecificOptions = ComponentSpecificOptions
 data LoadTargetsOptions = LoadTargetsOptions
   { enableAutoRefactor :: Bool
   }
+
+data LoadTargetsResult = LoadTargetsResult
+  { loadTargetsDiagnostics :: [Diagnostic],
+    loadTargetsSucceeded :: Bool,
+    loadTargetsModulesLoaded :: Int,
+    loadTargetsModulesFailed :: Int,
+    loadTargetsModulesAutofixed :: Int,
+    loadTargetsModulesTotal :: Int
+  }
+  deriving (Eq, Show)
 
 defaultLoadTargetsOptions :: LoadTargetsOptions
 defaultLoadTargetsOptions =
@@ -91,7 +104,7 @@ prepareTargetsPlan components = do
         modulesWithComponentOptions = Map.unions modulesWithComponentOptions
       }
 
-loadTargets :: (MonadLore m) => LoadTargetsOptions -> m [Diagnostic]
+loadTargets :: (MonadLore m) => LoadTargetsOptions -> m LoadTargetsResult
 loadTargets options = do
   dflags <- GHC.getSessionDynFlags
   let homeUnitId = GHC.homeUnitId_ dflags
@@ -116,16 +129,31 @@ loadTargets options = do
         . setGhcSourceDirs (Set.toList sourceDirs)
         . setDependencies (Set.toList dependenciesToAdd)
     )
-  let targets = map (mkModuleTarget homeUnitId) (Map.keys $ modulesWithComponentOptions targetsPlan)
+  let targetModules = Map.keysSet $ modulesWithComponentOptions targetsPlan
+      targets = map (mkModuleTarget homeUnitId) (Set.toList targetModules)
   GHC.setTargets targets
-  LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <- loadTargets' options targetsPlan
+  LoadAttempt {loadAttemptDiagnostics, loadAttemptResult, loadAttemptAutoRefactFiles} <- loadTargets' options targetsPlan
   refreshInterpreterContext
+  loadedModulesCount <- countLoadedModules targetModules
+  let totalModulesCount = Set.size targetModules
+      failedModulesCount = totalModulesCount - loadedModulesCount
   case loadAttemptResult of
     GHC.Succeeded -> do
       Log.debug "Successfully updated GHC targets based on package.yaml configurations"
     GHC.Failed -> do
       Log.err "Failed to load GHC targets after updating. Please check the provided GHC options, source directories, and dependencies for correctness."
-  pure loadAttemptDiagnostics
+  pure
+    LoadTargetsResult
+      { loadTargetsDiagnostics = loadAttemptDiagnostics,
+        loadTargetsSucceeded =
+          case loadAttemptResult of
+            GHC.Succeeded -> True
+            GHC.Failed -> False,
+        loadTargetsModulesLoaded = loadedModulesCount,
+        loadTargetsModulesFailed = failedModulesCount,
+        loadTargetsModulesAutofixed = Set.size loadAttemptAutoRefactFiles,
+        loadTargetsModulesTotal = totalModulesCount
+      }
 
 mkModuleTarget :: GHC.UnitId -> GHC.ModuleName -> GHC.Target
 mkModuleTarget unitId modName =
@@ -138,22 +166,33 @@ mkModuleTarget unitId modName =
 
 data LoadAttempt = LoadAttempt
   { loadAttemptDiagnostics :: [Diagnostic],
-    loadAttemptResult :: GHC.SuccessFlag
+    loadAttemptResult :: GHC.SuccessFlag,
+    loadAttemptAutoRefactFiles :: Set.Set FilePath
   }
 
 loadTargets' :: (MonadLore m) => LoadTargetsOptions -> TargetsPlan -> m LoadAttempt
 loadTargets' options targetsPlan =
-  go 0 Map.empty
+  go 0 Map.empty Set.empty
   where
     maxAutoRefactorAttempts = 3 :: Int
 
-    go attemptNo pendingRollback = do
+    go attemptNo pendingRollback committedAutoRefactFiles = do
       currentAttempt@LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <- loadTargetsOnce targetsPlan
       let unresolvedRollback =
             retainUnresolvedRollback pendingRollback loadAttemptDiagnostics
+          unresolvedRollbackFiles = rollbackStateFiles unresolvedRollback
+          pendingRollbackFiles = rollbackStateFiles pendingRollback
+          committedAutoRefactFiles' =
+            committedAutoRefactFiles
+              `Set.union` (pendingRollbackFiles Set.\\ unresolvedRollbackFiles)
       case loadAttemptResult of
         GHC.Succeeded ->
-          pure currentAttempt
+          pure
+            currentAttempt
+              { loadAttemptAutoRefactFiles =
+                  committedAutoRefactFiles
+                    `Set.union` pendingRollbackFiles
+              }
         GHC.Failed
           | options.enableAutoRefactor && attemptNo < maxAutoRefactorAttempts -> do
               case classifyAutoRefactorIssues loadAttemptDiagnostics of
@@ -165,14 +204,17 @@ loadTargets' options targetsPlan =
                       invalidateSymbolsMapCache
                       invalidateModSummaries
                       invalidateNameToInstancesIndex
-                      go (attemptNo + 1) (Map.union unresolvedRollback autoRefactorOriginalContents)
+                      go (attemptNo + 1) (Map.union unresolvedRollback autoRefactorOriginalContents) committedAutoRefactFiles'
                     else
-                      rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
+                      withAutoRefactFiles committedAutoRefactFiles' <$> rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
                 Nothing -> do
                   Log.debug "Auto-refact: no fixable import diagnostics found; skipping."
-                  rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
+                  withAutoRefactFiles committedAutoRefactFiles' <$> rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
         GHC.Failed ->
-          rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
+          withAutoRefactFiles committedAutoRefactFiles' <$> rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
+
+    withAutoRefactFiles autoRefactFiles loadAttempt =
+      loadAttempt {loadAttemptAutoRefactFiles = autoRefactFiles}
 
 retainUnresolvedRollback :: Map.Map FilePath a -> [Diagnostic] -> Map.Map FilePath a
 retainUnresolvedRollback rollbackState diagnostics =
@@ -213,8 +255,23 @@ loadTargetsOnce targetsPlan = do
   pure
     LoadAttempt
       { loadAttemptDiagnostics = dependencyDiagnostics <> diagnostics,
-        loadAttemptResult = r
+        loadAttemptResult = r,
+        loadAttemptAutoRefactFiles = Set.empty
       }
+
+countLoadedModules :: (MonadLore m) => Set.Set GHC.ModuleName -> m Int
+countLoadedModules targetModules = do
+  ModSummaries modSummaries <- getModSummaries
+  let targetMods =
+        [ mod'
+        | mod' <- Map.keys modSummaries,
+          GHC.moduleName mod' `Set.member` targetModules
+        ]
+  length <$> mapMaybeM GHC.getModuleInfo targetMods
+
+rollbackStateFiles :: Map.Map FilePath a -> Set.Set FilePath
+rollbackStateFiles =
+  Set.fromList . Map.keys
 
 applyModuleScopedArgs ::
   (MonadLore m) =>

@@ -9,7 +9,7 @@ import Lore.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (
 import Lore.Logger (LogMessage (..), LoggerHandle (..))
 import Lore.Lookup (findSymbols)
 import Lore.Monad (MonadLore)
-import Lore.Targets (LoadTargetsOptions (..), defaultLoadTargetsOptions, retainUnresolvedRollback)
+import Lore.Targets (LoadTargetsOptions (..), LoadTargetsResult (..), defaultLoadTargetsOptions, retainUnresolvedRollback)
 import qualified Lore.Targets as Targets
 import System.Directory (createDirectoryIfMissing, makeAbsolute)
 import System.FilePath ((</>))
@@ -31,22 +31,28 @@ spec =
               "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
               "lookupOrZero pairs key ="
 
-          diagnostics <-
+          loadResult@LoadTargetsResult {loadTargetsDiagnostics} <-
             fixtureLoreAt fixtureRoot $
               Targets.loadTargets defaultLoadTargetsOptions
 
-          diagnostics `shouldSatisfy` (not . null)
-          fmap diagnosticMessage diagnostics
+          loadResult.loadTargetsSucceeded `shouldBe` False
+          loadTargetsDiagnostics `shouldSatisfy` (not . null)
+          fmap diagnosticMessage loadTargetsDiagnostics
             `shouldSatisfy` any (T.isInfixOf "parse error")
+          loadResult.loadTargetsModulesFailed `shouldSatisfy` (> 0)
 
       it "MULTIPKG_LANGUAGE respects the configured default language in the multipackage workspace" do
         repoRoot <- makeAbsolute ".."
 
-        diagnostics <-
+        loadResult <-
           fixtureLoreAt repoRoot $
             Targets.loadTargets defaultLoadTargetsOptions
 
-        diagnostics `shouldBe` []
+        loadResult.loadTargetsDiagnostics `shouldBe` []
+        loadResult.loadTargetsSucceeded `shouldBe` True
+        loadResult.loadTargetsModulesLoaded `shouldBe` loadResult.loadTargetsModulesTotal
+        loadResult.loadTargetsModulesFailed `shouldBe` 0
+        loadResult.loadTargetsModulesAutofixed `shouldBe` 0
 
     describe "loadTargets auto-refact" do
       it "re-adds a missing unqualified import when the symbol has a unique module" do
@@ -64,6 +70,23 @@ spec =
           demoSource <- TIO.readFile demoFile
           loaded `shouldBe` True
           T.isInfixOf "import Data.Maybe (fromMaybe)\n" demoSource `shouldBe` True
+
+      it "reports loaded, failed, and auto-fixed module counts" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+          rewriteDemo demoFile $
+            T.unlines
+              . filter (/= "import Data.Maybe (fromMaybe)")
+              . T.lines
+
+          loadResult <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+
+          loadResult.loadTargetsSucceeded `shouldBe` True
+          loadResult.loadTargetsModulesLoaded `shouldBe` loadResult.loadTargetsModulesTotal
+          loadResult.loadTargetsModulesFailed `shouldBe` 0
+          loadResult.loadTargetsModulesAutofixed `shouldBe` 1
 
     it "opens a qualified aliased import when a used item is missing" do
       withFixtureCopy \fixtureRoot -> do
@@ -228,7 +251,37 @@ spec =
         demoSource <- TIO.readFile demoFile
         loaded `shouldBe` True
         importHeaderFor "import AutoRefactFixture.Imports" demoSource
-          `shouldSatisfy` maybe False (\line -> "FixtureBox" `T.isInfixOf` line && "FixtureCtorA" `T.isInfixOf` line)
+          `shouldBe` Just "import AutoRefactFixture.Imports (FixtureBox(..))"
+
+    it "extends an existing import list for a missing record field used via dot syntax" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+        ensureRecordFieldFixtureModule fixtureRoot
+        enableOverloadedRecordDot demoFile
+        addImportAndKeepDefinition
+          demoFile
+          "import AutoRefactFixture.RecordFields (RecordBox(RecordBox))\n"
+          [ "recordFieldViaDot :: RecordBox -> Int",
+            "recordFieldViaDot value = value.recordField"
+          ]
+
+        logsRef <- newIORef []
+        let loggerHandle =
+              LoggerHandle \logMessage ->
+                modifyIORef' logsRef (<> [logMessage.content])
+
+        loaded <- fixtureLoreAtWithLogger loggerHandle fixtureRoot do
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
+
+        demoSource <- TIO.readFile demoFile
+        logs <- readIORef logsRef
+        if loaded
+          then pure ()
+          else expectationFailure (unlines logs <> "\n" <> T.unpack demoSource)
+        loaded `shouldBe` True
+        importHeaderFor "import AutoRefactFixture.RecordFields" demoSource
+          `shouldBe` Just "import AutoRefactFixture.RecordFields (RecordBox(..))"
 
     it "does not edit ambiguous missing imports" do
       withFixtureCopy \fixtureRoot -> do
@@ -731,6 +784,13 @@ ensureAutoRefactFixtureModule fixtureRoot = do
   createDirectoryIfMissing True moduleDir
   TIO.writeFile moduleFile autoRefactFixtureModuleSource
 
+ensureRecordFieldFixtureModule :: FilePath -> IO ()
+ensureRecordFieldFixtureModule fixtureRoot = do
+  let moduleDir = fixtureRoot </> "src" </> "AutoRefactFixture"
+      moduleFile = moduleDir </> "RecordFields.hs"
+  createDirectoryIfMissing True moduleDir
+  TIO.writeFile moduleFile recordFieldFixtureModuleSource
+
 enablePatternSynonyms :: FilePath -> IO ()
 enablePatternSynonyms demoFile =
   rewriteDemo demoFile ("{-# LANGUAGE PatternSynonyms #-}\n" <>)
@@ -738,6 +798,10 @@ enablePatternSynonyms demoFile =
 enableOverloadedStrings :: FilePath -> IO ()
 enableOverloadedStrings demoFile =
   rewriteDemo demoFile ("{-# LANGUAGE OverloadedStrings #-}\n" <>)
+
+enableOverloadedRecordDot :: FilePath -> IO ()
+enableOverloadedRecordDot demoFile =
+  rewriteDemo demoFile ("{-# LANGUAGE OverloadedRecordDot #-}\n" <>)
 
 enableImportQualifiedPost :: FilePath -> IO ()
 enableImportQualifiedPost fixtureRoot = do
@@ -801,6 +865,19 @@ autoRefactFixtureModuleSource =
       "left .+. right = left + right",
       "",
       "infixl 6 .+."
+    ]
+
+recordFieldFixtureModuleSource :: T.Text
+recordFieldFixtureModuleSource =
+  T.unlines
+    [ "module AutoRefactFixture.RecordFields",
+      "  ( RecordBox(..)",
+      "  )",
+      "where",
+      "",
+      "data RecordBox = RecordBox",
+      "  { recordField :: Int",
+      "  }"
     ]
 
 ambiguousFixtureModuleSource :: T.Text -> T.Text

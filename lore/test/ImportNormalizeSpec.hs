@@ -76,6 +76,14 @@ spec =
 
       normalized `shouldBe` []
 
+    it "lets parent all-constructors imports subsume bare parent items" do
+      let (normalized, _) =
+            applyImportOperations
+              [explicitImport 1 0 "Lore" [item "LoadTargetsResult"]]
+              [AddUnqualifiedItem "Lore" "LoadTargetsResult(..)"]
+
+      normalized `shouldBe` [explicitImport 1 0 "Lore" [item "LoadTargetsResult(..)"]]
+
 item :: String -> ImportItem
 item text =
   ImportItem

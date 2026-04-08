@@ -6,6 +6,7 @@ module Lore
     LoreMonadT,
     MonadLore,
     runLore,
+    LoadTargetsResult (..),
     LoadTargetsOptions (..),
     defaultLoadTargetsOptions,
     loadTargets,

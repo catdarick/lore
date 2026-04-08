@@ -8,7 +8,11 @@ module Lore.Internal.AutoRefactor.ImportNormalize
 where
 
 import Data.List (find, foldl', groupBy, partition, sortOn)
+import Data.Maybe (mapMaybe)
+import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text as T
+import Lore.Diagnostics (Span)
 import Lore.Internal.AutoRefactor.ImportDecl
   ( ImportId,
     ImportItem (..),
@@ -31,6 +35,8 @@ applyOperation :: [NormalizedImport] -> ImportOperation -> ([NormalizedImport], 
 applyOperation imports = \case
   AddUnqualifiedItem moduleName itemText ->
     ensureUnqualifiedItem moduleName itemText imports
+  AddUnqualifiedItemToExistingImport moduleName itemText ->
+    ensureExistingUnqualifiedItem moduleName itemText imports
   EnsureQualifiedImport moduleName qualifier ->
     ensureQualifiedImport moduleName qualifier imports
   RemoveImportItem importId itemText ->
@@ -57,6 +63,31 @@ ensureUnqualifiedItem moduleName itemText imports =
           insertNewImport (newExplicitImport moduleName itemText) imports
     Nothing ->
       insertNewImport (newExplicitImport moduleName itemText) imports
+  where
+    isCompatible normalizedImport =
+      normalizedImport.normalizedImportModuleName == moduleName
+        && normalizedImport.normalizedImportQualifiedStyle == ImportUnqualified
+        && not (isHidingImport normalizedImport)
+
+ensureExistingUnqualifiedItem :: Text -> Text -> [NormalizedImport] -> ([NormalizedImport], [String])
+ensureExistingUnqualifiedItem moduleName itemText imports =
+  case find isCompatible imports of
+    Just normalizedImport ->
+      case normalizedImport.normalizedImportList of
+        OpenImport ->
+          (imports, [])
+        ExplicitImport items ->
+          let updatedItems = appendUniqueImportItems items [ImportItem itemText Nothing]
+           in if updatedItems == items
+                then (imports, [])
+                else
+                  ( replaceImport normalizedImport normalizedImport {normalizedImportList = ExplicitImport updatedItems} imports,
+                    ["Auto-refact: extended existing import list for " <> show moduleName]
+                  )
+        HidingImport {} ->
+          (imports, [])
+    Nothing ->
+      (imports, [])
   where
     isCompatible normalizedImport =
       normalizedImport.normalizedImportModuleName == moduleName
@@ -247,7 +278,136 @@ appendUniqueImportItems existing additions =
   where
     appendItem acc item
       | any ((== item.importItemText) . importItemText) acc = acc
-      | otherwise = acc <> [item]
+      | otherwise =
+          case classifyImportItem item of
+            PlainImportItem ->
+              acc <> [item]
+            ParentImportItem parent newCoverage ->
+              mergeParentImportItem parent newCoverage item acc
+
+mergeParentImportItem :: Text -> ParentImportCoverage -> ImportItem -> [ImportItem] -> [ImportItem]
+mergeParentImportItem parent newCoverage newItem items =
+  let (sameParentItems, otherItems) =
+        partition
+          (\item -> itemParentMatches parent item)
+          items
+   in case foldl' mergeCoverage Nothing (mapMaybe parentImportCoverage sameParentItems) of
+        Just existingCoverage
+          | existingCoverage `coversCoverage` newCoverage ->
+              items
+          | otherwise ->
+              let mergedCoverage = mergeCoverages existingCoverage newCoverage
+               in otherItems <> [renderParentImportItem parent mergedCoverage newItem.importItemSpan]
+        Nothing ->
+          otherItems <> [newItem]
+
+data ClassifiedImportItem
+  = PlainImportItem
+  | ParentImportItem Text ParentImportCoverage
+
+data ParentImportCoverage
+  = ParentOnly
+  | ParentAllChildren
+  | ParentChildren (Set.Set Text)
+
+classifyImportItem :: ImportItem -> ClassifiedImportItem
+classifyImportItem item =
+  case parseParentImportItem item.importItemText of
+    Just classifiedItem -> classifiedItem
+    Nothing -> PlainImportItem
+
+parseParentImportItem :: Text -> Maybe ClassifiedImportItem
+parseParentImportItem itemText
+  | T.isPrefixOf "pattern " itemText = Nothing
+  | T.isPrefixOf "(" itemText = Nothing
+  | otherwise =
+      case T.breakOn "(" itemText of
+        (parent, "")
+          | isParentImportName parent ->
+              Just (ParentImportItem parent ParentOnly)
+        (parent, suffix)
+          | isParentImportName parent,
+            Just membersText <- T.stripSuffix ")" (T.drop 1 suffix) ->
+              Just
+                ( ParentImportItem
+                    parent
+                    (parseParentMembers membersText)
+                )
+        _ ->
+          Nothing
+
+parseParentMembers :: Text -> ParentImportCoverage
+parseParentMembers membersText
+  | T.strip membersText == ".." =
+      ParentAllChildren
+  | otherwise =
+      ParentChildren (Set.fromList (map T.strip (T.splitOn "," membersText)))
+
+isParentImportName :: Text -> Bool
+isParentImportName parent =
+  case T.uncons (T.strip parent) of
+    Just (firstChar, _) -> firstChar >= 'A' && firstChar <= 'Z'
+    Nothing -> False
+
+itemParentMatches :: Text -> ImportItem -> Bool
+itemParentMatches parent item =
+  case parseParentImportItem item.importItemText of
+    Just (ParentImportItem itemParent _) -> itemParent == parent
+    _ -> False
+
+parentImportCoverage :: ImportItem -> Maybe ParentImportCoverage
+parentImportCoverage item =
+  case parseParentImportItem item.importItemText of
+    Just (ParentImportItem _ coverage) -> Just coverage
+    _ -> Nothing
+
+mergeCoverage :: Maybe ParentImportCoverage -> ParentImportCoverage -> Maybe ParentImportCoverage
+mergeCoverage Nothing coverage =
+  Just coverage
+mergeCoverage (Just left) right =
+  Just (mergeCoverages left right)
+
+mergeCoverages :: ParentImportCoverage -> ParentImportCoverage -> ParentImportCoverage
+mergeCoverages left right =
+  case (left, right) of
+    (ParentAllChildren, _) ->
+      ParentAllChildren
+    (_, ParentAllChildren) ->
+      ParentAllChildren
+    (ParentOnly, coverage) ->
+      coverage
+    (coverage, ParentOnly) ->
+      coverage
+    (ParentChildren leftChildren, ParentChildren rightChildren) ->
+      ParentChildren (leftChildren `Set.union` rightChildren)
+
+coversCoverage :: ParentImportCoverage -> ParentImportCoverage -> Bool
+coversCoverage left right =
+  case (left, right) of
+    (ParentAllChildren, _) ->
+      True
+    (ParentChildren _, ParentOnly) ->
+      True
+    (ParentChildren leftChildren, ParentChildren rightChildren) ->
+      rightChildren `Set.isSubsetOf` leftChildren
+    (ParentOnly, ParentOnly) ->
+      True
+    _ ->
+      False
+
+renderParentImportItem :: Text -> ParentImportCoverage -> Maybe Span -> ImportItem
+renderParentImportItem parent coverage importItemSpan =
+  ImportItem
+    { importItemText =
+        case coverage of
+          ParentOnly ->
+            parent
+          ParentAllChildren ->
+            parent <> "(..)"
+          ParentChildren children ->
+            parent <> "(" <> T.intercalate ", " (Set.toAscList children) <> ")",
+      importItemSpan
+    }
 
 isHidingImport :: NormalizedImport -> Bool
 isHidingImport normalizedImport =

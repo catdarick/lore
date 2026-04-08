@@ -1,5 +1,6 @@
 module Lore.Targets
-  ( LoadTargetsOptions (..),
+  ( LoadTargetsResult (..),
+    LoadTargetsOptions (..),
     defaultLoadTargetsOptions,
     loadTargets,
     retainUnresolvedRollback,
@@ -8,6 +9,7 @@ where
 
 import Lore.Internal.Targets
   ( LoadTargetsOptions (..),
+    LoadTargetsResult (..),
     defaultLoadTargetsOptions,
     loadTargets,
     retainUnresolvedRollback,
