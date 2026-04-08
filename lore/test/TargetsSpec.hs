@@ -970,5 +970,6 @@ diagnosticIn filePath =
               spanEndLine = 1,
               spanEndCol = 1
             },
-      diagnosticMessage = T.pack "test"
+      diagnosticMessage = T.pack "test",
+      diagnosticHints = []
     }

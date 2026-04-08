@@ -64,12 +64,13 @@ renderLoadTargetsResult loadResult@LoadTargetsResult {loadTargetsDiagnostics}
         <> show loadResult.loadTargetsModulesTotal
 
 renderDiagnosticBlock :: Int -> Diagnostic -> [String]
-renderDiagnosticBlock index Diagnostic {diagnosticClass, diagnosticSeverity, diagnosticReason, diagnosticCode, diagnosticSpan, diagnosticMessage} =
+renderDiagnosticBlock index Diagnostic {diagnosticClass, diagnosticSeverity, diagnosticReason, diagnosticCode, diagnosticSpan, diagnosticMessage, diagnosticHints} =
   [ show index <> ". " <> locationLine,
     "   " <> headline,
     "   " <> codeLine
   ]
     <> map ("   " <>) (messageLines diagnosticMessage)
+    <> hintLines diagnosticHints
   where
     locationLine = renderDiagnosticSpan diagnosticSpan
     headline =
@@ -86,6 +87,11 @@ messageLines rawMessage =
   case filter (not . null) (map T.unpack (T.lines rawMessage)) of
     [] -> ["message: <empty>"]
     firstLine : otherLines -> ("message: " <> firstLine) : otherLines
+
+hintLines :: [Text] -> [String]
+hintLines [] = []
+hintLines hints =
+  "   hints:" : map (("     - " <>) . T.unpack) hints
 
 renderDiagnosticSpan :: DiagnosticSpan -> String
 renderDiagnosticSpan = \case

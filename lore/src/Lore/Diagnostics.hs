@@ -30,7 +30,8 @@ data Diagnostic = Diagnostic
     diagnosticReason :: Maybe Text,
     diagnosticCode :: Maybe DiagnosticCodeInfo,
     diagnosticSpan :: DiagnosticSpan,
-    diagnosticMessage :: Text
+    diagnosticMessage :: Text,
+    diagnosticHints :: [Text]
   }
   deriving (Eq, Show)
 
@@ -71,7 +72,8 @@ ghcMessageToDiagnostic msgClass srcSpan sdoc =
       diagnosticReason = toReasonText msgClass,
       diagnosticCode = toCodeInfo msgClass,
       diagnosticSpan = toDiagnosticSpan srcSpan,
-      diagnosticMessage = T.pack (GHC.showSDocUnsafe sdoc)
+      diagnosticMessage = T.pack (GHC.showSDocUnsafe sdoc),
+      diagnosticHints = []
     }
 
 driverMessagesToDiagnostics :: GHC.Driver.DriverMessages -> [Diagnostic]
@@ -89,7 +91,8 @@ driverMessageEnvelopeToDiagnostic env =
           diagnosticReason = Just (reasonToText (GHC.diagnosticReason msg)),
           diagnosticCode = fmap fromDiagnosticCode (GHC.diagnosticCode msg),
           diagnosticSpan = toDiagnosticSpan (GHC.errMsgSpan env),
-          diagnosticMessage = renderDecorated (GHC.diagnosticMessage (GHC.defaultDiagnosticOpts @GHC.Driver.DriverMessage) msg)
+          diagnosticMessage = renderDecorated (GHC.diagnosticMessage (GHC.defaultDiagnosticOpts @GHC.Driver.DriverMessage) msg),
+          diagnosticHints = map renderHint (GHC.diagnosticHints msg)
         }
 
 toDiagnosticClass :: MessageClass -> DiagnosticClass
@@ -153,6 +156,12 @@ renderDecorated =
     . GHC.showSDocUnsafe
     . GHC.vcat
     . GHC.unDecorated
+
+renderHint :: GHC.GhcHint -> Text
+renderHint =
+  T.pack
+    . GHC.showSDocUnsafe
+    . GHC.ppr
 
 withDiagnosticsCapturing :: (GHC.GhcMonad m) => m b -> m ([Diagnostic], b)
 withDiagnosticsCapturing action = do
