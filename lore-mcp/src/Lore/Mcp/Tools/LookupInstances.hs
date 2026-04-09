@@ -34,8 +34,8 @@ import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
 newtype LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs
   { names ::
       Field fieldType [Text]
-        `WithMeta` '[ Description "The tool returns only instances associated with every queried name. Provide two or more symbol names.",
-                      ExampleList '["HasIndex", "Indexed"],
+        `WithMeta` '[ Description "The tool returns only instances associated with every queried name. Provide two or more symbol names. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
+                      ExampleList '["HasIndex", "Indexed", "Some.Module.someFunction"],
                       MinItems 2
                     ]
   }

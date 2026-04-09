@@ -39,9 +39,7 @@ import Lore.Monad (MonadLore)
 findSymbols :: (MonadLore m) => Text -> m [ExportedSymbol]
 findSymbols needle = do
   SymbolsMap symbolsMap <- getSymbolsMap
-  case Map.lookup needle symbolsMap of
-    Nothing -> pure []
-    Just names -> pure names
+  pure (findExportedSymbols needle symbolsMap)
 
 data SymbolInfo = SymbolInfo
   { symbolName :: GHC.Name,
@@ -99,14 +97,12 @@ lookupRootSymbolInfo = getSymbolInfo' True
 getSymbolInfo' :: (MonadLore m) => Bool -> Text -> m [SymbolInfo]
 getSymbolInfo' resolveRoot needle = do
   SymbolsMap symbolsMap <- getSymbolsMap
-  case Map.lookup needle symbolsMap of
-    Nothing -> pure []
-    Just names -> do
-      resolvedSymbols <-
-        if resolveRoot
-          then resolveRootExportedSymbols symbolsMap names
-          else pure names
-      catMaybes <$> forM resolvedSymbols (getExportedSymbolInfo resolveRoot)
+  let names = findExportedSymbols needle symbolsMap
+  resolvedSymbols <-
+    if resolveRoot
+      then resolveRootExportedSymbols symbolsMap names
+      else pure names
+  catMaybes <$> forM resolvedSymbols (getExportedSymbolInfo resolveRoot)
 
 getExportedSymbolInfo :: (MonadLore m) => Bool -> ExportedSymbol -> m (Maybe SymbolInfo)
 getExportedSymbolInfo resolveRoot es = do
@@ -232,10 +228,42 @@ resolveLookupInstancesQuery resolveRoot queryText = do
 findResolvedSymbolNames :: (MonadLore m) => Bool -> Text -> m [GHC.Name]
 findResolvedSymbolNames resolveRoot needle = do
   SymbolsMap symbolsMap <- getSymbolsMap
-  case Map.lookup needle symbolsMap of
-    Nothing -> pure []
+  let exportedSymbols = findExportedSymbols needle symbolsMap
+  deduplicateNames <$> mapM (resolveExportedSymbolName resolveRoot) exportedSymbols
+
+findExportedSymbols :: Text -> Map.Map Text [ExportedSymbol] -> [ExportedSymbol]
+findExportedSymbols queryText symbolsMap =
+  case Map.lookup occName symbolsMap of
+    Nothing ->
+      []
     Just exportedSymbols ->
-      deduplicateNames <$> mapM (resolveExportedSymbolName resolveRoot) exportedSymbols
+      filterExportedSymbolsByModuleHint moduleHint exportedSymbols
+  where
+    (moduleHint, occName) =
+      case reverse (T.splitOn "." queryText) of
+        parsedOccName : reversedModuleHintSegments
+          | not (T.null parsedOccName),
+            let moduleHintSegments = reverse reversedModuleHintSegments,
+            not (null moduleHintSegments),
+            all (not . T.null) moduleHintSegments ->
+              (Just (T.intercalate "." moduleHintSegments), parsedOccName)
+        _ ->
+          (Nothing, queryText)
+
+    filterExportedSymbolsByModuleHint Nothing exportedSymbols =
+      exportedSymbols
+    filterExportedSymbolsByModuleHint (Just hintedModule) exportedSymbols =
+      filter (exportedSymbolMatchesModuleHint hintedModule) exportedSymbols
+
+    exportedSymbolMatchesModuleHint hintedModule exportedSymbol =
+      symbolDefinedInModuleHint hintedModule exportedSymbol
+        || any (moduleMatchesHint hintedModule) exportedSymbol.exportedFrom
+
+    symbolDefinedInModuleHint hintedModule exportedSymbol =
+      maybe False (moduleMatchesHint hintedModule) (GHC.nameModule_maybe exportedSymbol.name)
+
+    moduleMatchesHint hintedModule module_ =
+      T.pack (GHC.moduleNameString (GHC.moduleName module_)) == hintedModule
 
 resolveExportedSymbolName :: (MonadLore m) => Bool -> ExportedSymbol -> m GHC.Name
 resolveExportedSymbolName resolveRoot exportedSymbol

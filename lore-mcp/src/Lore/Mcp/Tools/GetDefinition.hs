@@ -5,12 +5,14 @@ where
 
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
+import Data.Either (lefts)
 import Data.Function (on)
-import Data.List (nubBy)
+import Data.List (nubBy, sortOn)
 import Data.Maybe (fromMaybe)
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GHC
 import GHC.Generics (Generic)
 import Lore
   ( DefinitionSlice,
@@ -30,8 +32,8 @@ import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
 data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
   { symbols ::
       Field fieldType [Text]
-        `WithMeta` '[ Description "Exact symbol names to resolve and render definitions for. Queries are resolved to root declarations automatically, then merged before rendering.",
-                      ExampleList '["HasIndex", "mkIndexed"],
+        `WithMeta` '[ Description "Exact symbol names to resolve and render definitions for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
+                      ExampleList '["HasIndex", "mkIndexed", "Some.Module.someFunction"],
                       MinItems 1
                     ],
     recursionDepth ::
@@ -64,9 +66,13 @@ getDefinitionHandler GetDefinitionArgs {symbols, recursionDepth} = do
     Nothing ->
       pure "Targets have not been loaded yet. Run loadTargets first."
     Just loadResult -> do
-      symbolInfos <- lookupRootSymbolInfos symbols
-      renderedDefinitions <- renderSymbolDefinitions resolvedRecursionDepth symbolInfos
-      pure (renderDefinitionResult loadResult symbols renderedDefinitions)
+      resolution <- resolveRequestedSymbols symbols
+      case resolution of
+        Left (missingSymbols, ambiguousQueries) ->
+          pure (renderAmbiguityResult loadResult missingSymbols ambiguousQueries)
+        Right resolvedSymbols -> do
+          renderedDefinitions <- renderSymbolDefinitions resolvedRecursionDepth resolvedSymbols.resolvedSymbolInfos
+          pure (renderDefinitionResult loadResult symbols resolvedSymbols.missingQueries renderedDefinitions)
   where
     resolvedRecursionDepth =
       max 0 (fromMaybe defaultRecursionDepth recursionDepth)
@@ -74,10 +80,52 @@ getDefinitionHandler GetDefinitionArgs {symbols, recursionDepth} = do
 defaultRecursionDepth :: Int
 defaultRecursionDepth = 0
 
-lookupRootSymbolInfos :: (MonadLore m) => [Text] -> m [SymbolInfo]
-lookupRootSymbolInfos symbols = do
-  symbolInfos <- concat <$> mapM lookupRootSymbolInfo symbols
-  pure (nubBy ((==) `on` symbolName) symbolInfos)
+data AmbiguousQuery = AmbiguousQuery
+  { ambiguousQueryText :: Text,
+    ambiguousQueryMatches :: [SymbolInfo]
+  }
+
+data ResolvedSymbols = ResolvedSymbols
+  { missingQueries :: [Text],
+    resolvedSymbolInfos :: [SymbolInfo]
+  }
+
+data ResolvedQuery
+  = MissingQuery Text
+  | ResolvedQuery SymbolInfo
+
+resolveRequestedSymbols :: (MonadLore m) => [Text] -> m (Either ([Text], [AmbiguousQuery]) ResolvedSymbols)
+resolveRequestedSymbols symbols = do
+  resolvedQueries <- mapM resolveRequestedSymbol symbols
+  pure $
+    case lefts resolvedQueries of
+      [] ->
+        Right
+          ResolvedSymbols
+            { missingQueries = [queryText | Right (MissingQuery queryText) <- resolvedQueries],
+              resolvedSymbolInfos = nubBy ((==) `on` symbolName) [symbolInfo | Right (ResolvedQuery symbolInfo) <- resolvedQueries]
+            }
+      ambiguousQueries ->
+        Left
+          ( [queryText | Right (MissingQuery queryText) <- resolvedQueries],
+            ambiguousQueries
+          )
+
+resolveRequestedSymbol :: (MonadLore m) => Text -> m (Either AmbiguousQuery ResolvedQuery)
+resolveRequestedSymbol symbol = do
+  symbolInfos <- lookupRootSymbolInfo symbol
+  pure $
+    case symbolInfos of
+      [] ->
+        Right (MissingQuery symbol)
+      [symbolInfo] ->
+        Right (ResolvedQuery symbolInfo)
+      ambiguousMatches ->
+        Left
+          AmbiguousQuery
+            { ambiguousQueryText = symbol,
+              ambiguousQueryMatches = ambiguousMatches
+            }
 
 renderSymbolDefinitions :: (MonadLore m) => Int -> [SymbolInfo] -> m (Maybe Text)
 renderSymbolDefinitions recursionDepth symbolInfos = do
@@ -93,17 +141,111 @@ resolveSymbolDefinitions recursionDepth symbolInfo
   | otherwise =
       resolveDefinitionClosure recursionDepth symbolInfo.symbolName
 
-renderDefinitionResult :: LoadTargetsResult -> [Text] -> Maybe Text -> Text
-renderDefinitionResult loadResult symbols renderedDefinitions =
+renderDefinitionResult :: LoadTargetsResult -> [Text] -> [Text] -> Maybe Text -> Text
+renderDefinitionResult loadResult symbols missingSymbols renderedDefinitions =
   appendPartialLoadWarning loadResult "Definition results may be incomplete." renderedBody
   where
     renderedBody =
-      case renderedDefinitions of
-        Nothing ->
-          "No definitions found for " <> quoteTexts symbols <> "."
-        Just definitionText ->
-          definitionText
+      T.intercalate "\n\n" $
+        missingSymbolsSection missingSymbols
+          <> case renderedDefinitions of
+            Nothing ->
+              ["No definitions found for " <> quoteTexts symbols <> "."]
+            Just definitionText ->
+              [definitionText]
+
+renderAmbiguityResult :: LoadTargetsResult -> [Text] -> [AmbiguousQuery] -> Text
+renderAmbiguityResult loadResult missingSymbols ambiguousQueries =
+  appendPartialLoadWarning loadResult "Definition results may be incomplete." renderedBody
+  where
+    ambiguousCount = length ambiguousQueries
+    renderedBody =
+      T.intercalate "\n\n" $
+        missingSymbolsSection missingSymbols
+          <> [ T.intercalate "\n" $
+                 [ T.pack (show ambiguousCount)
+                     <> " requested name"
+                     <> pluralSuffix ambiguousCount
+                     <> " "
+                     <> ambiguousVerb ambiguousCount
+                     <> " ambiguous. More qualification is required:"
+                 ]
+                   <> concatMap renderAmbiguousQuery (zip [1 :: Int ..] ambiguousQueries)
+                   <> ["", "Run the tool again with a qualified symbol name, for example: " <> renderExampleQualification ambiguousQueries]
+             ]
+
+renderAmbiguousQuery :: (Int, AmbiguousQuery) -> [Text]
+renderAmbiguousQuery (index, ambiguousQuery) =
+  ["  " <> T.pack (show index) <> ". " <> ambiguousQuery.ambiguousQueryText <> " is defined in:"]
+    <> map (("       - " <>) . renderModuleName) (ambiguousDefinitionModules ambiguousQuery.ambiguousQueryMatches)
+
+ambiguousDefinitionModules :: [SymbolInfo] -> [GHC.Module]
+ambiguousDefinitionModules =
+  map head
+    . groupModules
+    . sortOn renderModuleName
+    . map definedIn
+  where
+    groupModules [] = []
+    groupModules (module_ : modules) =
+      let (matchingModules, rest) = span ((== renderModuleName module_) . renderModuleName) modules
+       in (module_ : matchingModules) : groupModules rest
+
+renderModuleName :: GHC.Module -> Text
+renderModuleName =
+  T.pack . GHC.moduleNameString . GHC.moduleName
+
+renderExampleQualification :: [AmbiguousQuery] -> Text
+renderExampleQualification ambiguousQueries =
+  case ambiguousQueries of
+    ambiguousQuery : _ ->
+      case ambiguousDefinitionModules ambiguousQuery.ambiguousQueryMatches of
+        module_ : _ ->
+          renderModuleName module_ <> "." <> queryOccName ambiguousQuery.ambiguousQueryText
+        [] ->
+          ambiguousQuery.ambiguousQueryText
+    [] ->
+      "<module>.<symbol>"
+
+queryOccName :: Text -> Text
+queryOccName queryText =
+  case reverse (T.splitOn "." queryText) of
+    occName : _ | not (T.null occName) -> occName
+    _ -> queryText
+
+pluralSuffix :: Int -> Text
+pluralSuffix count
+  | count == 1 = ""
+  | otherwise = "s"
+
+ambiguousVerb :: Int -> Text
+ambiguousVerb count
+  | count == 1 = "is"
+  | otherwise = "are"
+
+missingSymbolsSection :: [Text] -> [Text]
+missingSymbolsSection [] = []
+missingSymbolsSection missingSymbols =
+  [ T.intercalate "\n" $
+      [ T.pack (show (length missingSymbols))
+          <> " requested name"
+          <> pluralSuffix (length missingSymbols)
+          <> " "
+          <> missingVerb (length missingSymbols)
+          <> " not found:"
+      ]
+        <> map (("  - " <>) . quoteText) missingSymbols
+  ]
+
+missingVerb :: Int -> Text
+missingVerb count
+  | count == 1 = "was"
+  | otherwise = "were"
 
 quoteTexts :: [Text] -> Text
 quoteTexts values =
   "[" <> T.intercalate ", " (map (\value -> "\"" <> value <> "\"") values) <> "]"
+
+quoteText :: Text -> Text
+quoteText value =
+  "\"" <> value <> "\""

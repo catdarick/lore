@@ -7,14 +7,17 @@ import Data.List (isInfixOf)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC
+import qualified GHC.Plugins as Plugins
 import qualified GHC.Utils.Outputable as Outputable
 import Lore
-  ( LookupInstancesQuery (..),
+  ( ExportedSymbol (..),
+    LookupInstancesQuery (..),
     LookupInstancesResult (..),
     MatchingInstance (..),
     SymbolCategory (..),
     SymbolInfo (..),
     defaultLoadTargetsOptions,
+    findSymbols,
     loadTargets,
     lookupIntersectingInstances,
     lookupIntersectingRootInstances,
@@ -70,6 +73,37 @@ spec =
         demoCategories elemInfo `shouldBe` [SymbolTypeFamily]
         demoCategories bucketInfo `shouldBe` [SymbolDataFamily]
 
+      it "filters symbol matches by definition module hint" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            lookupRootSymbolInfo "Demo.Support.supportSeed"
+
+        length result `shouldBe` 1
+        fmap (GHC.moduleNameString . GHC.moduleName . definedIn) result
+          `shouldBe` ["Demo.Support"]
+
+      it "filters symbol matches by export module hint" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            lookupRootSymbolInfo "Prelude.map"
+
+        result `shouldSatisfy` (not . null)
+        result
+          `shouldSatisfy` all (\symbolInfo -> elem "Prelude" (map (GHC.moduleNameString . GHC.moduleName) symbolInfo.exportedFrom))
+
+    describe "findSymbols" do
+      it "supports module-qualified hints before filtering candidates" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            findSymbols "Demo.Support.supportSeed"
+
+        length result `shouldBe` 1
+        fmap (\exportedSymbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe exportedSymbol.name)) result
+          `shouldBe` ["Demo.Support"]
+
     describe "lookupIntersectingInstances" do
       it "intersects class instances across multiple symbol queries" do
         withFixtureInstances \fixtureRoot -> do
@@ -87,6 +121,16 @@ spec =
             fixtureLoreAt fixtureRoot do
               _ <- loadTargets defaultLoadTargetsOptions
               lookupIntersectingRootInstances ["indexedValues", "HasIndex"]
+
+          lookupInstancesQueryMatchCounts result `shouldSatisfy` all (> 0)
+          renderMatchingInstances result `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
+
+      it "supports module-qualified symbol queries" do
+        withFixtureInstances \fixtureRoot -> do
+          result <-
+            fixtureLoreAt fixtureRoot do
+              _ <- loadTargets defaultLoadTargetsOptions
+              lookupIntersectingRootInstances ["Demo.Indexed", "HasIndex"]
 
           lookupInstancesQueryMatchCounts result `shouldSatisfy` all (> 0)
           renderMatchingInstances result `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"

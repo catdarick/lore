@@ -30,8 +30,9 @@ import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
 newtype LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
   { symbol ::
       Field fieldType Text
-        `WithMeta` '[ Description "Exact symbol name to look up in the loaded project symbol table.",
-                      Example "lookupOrZero"
+        `WithMeta` '[ Description "Exact symbol name to look up in the loaded project symbol table. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
+                      Example "lookupOrZero",
+                      Example "Some.Module.someFunction"
                     ]
   }
   deriving stock (Generic)
