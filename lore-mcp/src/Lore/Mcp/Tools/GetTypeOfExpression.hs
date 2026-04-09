@@ -58,10 +58,10 @@ getTypeOfExpressionHandler GetTypeOfExpressionArgs {expression} = do
   contextReady <- interpreterContextIsReady
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run loadTargets first."
+      pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult
       | not contextReady ->
-          pure "Interpreter context is not ready. Run loadTargets again."
+          pure "Interpreter context is not ready. Run reloadHomeModules again."
       | otherwise -> do
           typeResult <-
             catches

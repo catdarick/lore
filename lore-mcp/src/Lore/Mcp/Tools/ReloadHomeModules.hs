@@ -1,4 +1,4 @@
-module Lore.Mcp.Tools.LoadTargets where
+module Lore.Mcp.Tools.ReloadHomeModules where
 
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
@@ -21,22 +21,22 @@ import Lore
   )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithoutArgs (..))
 
-loadTargetsTool :: (MonadLore m) => SomeTool m
-loadTargetsTool =
+reloadHomeModulesTool :: (MonadLore m) => SomeTool m
+reloadHomeModulesTool =
   SomeToolWithoutArgs
     ToolWithoutArgs
-      { name = "loadTargets",
-        description = Just "Load the targets of the current project, checking for errors and performing safe auto-fixes if possible.",
-        handler = loadTargetsHandler
+      { name = "reloadHomeModules",
+        description = Just "Reloads all the home modules checking for errors and applying auto-fixes when possible. Run this command before using other tools that require up-to-date module information.",
+        handler = reloadHomeModulesHandler
       }
 
-loadTargetsHandler :: (MonadLore m) => m Text
-loadTargetsHandler = do
+reloadHomeModulesHandler :: (MonadLore m) => m Text
+reloadHomeModulesHandler = do
   loadResult <- loadTargets LoadTargetsOptions {enableAutoRefactor = True}
-  renderLoadTargetsResult loadResult
+  renderReloadHomeModulesResult loadResult
 
-renderLoadTargetsResult :: (MonadLore m) => LoadTargetsResult -> m Text
-renderLoadTargetsResult loadResult@LoadTargetsResult {loadTargetsDiagnostics}
+renderReloadHomeModulesResult :: (MonadLore m) => LoadTargetsResult -> m Text
+renderReloadHomeModulesResult loadResult@LoadTargetsResult {loadTargetsDiagnostics}
   | null loadTargetsDiagnostics =
       pure $
         T.pack $

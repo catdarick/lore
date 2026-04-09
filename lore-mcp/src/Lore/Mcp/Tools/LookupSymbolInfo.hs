@@ -55,7 +55,7 @@ lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol} = do
   maybeLoadResult <- getLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run loadTargets first."
+      pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
       symbolInfos <- lookupRootSymbolInfo symbol
       pure (renderLookupResult loadResult symbol symbolInfos)

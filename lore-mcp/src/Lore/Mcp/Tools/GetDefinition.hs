@@ -64,7 +64,7 @@ getDefinitionHandler GetDefinitionArgs {symbols, recursionDepth} = do
   maybeLoadResult <- getLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run loadTargets first."
+      pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
       resolution <- resolveRequestedSymbols symbols
       case resolution of

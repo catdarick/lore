@@ -33,9 +33,9 @@ executable lore-mcp
       Lore.Mcp.Tools.ExecuteStatement
       Lore.Mcp.Tools.GetDefinition
       Lore.Mcp.Tools.GetTypeOfExpression
-      Lore.Mcp.Tools.LoadTargets
       Lore.Mcp.Tools.LookupInstances
       Lore.Mcp.Tools.LookupSymbolInfo
+      Lore.Mcp.Tools.ReloadHomeModules
       Lore.Mcp.Tools.Shared
       Paths_lore_mcp
   autogen-modules:
@@ -94,5 +94,6 @@ executable lore-mcp
     , lore
     , openapi3
     , text
+    , unliftio
     , vector
   default-language: Haskell2010

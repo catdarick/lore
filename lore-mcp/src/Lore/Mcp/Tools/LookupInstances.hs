@@ -59,7 +59,7 @@ lookupInstancesHandler LookupInstancesArgs {names} = do
   maybeLoadResult <- getLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run loadTargets first."
+      pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
       lookupResult <- lookupIntersectingRootInstances names
       pure (renderLookupInstancesResult loadResult lookupResult)
