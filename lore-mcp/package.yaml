@@ -22,6 +22,7 @@ dependencies:
 - openapi3
 - lens
 - vector 
+- unliftio
 
 ghc-options:
 - -Werror

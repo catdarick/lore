@@ -34,8 +34,8 @@ import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
 newtype LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs
   { names ::
       Field fieldType [Text]
-        `WithMeta` '[ Description "The tool returns only instances associated with every queried name. Provide two or more symbol names. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
-                      ExampleList '["HasIndex", "Indexed", "Some.Module.someFunction"],
+        `WithMeta` '[ Description "Provide two or more symbol names. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
+                      ExampleList '["Show", "Int", "Some.Module.someFunction"],
                       MinItems 2
                     ]
   }
@@ -50,7 +50,7 @@ lookupInstancesTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "lookupInstances",
-        description = Just "Find class or family instances common to two or more queried symbols in the loaded project. Queries are resolved to root declarations automatically.",
+        description = Just "Find class or family instance declarations whose instance head mentions all queried symbols. Example: [\"Show\", \"Int\"] matches `instance Show Int`; [\"Int\", \"String\"] matches only instances where both types appear together. Queries are resolved to root declarations automatically.",
         handler = lookupInstancesHandler
       }
 
@@ -96,10 +96,10 @@ renderInstancesSection :: [MatchingInstance] -> Text
 renderInstancesSection instances_ =
   case instances_ of
     [] ->
-      "Common instances:\n- <none>"
+      "Matching instances (instance head mentions all queried symbols):\n- <none>"
     _ ->
       T.intercalate "\n" $
-        "Common instances:"
+        "Matching instances (instance head mentions all queried symbols):"
           : map (("- " <>) . renderMatchingInstance) instances_
 
 renderMatchingInstance :: MatchingInstance -> Text

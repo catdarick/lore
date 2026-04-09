@@ -4,9 +4,11 @@ module Lore.Mcp.Protocol.Server
   )
 where
 
+import Control.Exception (SomeException)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Aeson (Value, object, (.=))
 import qualified Data.Aeson as J
+import Data.Bifunctor (first)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Text (Text)
@@ -20,6 +22,7 @@ import Lore.JsonRpc.Server
   )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..), getSomeToolSpec, getToolName)
 import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Notification (..), McpRequest'Tools (..), parseMcpRequest)
+import UnliftIO (MonadUnliftIO, try)
 
 newtype McpServerState = McpServerState
   { mcpServerInitialized :: IORef Bool
@@ -36,12 +39,12 @@ data McpServer m = McpServer
     tools :: [SomeTool m]
   }
 
-runMcpServer :: (MonadIO m) => McpServer m -> m ()
+runMcpServer :: (MonadUnliftIO m) => McpServer m -> m ()
 runMcpServer mcpServer = do
   state <- liftIO initialMcpServerState
   runJsonRpcLoop (handleJsonRpcRequest state mcpServer)
 
-handleJsonRpcRequest :: (MonadIO m) => McpServerState -> McpServer m -> JsonRpcRequest -> m JsonRpcHandlerResult
+handleJsonRpcRequest :: (MonadUnliftIO m) => McpServerState -> McpServer m -> JsonRpcRequest -> m JsonRpcHandlerResult
 handleJsonRpcRequest state server jsonRpcRequest = case parseMcpRequest jsonRpcRequest of
   Left err ->
     pure
@@ -53,7 +56,7 @@ handleJsonRpcRequest state server jsonRpcRequest = case parseMcpRequest jsonRpcR
     response <- handleMcpRequest state server mcpRequest
     pure $ JsonRpcHandlerResult {jsonRpcHandlerResponse = response, jsonRpcShouldExit = False}
 
-handleMcpRequest :: (MonadIO m) => McpServerState -> McpServer m -> McpRequest -> m JsonRpcResponse
+handleMcpRequest :: (MonadUnliftIO m) => McpServerState -> McpServer m -> McpRequest -> m JsonRpcResponse
 handleMcpRequest state server mcpRequest = case mcpRequest of
   Initialize -> do
     server.initialize
@@ -74,12 +77,12 @@ handleMcpRequest state server mcpRequest = case mcpRequest of
           case J.fromJSON <$> args of
             Nothing -> pure $ Left "missing arguments"
             Just (J.Error e) -> pure $ Left ("invalid arguments: " <> T.pack e)
-            Just (J.Success parsedArgs) -> Right <$> tool.handler parsedArgs
+            Just (J.Success parsedArgs) -> first (T.pack . show) <$> try @_ @SomeException (tool.handler parsedArgs)
         SomeToolWithoutArgs tool -> do
-          Right <$> tool.handler
+          first (T.pack . show) <$> try @_ @SomeException tool.handler
       case eiOutput of
         Left err -> pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32602, jsonRpcErrorMessage = err}
-        Right output -> pure $ JsonRpcResult (J.object ["output" .= output])
+        Right output -> pure $ JsonRpcResult (toolCallResult output)
   OtherRequest method ->
     pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32601, jsonRpcErrorMessage = "method not found: " <> method}
   where
@@ -107,4 +110,16 @@ initializeResult serverName =
         .= object
           [ "tools" .= object []
           ]
+    ]
+
+toolCallResult :: Text -> Value
+toolCallResult output =
+  object
+    [ "content"
+        .= [ object
+               [ "type" .= ("text" :: Text),
+                 "text" .= output
+               ]
+           ],
+      "isError" .= False
     ]

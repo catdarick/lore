@@ -16,7 +16,7 @@ runLoreMcpServer :: IO ()
 runLoreMcpServer = runLore sessionConfig do
   runMcpServer
     McpServer
-      { name = "lore-mcp",
+      { name = "lore",
         initialize = pure (),
         tools = [loadTargetsTool, executeStatementTool, getTypeOfExpressionTool, lookupSymbolInfoTool, lookupInstancesTool, getDefinitionTool]
       }

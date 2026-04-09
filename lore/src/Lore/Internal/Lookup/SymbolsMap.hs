@@ -4,7 +4,6 @@ module Lore.Internal.Lookup.SymbolsMap
   )
 where
 
-import Control.Exception (Exception (toException), SomeException)
 import Control.Monad (forM)
 import Control.Monad.Reader (asks)
 import qualified Data.Map as Map
@@ -17,7 +16,7 @@ import Lore.Internal.Lookup.Types (ExportedSymbol (..), ModSummaries (..), Symbo
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
-import UnliftIO (modifyMVar)
+import UnliftIO (SomeException, evaluate, modifyMVar, tryAny)
 
 getSymbolsMap :: (MonadLore m) => m SymbolsMap
 getSymbolsMap = do
@@ -39,15 +38,14 @@ prepareSymbolsMap = do
   externalModules <- enumerateVisiblePackageModules
   let modules = homeModules <> externalModules
   namedSymbols <- forM modules \m -> do
-    safeGetModuleInfo m >>= \case
-      Left err -> do
+    safeGetModuleExports m >>= \case
+      ModuleExportsFailed err -> do
         Log.err $ "Failed to get module info for " <> show m.moduleName <> ": " <> show err
         pure []
-      Right Nothing -> do
+      ModuleExportsMissing -> do
         Log.warn $ "Module info not found for " <> show m.moduleName
         pure []
-      Right (Just modInfo) -> do
-        let names = GHC.modInfoExports modInfo
+      ModuleExportsLoaded names -> do
         pure [(T.pack (GHC.getOccString n), n, m) | n <- names]
   let grouped = buildGroupedMap (concat namedSymbols)
   pure $ SymbolsMap $ fmap toExportedSymbols grouped
@@ -83,11 +81,27 @@ enumerateVisiblePackageModules = do
         ]
   pure mods
 
-safeGetModuleInfo ::
+data ModuleExportsResult
+  = ModuleExportsLoaded [GHC.Name]
+  | ModuleExportsMissing
+  | ModuleExportsFailed SomeException
+
+safeGetModuleExports ::
   (MonadLore m) =>
   GHC.Module ->
-  m (Either SomeException (Maybe GHC.ModuleInfo))
-safeGetModuleInfo mdl =
-  GHC.handleSourceError
-    (pure . Left . toException)
-    (Right <$> GHC.getModuleInfo mdl)
+  m ModuleExportsResult
+safeGetModuleExports mdl = do
+  tryAny
+    ( do
+        maybeInfo <- GHC.getModuleInfo mdl
+        case maybeInfo of
+          Nothing ->
+            pure ModuleExportsMissing
+          Just modInfo -> do
+            let exportedNames = GHC.modInfoExports modInfo
+            _ <- evaluate (length exportedNames)
+            pure (ModuleExportsLoaded exportedNames)
+    )
+    >>= \case
+      Left err -> pure (ModuleExportsFailed err)
+      Right result -> pure result
