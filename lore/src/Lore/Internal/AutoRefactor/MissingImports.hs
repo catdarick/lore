@@ -11,8 +11,6 @@ import Control.Monad.Reader (asks)
 import Data.List (nubBy, sortBy)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe, maybeToList)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -33,12 +31,13 @@ import Lore.Internal.AutoRefactor.MissingImports.Diagnostic
     MissingSymbolKind (..),
     ResolveMissingImportDetails (..),
   )
-import Lore.Internal.Lookup.Types (ExportedSymbol (..))
+import Lore.Internal.Lookup.SymbolsMap (lookupSymbolsInMap)
+import Lore.Internal.Lookup.Types (ExportedSymbol (..), SymbolsMap)
 import Lore.Internal.Session (SessionContext (customPrelude))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 
-suggestMissingImportOperations :: (MonadLore m) => [ParsedImport] -> Map Text [ExportedSymbol] -> NonEmpty MissingImportRequest -> m [ImportOperation]
+suggestMissingImportOperations :: (MonadLore m) => [ParsedImport] -> SymbolsMap -> NonEmpty MissingImportRequest -> m [ImportOperation]
 suggestMissingImportOperations parsedImports symbolsMap requests = do
   maybeCustomPrelude <- asks customPrelude
   concat <$> mapM (suggestForRequest maybeCustomPrelude) (NE.toList requests)
@@ -48,7 +47,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
         ResolveMissingImport ResolveMissingImportDetails {requestPreferredModules, requestSuggestedImportTargets} -> do
           let matchingExportedSymbols =
                 filter (matchesMissingKind requestMissingSymbol) $
-                  Map.findWithDefault [] requestMissingSymbol.missingName symbolsMap
+                  lookupSymbolsInMap requestMissingSymbol.missingName symbolsMap
               selectionDecision =
                 decideModuleSelection
                   requestMissingSymbol
@@ -75,7 +74,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
         ExtendExistingImport ExtendExistingImportDetails {requestTargetModule, requestImportItemOverride} ->
           let matchingExportedSymbols =
                 filter (matchesMissingKind requestMissingSymbol) $
-                  Map.findWithDefault [] requestMissingSymbol.missingName symbolsMap
+                  lookupSymbolsInMap requestMissingSymbol.missingName symbolsMap
               selectedTargetModule =
                 fromMaybe
                   requestTargetModule

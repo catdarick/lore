@@ -36,7 +36,7 @@ import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..)
 import Lore.Internal.Interpreter (invalidateInterpreterContext, refreshInterpreterContext)
 import Lore.Internal.Lookup.ModSummaries (getModSummaries, invalidateModSummaries)
 import Lore.Internal.Lookup.NameToInstances (invalidateNameToInstancesIndex)
-import Lore.Internal.Lookup.SymbolsMap (invalidateSymbolsMapCache)
+import Lore.Internal.Lookup.SymbolsMap (invalidateHomeSymbolsMapCache, setSymbolsMapDependencies)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Package (ComponentData (..), PackageData (..), defaultExtensions, extractDependencies, extractSourceDirs, prepareComponentsData)
 import Lore.Internal.Session (SessionContext (..))
@@ -119,7 +119,8 @@ loadTargets options = do
   Log.debug $ "Common extensions: " <> show (Set.toList $ commonExtensions targetsPlan)
   Log.debug $ "Dependencies to add: " <> show (Set.toList dependenciesToAdd)
   invalidateInterpreterContext
-  invalidateSymbolsMapCache
+  setSymbolsMapDependencies dependenciesToAdd
+  invalidateHomeSymbolsMapCache
   invalidateModSummaries
   invalidateNameToInstancesIndex
   modifySessionDynFlagsM
@@ -204,7 +205,7 @@ loadTargets' options targetsPlan =
                   if autoRefactorApplied
                     then do
                       Log.info "Auto-refact applied import fixes. Retrying target load."
-                      invalidateSymbolsMapCache
+                      invalidateHomeSymbolsMapCache
                       invalidateModSummaries
                       invalidateNameToInstancesIndex
                       go (attemptNo + 1) (Map.union unresolvedRollback autoRefactorOriginalContents) committedAutoRefactFiles'
@@ -236,7 +237,7 @@ rollbackUnresolvedAutoRefact targetsPlan rollbackState failedAttempt
   | otherwise = do
       Log.info "Auto-refact: rolling back unresolved edits."
       rollbackAutoRefactorEdits rollbackState
-      invalidateSymbolsMapCache
+      invalidateHomeSymbolsMapCache
       invalidateModSummaries
       invalidateNameToInstancesIndex
       loadTargetsOnce targetsPlan

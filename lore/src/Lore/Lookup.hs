@@ -20,8 +20,7 @@ where
 
 import Control.Monad (forM)
 import Data.Containers.ListUtils (nubOrdOn)
-import Data.List (find, foldl', intercalate, sortOn)
-import qualified Data.Map.Strict as Map
+import Data.List (foldl', intercalate, sortOn)
 import Data.Maybe (catMaybes, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -31,14 +30,14 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
 import Lore.Definition (DefinitionSlice, resolveDefinitionSlice)
 import Lore.Internal.Lookup.NameToInstances (getNameToInstancesIndex)
-import Lore.Internal.Lookup.SymbolsMap (getSymbolsMap)
-import Lore.Internal.Lookup.Types (ExportedSymbol (..), NameToInstancesIndex (..), SymbolsMap (..))
+import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
+import Lore.Internal.Lookup.Types (ExportedSymbol (..), NameToInstancesIndex (..), SymbolsMap)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 
 findSymbols :: (MonadLore m) => Text -> m [ExportedSymbol]
 findSymbols needle = do
-  SymbolsMap symbolsMap <- getSymbolsMap
+  symbolsMap <- SymbolsMap.getSymbolsMap
   pure (findExportedSymbols needle symbolsMap)
 
 data SymbolInfo = SymbolInfo
@@ -96,7 +95,7 @@ lookupRootSymbolInfo = getSymbolInfo' True
 
 getSymbolInfo' :: (MonadLore m) => Bool -> Text -> m [SymbolInfo]
 getSymbolInfo' resolveRoot needle = do
-  SymbolsMap symbolsMap <- getSymbolsMap
+  symbolsMap <- SymbolsMap.getSymbolsMap
   let names = findExportedSymbols needle symbolsMap
   resolvedSymbols <-
     if resolveRoot
@@ -158,26 +157,20 @@ classifySymbolCategory = \case
         | GHC.isDataTyCon tyCon -> SymbolData
         | otherwise -> SymbolUnknown
 
-resolveRootExportedSymbols :: (MonadLore m) => Map.Map Text [ExportedSymbol] -> [ExportedSymbol] -> m [ExportedSymbol]
+resolveRootExportedSymbols :: (MonadLore m) => SymbolsMap -> [ExportedSymbol] -> m [ExportedSymbol]
 resolveRootExportedSymbols symbolsMap exportedSymbols = do
   Log.debug $ "Resolving root symbols for " <> show (length exportedSymbols) <> " exported symbols."
   r <- deduplicateExportedSymbols <$> mapM (resolveRootExportedSymbol symbolsMap) exportedSymbols
   Log.debug "Finished resolving root symbols."
   pure r
 
-resolveRootExportedSymbol :: (MonadLore m) => Map.Map Text [ExportedSymbol] -> ExportedSymbol -> m ExportedSymbol
+resolveRootExportedSymbol :: (MonadLore m) => SymbolsMap -> ExportedSymbol -> m ExportedSymbol
 resolveRootExportedSymbol symbolsMap exportedSymbol = do
   rootName <- resolveRootName exportedSymbol.name
   pure $
-    case lookupExportedSymbolByName symbolsMap rootName of
+    case SymbolsMap.lookupExportedSymbolByNameInMap rootName symbolsMap of
       Just rootExportedSymbol -> rootExportedSymbol
       Nothing -> exportedSymbol
-
-lookupExportedSymbolByName :: Map.Map Text [ExportedSymbol] -> GHC.Name -> Maybe ExportedSymbol
-lookupExportedSymbolByName symbolsMap name = do
-  let occName = T.pack (GHC.getOccString name)
-  candidates <- Map.lookup occName symbolsMap
-  find (\candidate -> candidate.name == name) candidates
 
 deduplicateExportedSymbols :: [ExportedSymbol] -> [ExportedSymbol]
 deduplicateExportedSymbols =
@@ -233,17 +226,14 @@ resolveLookupInstancesQuery resolveRoot queryText = do
 
 findResolvedSymbolNames :: (MonadLore m) => Bool -> Text -> m [GHC.Name]
 findResolvedSymbolNames resolveRoot needle = do
-  SymbolsMap symbolsMap <- getSymbolsMap
+  symbolsMap <- SymbolsMap.getSymbolsMap
   let exportedSymbols = findExportedSymbols needle symbolsMap
   deduplicateNames <$> mapM (resolveExportedSymbolName resolveRoot) exportedSymbols
 
-findExportedSymbols :: Text -> Map.Map Text [ExportedSymbol] -> [ExportedSymbol]
+findExportedSymbols :: Text -> SymbolsMap -> [ExportedSymbol]
 findExportedSymbols queryText symbolsMap =
-  case Map.lookup occName symbolsMap of
-    Nothing ->
-      []
-    Just exportedSymbols ->
-      filterExportedSymbolsByModuleHint moduleHint exportedSymbols
+  filterExportedSymbolsByModuleHint moduleHint $
+    SymbolsMap.lookupSymbolsInMap occName symbolsMap
   where
     (moduleHint, occName) =
       case reverse (T.splitOn "." queryText) of

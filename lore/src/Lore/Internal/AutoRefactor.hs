@@ -23,7 +23,7 @@ import Lore.Internal.AutoRefactor.Issue (AutoRefactorIssue (..), AutoRefactorPay
 import Lore.Internal.AutoRefactor.MissingImports (suggestMissingImportOperations)
 import Lore.Internal.AutoRefactor.RedundantImports (suggestRedundantImportOperations)
 import Lore.Internal.Lookup.SymbolsMap (getSymbolsMap)
-import Lore.Internal.Lookup.Types (ExportedSymbol, SymbolsMap (..))
+import Lore.Internal.Lookup.Types (SymbolsMap)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import System.FilePath (normalise)
@@ -35,7 +35,7 @@ data AutoRefactorResult = AutoRefactorResult
 
 applyAutoRefactor :: (MonadLore m) => NonEmpty AutoRefactorIssue -> m AutoRefactorResult
 applyAutoRefactor issues = do
-  SymbolsMap symbolsMap <- getSymbolsMap
+  symbolsMap <- getSymbolsMap
   modSummariesByFile <- currentModSummariesByFile
   rewriteResults <- mapM (rewriteIssuesInFile symbolsMap modSummariesByFile) (Map.toList (groupIssuesByFile issues))
   let edits = concatMap rewriteEdits rewriteResults
@@ -54,7 +54,7 @@ rollbackAutoRefactorEdits =
 
 rewriteIssuesInFile ::
   (MonadLore m) =>
-  Map.Map Text [ExportedSymbol] ->
+  SymbolsMap ->
   Map.Map FilePath GHC.ModSummary ->
   (FilePath, NonEmpty AutoRefactorIssue) ->
   m ImportRewriteResult

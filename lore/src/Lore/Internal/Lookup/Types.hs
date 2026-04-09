@@ -1,5 +1,7 @@
 module Lore.Internal.Lookup.Types
   ( SymbolsMap (..),
+    SymbolsIndex (..),
+    ExternalPackagesSymbolsCache (..),
     ModSummaries (..),
     NameToInstancesIndex (..),
     ExportedSymbol (..),
@@ -8,12 +10,23 @@ where
 
 import Data.List (intercalate)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC
 import qualified GHC.Plugins as GHC
 
-newtype SymbolsMap = SymbolsMap
-  { unSymbolsMap :: Map.Map Text [ExportedSymbol]
+newtype SymbolsIndex = SymbolsIndex
+  { unSymbolsIndex :: Map.Map Text [ExportedSymbol]
+  }
+
+data SymbolsMap = SymbolsMap
+  { homeSymbolsMap :: SymbolsIndex,
+    externalSymbolsMap :: SymbolsIndex
+  }
+
+data ExternalPackagesSymbolsCache = ExternalPackagesSymbolsCache
+  { externalPackagesDependencies :: Set.Set String,
+    externalPackagesSymbolsMap :: SymbolsIndex
   }
 
 newtype ModSummaries = ModSummaries

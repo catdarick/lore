@@ -8,6 +8,7 @@ module Lore.Internal.Session
 where
 
 import qualified Control.Concurrent as GHC
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
@@ -16,7 +17,7 @@ import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Lore.Internal.Ghc.DynFlags
   ( ParallelWorkersCount (..),
   )
-import Lore.Internal.Lookup.Types (ModSummaries, NameToInstancesIndex, SymbolsMap)
+import Lore.Internal.Lookup.Types (ExternalPackagesSymbolsCache, ModSummaries, NameToInstancesIndex, SymbolsIndex)
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
 import Lore.Internal.Targets.Result (LoadTargetsResult)
 import Lore.Logger (LoggerHandle, noLogHandle)
@@ -28,7 +29,9 @@ data SessionContext = SessionContext
     customPrelude :: Maybe Text,
     packageDbPaths :: [FilePath],
     ifaceCache :: GHC.ModIfaceCache,
-    externalPackagesSymbolsCache :: MVar (Maybe SymbolsMap),
+    homeModulesSymbolsCache :: MVar (Maybe SymbolsIndex),
+    externalPackagesSymbolsCache :: MVar (Maybe ExternalPackagesSymbolsCache),
+    symbolsMapDependencySet :: MVar (Set.Set String),
     modSummariesCache :: MVar (Maybe ModSummaries),
     nameToInstancesIndexCache :: MVar (Maybe NameToInstancesIndex),
     interpreterContextCache :: MVar (Maybe [GHC.ModuleName]),
@@ -58,7 +61,9 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
   packageFiles <- findFilesByNameRecursively (Just defaultIgnoreList) projectRoot "package.yaml"
   eiPackageDbPaths <- resolvePackageDbPaths projectRoot
   ifaceCache <- GHC.newIfaceCache
+  homeModulesSymbolsCache <- GHC.newMVar Nothing
   externalPackagesSymbolsCache <- GHC.newMVar Nothing
+  symbolsMapDependencySet <- GHC.newMVar Set.empty
   modSummariesCache <- GHC.newMVar Nothing
   nameToInstancesIndexCache <- GHC.newMVar Nothing
   interpreterContextCache <- GHC.newMVar Nothing
@@ -75,7 +80,9 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
               customPrelude,
               packageDbPaths = packageDbPaths,
               ifaceCache,
+              homeModulesSymbolsCache,
               externalPackagesSymbolsCache,
+              symbolsMapDependencySet,
               modSummariesCache,
               nameToInstancesIndexCache,
               interpreterContextCache,
