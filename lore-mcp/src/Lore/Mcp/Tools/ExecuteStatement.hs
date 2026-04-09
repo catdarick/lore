@@ -18,7 +18,7 @@ import Lore
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (prependPartialLoadWarning, renderFailureWithPartialLoadWarning)
+import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartialLoadWarning)
 
 newtype ExecuteStatementArgs (fieldType :: FieldType) = ExecuteStatementArgs
   { statement ::
@@ -67,7 +67,7 @@ executeStatementHandler ExecuteStatementArgs {statement} = do
 
 renderExecutionResult :: LoadTargetsResult -> String -> Text
 renderExecutionResult loadResult result =
-  prependPartialLoadWarning loadResult "Evaluation may be incomplete." renderedResult
+  appendPartialLoadWarning loadResult "Evaluation may be incomplete." renderedResult
   where
     renderedResult =
       if T.null outputText

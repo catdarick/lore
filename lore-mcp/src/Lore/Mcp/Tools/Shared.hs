@@ -1,5 +1,5 @@
 module Lore.Mcp.Tools.Shared
-  ( prependPartialLoadWarning,
+  ( appendPartialLoadWarning,
     renderDiagnosticSummary,
     renderFailureWithPartialLoadWarning,
   )
@@ -10,26 +10,23 @@ import qualified Data.Text as T
 import Lore (LoadTargetsResult (..))
 import Lore.Diagnostics (Diagnostic (..))
 
-prependPartialLoadWarning :: LoadTargetsResult -> Text -> Text -> Text
-prependPartialLoadWarning loadResult partialLoadSuffix body
+appendPartialLoadWarning :: LoadTargetsResult -> Text -> Text -> Text
+appendPartialLoadWarning loadResult partialLoadSuffix body
   | loadResult.loadTargetsModulesFailed > 0 =
-      renderPartialLoadWarning loadResult partialLoadSuffix
-        <> "\n"
-        <> body
+      body
+        <> "\n\n"
+        <> renderPartialLoadWarning loadResult partialLoadSuffix
   | otherwise =
       body
 
 renderFailureWithPartialLoadWarning :: LoadTargetsResult -> Text -> Text -> [Diagnostic] -> Text
 renderFailureWithPartialLoadWarning loadResult partialLoadSuffix heading diagnostics =
-  T.unlines $
-    warningLines
-      <> [heading]
-      <> map renderDiagnosticSummary diagnostics
+  appendPartialLoadWarning loadResult partialLoadSuffix renderedBody
   where
-    warningLines =
-      [ renderPartialLoadWarning loadResult partialLoadSuffix
-      | loadResult.loadTargetsModulesFailed > 0
-      ]
+    renderedBody =
+      T.unlines $
+        [heading]
+          <> map renderDiagnosticSummary diagnostics
 
 renderPartialLoadWarning :: LoadTargetsResult -> Text -> Text
 renderPartialLoadWarning loadResult partialLoadSuffix =

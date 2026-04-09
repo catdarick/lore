@@ -28,7 +28,7 @@ import Lore.Diagnostics
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (prependPartialLoadWarning, renderFailureWithPartialLoadWarning)
+import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartialLoadWarning)
 
 newtype GetTypeOfExpressionArgs (fieldType :: FieldType) = GetTypeOfExpressionArgs
   { expression ::
@@ -84,7 +84,7 @@ getTypeOfExpressionHandler GetTypeOfExpressionArgs {expression} = do
 
 renderTypeResult :: LoadTargetsResult -> GHC.Type -> Text
 renderTypeResult loadResult inferredType =
-  prependPartialLoadWarning loadResult "Type inference may be incomplete." renderedType
+  appendPartialLoadWarning loadResult "Type inference may be incomplete." renderedType
   where
     renderedType =
       T.pack (Outputable.showSDocUnsafe (Outputable.ppr inferredType))
