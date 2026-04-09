@@ -3,10 +3,12 @@ module InterpreterSpec
   )
 where
 
+import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC
 import qualified GHC.Utils.Outputable as Outputable
-import Lore.Interpreter (getTypeOfExpression, interpretExpression)
+import Lore.Diagnostics (Diagnostic (..))
+import Lore.Interpreter (executeStatement, getTypeOfExpression)
 import Lore.Session (PreludeImportRule (..), defaultSessionConfig)
 import qualified Lore.Session as Session
 import System.FilePath ((</>))
@@ -16,19 +18,19 @@ import TestSupport (fixtureLore, fixtureLoreAt, fixtureLoreAtWithConfig, withFix
 spec :: Spec
 spec =
   describe "interpreter" do
-    it "evaluates expressions against project modules loaded as default imports" do
+    it "executes statements against project modules loaded as default imports" do
       result <-
         fixtureLore do
-          interpretExpression "lookupOrZero [(\"left\", 3)] \"left\""
+          executeStatement "lookupOrZero [(\"left\", 3)] \"left\""
 
-      result `shouldBe` "3"
+      result `shouldBe` Right "3"
 
     it "uses symbols from multiple project modules without explicit imports" do
       result <-
         fixtureLore do
-          interpretExpression "(crossModuleSeed, supportStep 4)"
+          executeStatement "(crossModuleSeed, supportStep 4)"
 
-      result `shouldBe` "(5,9)"
+      result `shouldBe` Right "(5,9)"
 
     it "returns the inferred type of an expression in the default project context" do
       result <-
@@ -36,6 +38,39 @@ spec =
           getTypeOfExpression "lookupOrZero [(\"left\", 3)]"
 
       renderType result `shouldBe` "String -> Int"
+
+    it "returns diagnostics instead of throwing for parse failures" do
+      result <-
+        fixtureLore do
+          executeStatement "map (+1 [1, 2 :: Int]"
+
+      case result of
+        Left diagnostics -> do
+          diagnostics `shouldSatisfy` (not . null)
+          any (\diagnostic -> "parse error" `T.isInfixOf` diagnostic.diagnosticMessage) diagnostics `shouldBe` True
+        Right rendered ->
+          expectationFailure ("Expected parse failure, got: " <> show rendered)
+
+    it "executes IO expressions instead of wrapping them in show" do
+      result <-
+        fixtureLore do
+          executeStatement "pure (3 :: Int)"
+
+      result `shouldBe` Right "3"
+
+    it "captures stdout produced by IO expressions" do
+      result <-
+        fixtureLore do
+          executeStatement "putStrLn \"123\\n345\""
+
+      result `shouldBe` Right "123\n345"
+
+    it "returns combined output for IO expressions that also produce a final result" do
+      result <-
+        fixtureLore do
+          executeStatement "print \"side\" >> pure (3 :: Int)"
+
+      result `shouldBe` Right "\"side\"\n3"
 
     it "keeps successfully loaded modules in context even when another module fails to compile" do
       withFixtureCopy \fixtureRoot -> do
@@ -45,18 +80,23 @@ spec =
 
         result <-
           fixtureLoreAt fixtureRoot do
-            interpretExpression "lookupOrZero [(\"left\", 7)] \"left\""
+            executeStatement "lookupOrZero [(\"left\", 7)] \"left\""
 
-        result `shouldBe` "7"
+        result `shouldBe` Right "7"
 
     it "can disable implicit Prelude imports" do
       withFixtureCopy \fixtureRoot -> do
         let sessionConfig = sessionConfigWithPreludeRule NoPrelude
 
-        ( fixtureLoreAtWithConfig sessionConfig fixtureRoot do
-            interpretExpression "map (+1) [1, 2 :: Int]"
-          )
-          `shouldThrow` anyException
+        result <-
+          fixtureLoreAtWithConfig sessionConfig fixtureRoot do
+            executeStatement "map (+1) [1, 2 :: Int]"
+
+        result `shouldSatisfy` \case
+          Left diagnostics ->
+            not (null diagnostics)
+          Right _ ->
+            False
 
     it "can use a custom Prelude import module" do
       withFixtureCopy \fixtureRoot -> do
@@ -68,9 +108,9 @@ spec =
 
         result <-
           fixtureLoreAtWithConfig sessionConfig fixtureRoot do
-            interpretExpression "nub ['a', 'a', 'b']"
+            executeStatement "nub ['a', 'a', 'b']"
 
-        result `shouldBe` "\"ab\""
+        result `shouldBe` Right "\"ab\""
 
         ty <-
           fixtureLoreAtWithConfig sessionConfig fixtureRoot do

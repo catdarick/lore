@@ -19,6 +19,7 @@ import Lore.Internal.Ghc.DynFlags
   )
 import Lore.Internal.Lookup.Types (ModSummaries, NameToInstancesIndex, SymbolsMap)
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
+import Lore.Internal.Targets.Result (LoadTargetsResult)
 import Lore.Logger (LoggerHandle, prettyLoggerHandle)
 
 data PreludeImportRule
@@ -37,7 +38,8 @@ data SessionContext = SessionContext
     externalPackagesSymbolsCache :: MVar (Maybe SymbolsMap),
     modSummariesCache :: MVar (Maybe ModSummaries),
     nameToInstancesIndexCache :: MVar (Maybe NameToInstancesIndex),
-    interpreterContextCache :: MVar (Maybe [GHC.ModuleName])
+    interpreterContextCache :: MVar (Maybe [GHC.ModuleName]),
+    lastLoadTargetsResult :: MVar (Maybe LoadTargetsResult)
   }
 
 data SessionConfig = SessionConfig
@@ -67,6 +69,7 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, interpreterPrelu
   modSummariesCache <- GHC.newMVar Nothing
   nameToInstancesIndexCache <- GHC.newMVar Nothing
   interpreterContextCache <- GHC.newMVar Nothing
+  lastLoadTargetsResult <- GHC.newMVar Nothing
   case eiPackageDbPaths of
     Left err -> pure $ Left $ "Failed to resolve package database paths: " <> err
     Right packageDbPaths -> do
@@ -82,5 +85,6 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, interpreterPrelu
               externalPackagesSymbolsCache,
               modSummariesCache,
               nameToInstancesIndexCache,
-              interpreterContextCache
+              interpreterContextCache,
+              lastLoadTargetsResult
             }

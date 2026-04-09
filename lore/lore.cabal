@@ -58,6 +58,7 @@ library
       Lore.Internal.PackageDB
       Lore.Internal.Session
       Lore.Internal.Targets
+      Lore.Internal.Targets.Result
   hs-source-dirs:
       src
   default-extensions:

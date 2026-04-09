@@ -30,6 +30,7 @@ executable lore-mcp
       Lore.Mcp.Protocol.Request
       Lore.Mcp.Protocol.Server
       Lore.Mcp.Server
+      Lore.Mcp.Tools.ExecuteStatement
       Lore.Mcp.Tools.LoadTargets
       Paths_lore_mcp
   autogen-modules:

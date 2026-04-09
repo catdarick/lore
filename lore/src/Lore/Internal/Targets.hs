@@ -5,11 +5,13 @@ module Lore.Internal.Targets
   ( LoadTargetsResult (..),
     LoadTargetsOptions (..),
     defaultLoadTargetsOptions,
+    getLastLoadTargetsResult,
     loadTargets,
     retainUnresolvedRollback,
   )
 where
 
+import qualified Control.Concurrent.MVar as MVar
 import Control.Monad (forM, unless)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.RWS (asks)
@@ -38,6 +40,7 @@ import Lore.Internal.Lookup.SymbolsMap (invalidateSymbolsMapCache)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Package (ComponentData (..), PackageData (..), defaultExtensions, extractDependencies, extractSourceDirs, prepareComponentsData)
 import Lore.Internal.Session (SessionContext (..))
+import Lore.Internal.Targets.Result (LoadTargetsResult (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import System.FilePath (normalise)
@@ -60,21 +63,16 @@ data LoadTargetsOptions = LoadTargetsOptions
   { enableAutoRefactor :: Bool
   }
 
-data LoadTargetsResult = LoadTargetsResult
-  { loadTargetsDiagnostics :: [Diagnostic],
-    loadTargetsSucceeded :: Bool,
-    loadTargetsModulesLoaded :: Int,
-    loadTargetsModulesFailed :: Int,
-    loadTargetsModulesAutofixed :: Int,
-    loadTargetsModulesTotal :: Int
-  }
-  deriving (Eq, Show)
-
 defaultLoadTargetsOptions :: LoadTargetsOptions
 defaultLoadTargetsOptions =
   LoadTargetsOptions
     { enableAutoRefactor = False
     }
+
+getLastLoadTargetsResult :: (MonadLore m) => m (Maybe LoadTargetsResult)
+getLastLoadTargetsResult = do
+  cachedResultVar <- asks lastLoadTargetsResult
+  liftIO (MVar.readMVar cachedResultVar)
 
 prepareTargetsPlan :: (MonadLore m) => [ComponentData] -> m TargetsPlan
 prepareTargetsPlan components = do
@@ -142,18 +140,23 @@ loadTargets options = do
       Log.debug "Successfully updated GHC targets based on package.yaml configurations"
     GHC.Failed -> do
       Log.err "Failed to load GHC targets after updating. Please check the provided GHC options, source directories, and dependencies for correctness."
-  pure
-    LoadTargetsResult
-      { loadTargetsDiagnostics = loadAttemptDiagnostics,
-        loadTargetsSucceeded =
-          case loadAttemptResult of
-            GHC.Succeeded -> True
-            GHC.Failed -> False,
-        loadTargetsModulesLoaded = loadedModulesCount,
-        loadTargetsModulesFailed = failedModulesCount,
-        loadTargetsModulesAutofixed = Set.size loadAttemptAutoRefactFiles,
-        loadTargetsModulesTotal = totalModulesCount
-      }
+  let loadTargetsResult =
+        LoadTargetsResult
+          { loadTargetsDiagnostics = loadAttemptDiagnostics,
+            loadTargetsSucceeded =
+              case loadAttemptResult of
+                GHC.Succeeded -> True
+                GHC.Failed -> False,
+            loadTargetsModulesLoaded = loadedModulesCount,
+            loadTargetsModulesFailed = failedModulesCount,
+            loadTargetsModulesAutofixed = Set.size loadAttemptAutoRefactFiles,
+            loadTargetsModulesTotal = totalModulesCount
+          }
+  cachedResultVar <- asks lastLoadTargetsResult
+  liftIO $
+    MVar.modifyMVar_ cachedResultVar $
+      const (pure (Just loadTargetsResult))
+  pure loadTargetsResult
 
 mkModuleTarget :: GHC.UnitId -> GHC.ModuleName -> GHC.Target
 mkModuleTarget unitId modName =

@@ -41,7 +41,7 @@ renderLoadTargetsResult loadResult@LoadTargetsResult {loadTargetsDiagnostics}
       pure $
         T.pack $
           unlines
-            [ statusLine ]
+            [statusLine]
   | otherwise =
       do
         let (visibleDiagnostics, hiddenDiagnostics) = splitAt maxRenderedDiagnostics loadTargetsDiagnostics
@@ -181,7 +181,7 @@ renderSnippet fileLines Span {spanStartLine, spanStartCol, spanEndLine, spanEndC
       case safeLine fileLines lineNumber of
         Nothing -> []
         Just sourceLine ->
-          [ renderSnippetLine lineNumber sourceLine ]
+          [renderSnippetLine lineNumber sourceLine]
             <> maybe [] (\caretLine -> [caretLine]) (renderCaretLine lineNumber sourceLine)
 
     renderSnippetLine lineNumber sourceLine =
@@ -275,7 +275,8 @@ stripBulletPrefix text =
 
 isContextBoundary :: Text -> Bool
 isContextBoundary text =
-  any (`T.isPrefixOf` text)
+  any
+    (`T.isPrefixOf` text)
     [ "In the ",
       "In a ",
       "In an "

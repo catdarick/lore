@@ -54,6 +54,7 @@ setGhciLikeDynFlags parallelWorkersLimit dflags0 =
           WorkersAsNumProcessors -> dflags1 {GHC.parMakeCount = Nothing}
    in dflags2
         `GHC.gopt_set` GHC.Opt_UseBytecodeRatherThanObjects
+        `GHC.gopt_set` GHC.Opt_ExternalInterpreter
         `GHC.gopt_set` GHC.Opt_Haddock
         `GHC.gopt_set` GHC.Opt_IgnoreHpcChanges
         `GHC.gopt_set` GHC.Opt_IgnoreOptimChanges

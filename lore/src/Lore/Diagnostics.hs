@@ -5,6 +5,7 @@ module Lore.Diagnostics
     Span (..),
     DiagnosticCodeInfo (..),
     driverMessagesToDiagnostics,
+    ghcMessagesToDiagnostics,
     withDiagnosticsCapturing,
   )
 where
@@ -82,6 +83,12 @@ driverMessagesToDiagnostics =
     . GHC.bagToList
     . GHC.getMessages
 
+ghcMessagesToDiagnostics :: GHC.Driver.ErrorMessages -> [Diagnostic]
+ghcMessagesToDiagnostics =
+  map ghcMessageEnvelopeToDiagnostic
+    . GHC.bagToList
+    . GHC.getMessages
+
 driverMessageEnvelopeToDiagnostic :: GHC.MsgEnvelope GHC.Driver.DriverMessage -> Diagnostic
 driverMessageEnvelopeToDiagnostic env =
   let msg = GHC.errMsgDiagnostic env
@@ -92,6 +99,19 @@ driverMessageEnvelopeToDiagnostic env =
           diagnosticCode = fmap fromDiagnosticCode (GHC.diagnosticCode msg),
           diagnosticSpan = toDiagnosticSpan (GHC.errMsgSpan env),
           diagnosticMessage = renderDecorated (GHC.diagnosticMessage (GHC.defaultDiagnosticOpts @GHC.Driver.DriverMessage) msg),
+          diagnosticHints = map renderHint (GHC.diagnosticHints msg)
+        }
+
+ghcMessageEnvelopeToDiagnostic :: GHC.MsgEnvelope GHC.Driver.GhcMessage -> Diagnostic
+ghcMessageEnvelopeToDiagnostic env =
+  let msg = GHC.errMsgDiagnostic env
+   in Diagnostic
+        { diagnosticClass = DiagCompiler,
+          diagnosticSeverity = Just (GHC.errMsgSeverity env),
+          diagnosticReason = Just (reasonToText (GHC.diagnosticReason msg)),
+          diagnosticCode = fmap fromDiagnosticCode (GHC.diagnosticCode msg),
+          diagnosticSpan = toDiagnosticSpan (GHC.errMsgSpan env),
+          diagnosticMessage = renderDecorated (GHC.diagnosticMessage (GHC.defaultDiagnosticOpts @GHC.Driver.GhcMessage) msg),
           diagnosticHints = map renderHint (GHC.diagnosticHints msg)
         }
 
