@@ -18,6 +18,7 @@ import Lore
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Tools.Shared (prependPartialLoadWarning, renderFailureWithPartialLoadWarning)
 
 newtype ExecuteStatementArgs (fieldType :: FieldType) = ExecuteStatementArgs
   { statement ::
@@ -25,7 +26,7 @@ newtype ExecuteStatementArgs (fieldType :: FieldType) = ExecuteStatementArgs
         fieldType
         ( WithMeta
             Text
-            '[ Description "Haskell statement to execute in the current interpreter context.",
+            '[ Description "Haskell statement to execute in the current interpreter context. Supports GHCi style variable bindings, function definitions, and IO actions.",
                Example "print (map (+1) [1, 2, 3])"
              ]
         )
@@ -65,13 +66,8 @@ executeStatementHandler ExecuteStatementArgs {statement} = do
                 renderExecutionFailure loadResult diagnostics
 
 renderExecutionResult :: LoadTargetsResult -> String -> Text
-renderExecutionResult loadResult result
-  | loadResult.loadTargetsModulesFailed > 0 =
-      renderPartialLoadWarning loadResult
-        <> "\n"
-        <> renderedResult
-  | otherwise =
-      renderedResult
+renderExecutionResult loadResult result =
+  prependPartialLoadWarning loadResult "Evaluation may be incomplete." renderedResult
   where
     renderedResult =
       if T.null outputText
@@ -81,37 +77,6 @@ renderExecutionResult loadResult result
     outputText =
       T.pack result
 
-renderPartialLoadWarning :: LoadTargetsResult -> Text
-renderPartialLoadWarning loadResult =
-  "Warning: only "
-    <> T.pack (show loadResult.loadTargetsModulesLoaded)
-    <> " of "
-    <> T.pack (show loadResult.loadTargetsModulesTotal)
-    <> " modules loaded successfully. Evaluation may be incomplete."
-
 renderExecutionFailure :: LoadTargetsResult -> [Diagnostic] -> Text
 renderExecutionFailure loadResult diagnostics =
-  T.unlines $
-    warningLines
-      <> ["Execution failed:"]
-      <> map renderDiagnosticSummary diagnostics
-  where
-    warningLines =
-      [ renderPartialLoadWarning loadResult
-      | loadResult.loadTargetsModulesFailed > 0
-      ]
-
-renderDiagnosticSummary :: Diagnostic -> Text
-renderDiagnosticSummary Diagnostic {diagnosticMessage} =
-  "- " <> firstMessageLine
-  where
-    firstMessageLine =
-      case filter (not . T.null) (map T.strip (T.lines diagnosticMessage)) of
-        line : _ -> stripBulletPrefix line
-        [] -> "<empty>"
-
-stripBulletPrefix :: Text -> Text
-stripBulletPrefix text =
-  case T.stripPrefix "* " text of
-    Just stripped -> stripped
-    Nothing -> text
+  renderFailureWithPartialLoadWarning loadResult "Evaluation may be incomplete." "Execution failed:" diagnostics
