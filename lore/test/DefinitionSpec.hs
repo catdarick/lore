@@ -1,11 +1,12 @@
 module DefinitionSpec (spec) where
 
 import Control.Monad (void)
-import Data.List (find, sort)
-import Data.Text (pack)
+import Control.Monad.IO.Class (liftIO)
+import Data.List (find, intercalate, sort)
+import Data.Text (pack, unpack)
 import qualified GHC
 import qualified GHC.Plugins
-import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice)
+import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderDefinitionModulesText, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice)
 import Lore.Lookup (ExportedSymbol (..), findSymbols)
 import Lore.Monad (MonadLore)
 import Lore.Targets (defaultLoadTargetsOptions)
@@ -172,6 +173,13 @@ spec = do
             "import Data.Maybe (fromMaybe)"
           ]
 
+    it "deduplicates repeated declaration spans when merged slices overlap" do
+      zero <- fixtureDefinition "lookupOrZero"
+
+      let merged = mergeDefinitionSlices [zero, zero]
+
+      fmap (length . declarationSpans) merged `shouldBe` Just 1
+
   describe "resolveDefinitionClosure" do
     it "respects the requested recursion depth for same-module function references" do
       depthZero <- fixtureDefinitionClosure 0 "derivedValue"
@@ -269,6 +277,67 @@ spec = do
                                         )
                                       ]
 
+  describe "renderDefinitionModulesText" do
+    it "renders a single definition as a minified module fragment" do
+      rendered <- fixtureRenderedDefinition "lookupOrZero"
+
+      rendered
+        `shouldBe` intercalate
+          "\n"
+          [ "=== src/Demo.hs ===",
+            "",
+            "--- imports ---",
+            "import qualified Data.Map.Strict as Map",
+            "import Data.Maybe (fromMaybe)",
+            "",
+            "--- lines 33-35 ---",
+            "lookupOrZero :: [(String, Int)] -> String -> Int",
+            "lookupOrZero pairs key =",
+            "  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
+          ]
+
+    it "renders recursive closures grouped by file with reduced imports" do
+      rendered <- fixtureRenderedDefinitionClosure 2 "crossModuleRecord"
+
+      rendered
+        `shouldBe` intercalate
+          "\n"
+          [ "=== src/Demo.hs ===",
+            "",
+            "--- imports ---",
+            "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)",
+            "",
+            "--- lines 60-62 ---",
+            "crossModuleRecord :: Int -> Support.SupportRecord",
+            "crossModuleRecord value =",
+            "  Support.mkSupportRecord (Support.supportStep value)",
+            "",
+            "=== src/Demo/Support.hs ===",
+            "",
+            "--- imports ---",
+            "import qualified Data.Map.Strict as Map",
+            "",
+            "--- lines 11-12 ---",
+            "supportSeed :: Int",
+            "supportSeed = 5",
+            "",
+            "--- lines 14-15 ---",
+            "supportStep :: Int -> Int",
+            "supportStep value = value + supportSeed",
+            "",
+            "--- lines 17-19 ---",
+            "data SupportRecord = SupportRecord",
+            "  { supportValues :: Map.Map String Int",
+            "  }",
+            "",
+            "--- lines 21-25 ---",
+            "mkSupportRecord :: Int -> SupportRecord",
+            "mkSupportRecord value =",
+            "  SupportRecord",
+            "    { supportValues = Map.singleton \"value\" value",
+            "    }"
+          ]
+
 shouldHaveSingleDefinitionText ::
   DefinitionSlice ->
   String ->
@@ -358,6 +427,24 @@ fixtureDefinitionClosure depth symbol =
     exportedSymbols <- findSymbols (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
     resolveDefinitionClosure depth targetName
+
+fixtureRenderedDefinition :: String -> IO String
+fixtureRenderedDefinition symbol =
+  fixtureLore do
+    loadTargets defaultLoadTargetsOptions
+    exportedSymbols <- findSymbols (pack symbol)
+    targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
+    definitionSlice <- maybe (error ("definition not found: " <> symbol)) pure =<< resolveDefinitionSlice targetName
+    unpack <$> liftIO (renderDefinitionModulesText [definitionSlice])
+
+fixtureRenderedDefinitionClosure :: Int -> String -> IO String
+fixtureRenderedDefinitionClosure depth symbol =
+  fixtureLore do
+    loadTargets defaultLoadTargetsOptions
+    exportedSymbols <- findSymbols (pack symbol)
+    targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
+    definitionClosure <- resolveDefinitionClosure depth targetName
+    unpack <$> liftIO (renderDefinitionModulesText definitionClosure)
 
 findFixtureSymbol :: String -> [ExportedSymbol] -> Maybe GHC.Name
 findFixtureSymbol symbol =

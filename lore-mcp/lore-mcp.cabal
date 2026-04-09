@@ -31,6 +31,7 @@ executable lore-mcp
       Lore.Mcp.Protocol.Server
       Lore.Mcp.Server
       Lore.Mcp.Tools.ExecuteStatement
+      Lore.Mcp.Tools.GetDefinition
       Lore.Mcp.Tools.GetTypeOfExpression
       Lore.Mcp.Tools.LoadTargets
       Lore.Mcp.Tools.LookupInstances
