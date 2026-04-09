@@ -9,7 +9,7 @@ import qualified GHC
 import qualified GHC.Utils.Outputable as Outputable
 import Lore.Diagnostics (Diagnostic (..))
 import Lore.Interpreter (executeStatement, getTypeOfExpression)
-import Lore.Session (PreludeImportRule (..), defaultSessionConfig)
+import Lore.Session (defaultSessionConfig)
 import qualified Lore.Session as Session
 import System.FilePath ((</>))
 import Test.Hspec
@@ -84,27 +84,13 @@ spec =
 
         result `shouldBe` Right "7"
 
-    it "can disable implicit Prelude imports" do
-      withFixtureCopy \fixtureRoot -> do
-        let sessionConfig = sessionConfigWithPreludeRule NoPrelude
-
-        result <-
-          fixtureLoreAtWithConfig sessionConfig fixtureRoot do
-            executeStatement "map (+1) [1, 2 :: Int]"
-
-        result `shouldSatisfy` \case
-          Left diagnostics ->
-            not (null diagnostics)
-          Right _ ->
-            False
-
     it "can use a custom Prelude import module" do
       withFixtureCopy \fixtureRoot -> do
         TIO.writeFile
           (fixtureRoot </> "src" </> "CustomPrelude.hs")
           "module CustomPrelude (module Prelude, nub) where\n\nimport Prelude\nimport Data.List (nub)\n"
 
-        let sessionConfig = sessionConfigWithPreludeRule (ImportCustomPrelude "CustomPrelude")
+        let sessionConfig = sessionConfigWithCustomPrelude (Just "CustomPrelude")
 
         result <-
           fixtureLoreAtWithConfig sessionConfig fixtureRoot do
@@ -118,13 +104,13 @@ spec =
 
         renderType ty `shouldBe` "[Char]"
 
-sessionConfigWithPreludeRule :: PreludeImportRule -> Session.SessionConfig
-sessionConfigWithPreludeRule interpreterPreludeImportRule =
+sessionConfigWithCustomPrelude :: Maybe T.Text -> Session.SessionConfig
+sessionConfigWithCustomPrelude customPrelude =
   Session.SessionConfig
     { Session.projectRoot = projectRoot,
       Session.ghcWorkDir = ghcWorkDir,
       Session.loggerHandle = loggerHandle,
-      Session.interpreterPreludeImportRule = interpreterPreludeImportRule,
+      Session.customPrelude = customPrelude,
       Session.parallelWorkersLimit = parallelWorkersLimit
     }
   where
@@ -132,6 +118,7 @@ sessionConfigWithPreludeRule interpreterPreludeImportRule =
       { Session.projectRoot,
         Session.ghcWorkDir,
         Session.loggerHandle,
+        Session.customPrelude = _defaultCustomPrelude,
         Session.parallelWorkersLimit
       } = defaultSessionConfig
 

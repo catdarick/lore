@@ -68,6 +68,14 @@ spec =
 
       normalized `shouldBe` [openQualifiedImport 1 0 ImportQualifiedPrefix "Data.Set" (Just "Set")]
 
+    it "opens an existing explicit unqualified import when requested" do
+      let (normalized, _) =
+            applyImportOperations
+              [explicitImport 1 0 "CustomPrelude" [item "preludePreferred"]]
+              [EnsureUnqualifiedOpenImport "CustomPrelude"]
+
+      normalized `shouldBe` [openQualifiedImport 1 0 ImportUnqualified "CustomPrelude" Nothing]
+
     it "removes an import when its last explicit binding becomes redundant" do
       let (normalized, _) =
             applyImportOperations

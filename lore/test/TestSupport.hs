@@ -46,14 +46,14 @@ sessionConfigWithLogger loggerHandle =
     { Session.projectRoot = projectRoot,
       Session.ghcWorkDir = ghcWorkDir,
       Session.loggerHandle = loggerHandle,
-      Session.interpreterPreludeImportRule = interpreterPreludeImportRule,
+      Session.customPrelude = customPrelude,
       Session.parallelWorkersLimit = parallelWorkersLimit
     }
   where
     Session.SessionConfig
       { Session.projectRoot,
         Session.ghcWorkDir,
-        Session.interpreterPreludeImportRule,
+        Session.customPrelude,
         Session.parallelWorkersLimit
       } = defaultSessionConfig
 

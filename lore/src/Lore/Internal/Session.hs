@@ -1,7 +1,6 @@
 module Lore.Internal.Session
   ( SessionContext (..),
     SessionConfig (..),
-    PreludeImportRule (..),
     defaultSessionConfig,
     prepareSessionContext,
     ParallelWorkersCount (..),
@@ -22,17 +21,11 @@ import Lore.Internal.PackageDB (resolvePackageDbPaths)
 import Lore.Internal.Targets.Result (LoadTargetsResult)
 import Lore.Logger (LoggerHandle, prettyLoggerHandle)
 
-data PreludeImportRule
-  = NoPrelude
-  | ImportBasePrelude
-  | ImportCustomPrelude Text
-  deriving (Eq, Show)
-
 data SessionContext = SessionContext
   { projectRoot :: FilePath,
     packageFiles :: [FilePath],
     loggerHandle :: LoggerHandle,
-    interpreterPreludeImportRule :: PreludeImportRule,
+    customPrelude :: Maybe Text,
     packageDbPaths :: [FilePath],
     ifaceCache :: GHC.ModIfaceCache,
     externalPackagesSymbolsCache :: MVar (Maybe SymbolsMap),
@@ -46,7 +39,7 @@ data SessionConfig = SessionConfig
   { projectRoot :: FilePath,
     ghcWorkDir :: FilePath,
     loggerHandle :: LoggerHandle,
-    interpreterPreludeImportRule :: PreludeImportRule,
+    customPrelude :: Maybe Text,
     parallelWorkersLimit :: ParallelWorkersCount
   }
 
@@ -56,12 +49,12 @@ defaultSessionConfig =
     { projectRoot = ".",
       ghcWorkDir = ".lore-work",
       loggerHandle = prettyLoggerHandle,
-      interpreterPreludeImportRule = ImportBasePrelude,
+      customPrelude = Nothing,
       parallelWorkersLimit = WorkersAsNumProcessors
     }
 
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
-prepareSessionContext SessionConfig {projectRoot, loggerHandle, interpreterPreludeImportRule} = do
+prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} = do
   packageFiles <- findFilesByNameRecursively (Just defaultIgnoreList) projectRoot "package.yaml"
   eiPackageDbPaths <- resolvePackageDbPaths projectRoot
   ifaceCache <- GHC.newIfaceCache
@@ -79,7 +72,7 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, interpreterPrelu
             { projectRoot,
               packageFiles,
               loggerHandle,
-              interpreterPreludeImportRule,
+              customPrelude,
               packageDbPaths = packageDbPaths,
               ifaceCache,
               externalPackagesSymbolsCache,

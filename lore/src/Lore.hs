@@ -1,7 +1,6 @@
 module Lore
   ( SessionConfig (..),
     defaultSessionConfig,
-    PreludeImportRule (..),
     ParallelWorkersCount (..),
     LoreMonadT,
     MonadLore,

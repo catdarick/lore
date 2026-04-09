@@ -9,12 +9,14 @@ import Lore.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (
 import Lore.Logger (LogMessage (..), LoggerHandle (..))
 import Lore.Lookup (findSymbols)
 import Lore.Monad (MonadLore)
+import Lore.Session (defaultSessionConfig)
+import qualified Lore.Session as Session
 import Lore.Targets (LoadTargetsOptions (..), LoadTargetsResult (..), defaultLoadTargetsOptions, retainUnresolvedRollback)
 import qualified Lore.Targets as Targets
 import System.Directory (createDirectoryIfMissing, makeAbsolute)
 import System.FilePath ((</>))
 import Test.Hspec
-import TestSupport (fixtureLoreAt, fixtureLoreAtWithLogger, withFixtureCopy)
+import TestSupport (fixtureLoreAt, fixtureLoreAtWithConfig, fixtureLoreAtWithLogger, withFixtureCopy)
 
 loadTargets :: (MonadLore m) => LoadTargetsOptions -> m ()
 loadTargets options = void (Targets.loadTargets options)
@@ -134,6 +136,40 @@ spec =
           else expectationFailure (unlines logs <> "\n" <> T.unpack demoSource)
         countImportHeaders "import qualified Data.Text as T" demoSource `shouldBe` 1
         countImportHeaders "import qualified Data.List as T" demoSource `shouldBe` 0
+
+    it "prefers customPrelude for missing-import auto-refact selection" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+            Session.SessionConfig
+              { Session.projectRoot,
+                Session.ghcWorkDir,
+                Session.loggerHandle,
+                Session.parallelWorkersLimit
+              } = defaultSessionConfig
+            sessionConfig =
+              Session.SessionConfig
+                { Session.projectRoot,
+                  Session.ghcWorkDir,
+                  Session.loggerHandle,
+                  Session.customPrelude = Just "CustomPrelude",
+                  Session.parallelWorkersLimit
+                }
+        ensureCustomPreludePreferenceModules fixtureRoot
+        appendDemoDefinitions
+          demoFile
+          [ "preludePreferredValue :: Int",
+            "preludePreferredValue = preludePreferred"
+          ]
+
+        loaded <- fixtureLoreAtWithConfig sessionConfig fixtureRoot do
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
+
+        demoSource <- TIO.readFile demoFile
+        loaded `shouldBe` True
+        T.isInfixOf "import CustomPrelude\n" demoSource `shouldBe` True
+        T.isInfixOf "import CustomPrelude (preludePreferred)\n" demoSource `shouldBe` False
+        countImportHeaders "import AutoRefactFixture.Competing" demoSource `shouldBe` 0
 
     it "merges multiple missing names from the same new module into one import" do
       withFixtureCopy \fixtureRoot -> do
@@ -784,6 +820,14 @@ ensureAutoRefactFixtureModule fixtureRoot = do
   createDirectoryIfMissing True moduleDir
   TIO.writeFile moduleFile autoRefactFixtureModuleSource
 
+ensureCustomPreludePreferenceModules :: FilePath -> IO ()
+ensureCustomPreludePreferenceModules fixtureRoot = do
+  let srcDir = fixtureRoot </> "src"
+      moduleDir = srcDir </> "AutoRefactFixture"
+  createDirectoryIfMissing True moduleDir
+  TIO.writeFile (srcDir </> "CustomPrelude.hs") customPreludePreferenceModuleSource
+  TIO.writeFile (moduleDir </> "Competing.hs") competingPreludePreferenceModuleSource
+
 ensureRecordFieldFixtureModule :: FilePath -> IO ()
 ensureRecordFieldFixtureModule fixtureRoot = do
   let moduleDir = fixtureRoot </> "src" </> "AutoRefactFixture"
@@ -935,6 +979,33 @@ reexportedLongModuleSource =
       "  ( reexportedValue,",
       "    ReexportTag(..)",
       "  )"
+    ]
+
+customPreludePreferenceModuleSource :: T.Text
+customPreludePreferenceModuleSource =
+  T.unlines
+    [ "module CustomPrelude",
+      "  ( module Prelude,",
+      "    preludePreferred",
+      "  )",
+      "where",
+      "",
+      "import Prelude",
+      "",
+      "preludePreferred :: Int",
+      "preludePreferred = 21"
+    ]
+
+competingPreludePreferenceModuleSource :: T.Text
+competingPreludePreferenceModuleSource =
+  T.unlines
+    [ "module AutoRefactFixture.Competing",
+      "  ( preludePreferred",
+      "  )",
+      "where",
+      "",
+      "preludePreferred :: Int",
+      "preludePreferred = 7"
     ]
 
 countImportHeaders :: T.Text -> T.Text -> Int

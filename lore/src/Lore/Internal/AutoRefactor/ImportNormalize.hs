@@ -35,6 +35,8 @@ applyOperation :: [NormalizedImport] -> ImportOperation -> ([NormalizedImport], 
 applyOperation imports = \case
   AddUnqualifiedItem moduleName itemText ->
     ensureUnqualifiedItem moduleName itemText imports
+  EnsureUnqualifiedOpenImport moduleName ->
+    ensureUnqualifiedOpenImport moduleName imports
   AddUnqualifiedItemToExistingImport moduleName itemText ->
     ensureExistingUnqualifiedItem moduleName itemText imports
   EnsureQualifiedImport moduleName qualifier ->
@@ -88,6 +90,27 @@ ensureExistingUnqualifiedItem moduleName itemText imports =
           (imports, [])
     Nothing ->
       (imports, [])
+  where
+    isCompatible normalizedImport =
+      normalizedImport.normalizedImportModuleName == moduleName
+        && normalizedImport.normalizedImportQualifiedStyle == ImportUnqualified
+        && not (isHidingImport normalizedImport)
+
+ensureUnqualifiedOpenImport :: Text -> [NormalizedImport] -> ([NormalizedImport], [String])
+ensureUnqualifiedOpenImport moduleName imports =
+  case find isCompatible imports of
+    Just normalizedImport ->
+      case normalizedImport.normalizedImportList of
+        OpenImport ->
+          (imports, [])
+        ExplicitImport _ ->
+          ( replaceImport normalizedImport normalizedImport {normalizedImportList = OpenImport} imports,
+            ["Auto-refact: opened unqualified import for " <> show moduleName]
+          )
+        HidingImport {} ->
+          insertNewImport (newOpenUnqualifiedImport moduleName) imports
+    Nothing ->
+      insertNewImport (newOpenUnqualifiedImport moduleName) imports
   where
     isCompatible normalizedImport =
       normalizedImport.normalizedImportModuleName == moduleName
@@ -255,6 +278,21 @@ newExplicitImport moduleName itemText =
       normalizedImportSafe = False,
       normalizedImportPackageQualifier = Nothing,
       normalizedImportList = ExplicitImport [ImportItem itemText Nothing]
+    }
+
+newOpenUnqualifiedImport :: Text -> NormalizedImport
+newOpenUnqualifiedImport moduleName =
+  NormalizedImport
+    { normalizedImportId = Nothing,
+      normalizedImportOrder = 1_000_000,
+      normalizedImportSpan = Nothing,
+      normalizedImportModuleName = moduleName,
+      normalizedImportQualifiedStyle = ImportUnqualified,
+      normalizedImportAlias = Nothing,
+      normalizedImportSource = False,
+      normalizedImportSafe = False,
+      normalizedImportPackageQualifier = Nothing,
+      normalizedImportList = OpenImport
     }
 
 newQualifiedImport :: Text -> Text -> NormalizedImport

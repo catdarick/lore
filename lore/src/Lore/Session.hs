@@ -1,7 +1,6 @@
 module Lore.Session
   ( SessionContext (..),
     SessionConfig (..),
-    PreludeImportRule (..),
     defaultSessionConfig,
     prepareSessionContext,
     runLore,
@@ -24,8 +23,7 @@ import Lore.Internal.Ghc.DynFlags
   )
 import Lore.Internal.Monad (LoreMonadT (..))
 import Lore.Internal.Session
-  ( PreludeImportRule (..),
-    SessionConfig (..),
+  ( SessionConfig (..),
     SessionContext (..),
     defaultSessionConfig,
     prepareSessionContext,

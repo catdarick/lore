@@ -7,12 +7,13 @@ module Lore.Internal.AutoRefactor.MissingImports
   )
 where
 
+import Control.Monad.Reader (asks)
 import Data.List (nubBy, sortBy)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (listToMaybe, maybeToList)
+import Data.Maybe (fromMaybe, listToMaybe, maybeToList)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC as Ghc
@@ -33,14 +34,16 @@ import Lore.Internal.AutoRefactor.MissingImports.Diagnostic
     ResolveMissingImportDetails (..),
   )
 import Lore.Internal.Lookup.Types (ExportedSymbol (..))
+import Lore.Internal.Session (SessionContext (customPrelude))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 
 suggestMissingImportOperations :: (MonadLore m) => [ParsedImport] -> Map Text [ExportedSymbol] -> NonEmpty MissingImportRequest -> m [ImportOperation]
-suggestMissingImportOperations parsedImports symbolsMap requests =
-  concat <$> mapM suggestForRequest (NE.toList requests)
+suggestMissingImportOperations parsedImports symbolsMap requests = do
+  maybeCustomPrelude <- asks customPrelude
+  concat <$> mapM (suggestForRequest maybeCustomPrelude) (NE.toList requests)
   where
-    suggestForRequest request@MissingImportRequest {requestMissingSymbol, requestKind} =
+    suggestForRequest maybeCustomPrelude request@MissingImportRequest {requestMissingSymbol, requestKind} =
       case requestKind of
         ResolveMissingImport ResolveMissingImportDetails {requestPreferredModules, requestSuggestedImportTargets} -> do
           let matchingExportedSymbols =
@@ -49,7 +52,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests =
               selectionDecision =
                 decideModuleSelection
                   requestMissingSymbol
-                  requestPreferredModules
+                  (prioritizeCustomPrelude maybeCustomPrelude requestPreferredModules)
                   requestSuggestedImportTargets
                   parsedImports
                   matchingExportedSymbols
@@ -68,25 +71,43 @@ suggestMissingImportOperations parsedImports symbolsMap requests =
               maybeImportItem <- renderImportItem requestMissingSymbol selectedSymbol
               pure $
                 maybeToList $
-                  buildResolveImportOperation request moduleName maybeImportItem
+                      buildResolveImportOperation maybeCustomPrelude request moduleName maybeImportItem
         ExtendExistingImport ExtendExistingImportDetails {requestTargetModule, requestImportItemOverride} ->
-          case buildExtendExistingImportOperation parsedImports requestMissingSymbol requestTargetModule of
+          let matchingExportedSymbols =
+                filter (matchesMissingKind requestMissingSymbol) $
+                  Map.findWithDefault [] requestMissingSymbol.missingName symbolsMap
+              selectedTargetModule =
+                fromMaybe
+                  requestTargetModule
+                  (selectCustomPreludeModule maybeCustomPrelude matchingExportedSymbols)
+           in case buildExtendExistingImportOperation parsedImports requestMissingSymbol selectedTargetModule of
             Nothing -> do
-              Log.debug $
-                "Auto-refact: skipping import-list extension for "
-                  <> renderMissingSymbol requestMissingSymbol.missingQualifier requestMissingSymbol.missingName
-                  <> " because MissingTargetImport with target "
-                  <> T.unpack requestTargetModule
-              pure []
-            Just buildOperation -> do
-              let matchingExportedSymbols =
-                    filter (matchesMissingKind requestMissingSymbol) $
-                      Map.findWithDefault [] requestMissingSymbol.missingName symbolsMap
-                  selectedSymbol =
+              let selectedSymbol =
                     listToMaybe
                       [ symbol
                       | symbol <- matchingExportedSymbols,
-                        requestTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
+                        selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
+                      ]
+              maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
+              if selectedTargetModule /= requestTargetModule
+                then do
+                  Log.debug (renderCustomPreludeSelection requestMissingSymbol selectedTargetModule)
+                  pure $
+                    maybeToList $
+                      buildResolveImportOperation maybeCustomPrelude request selectedTargetModule maybeImportItem
+                else do
+                  Log.debug $
+                    "Auto-refact: skipping import-list extension for "
+                      <> renderMissingSymbol requestMissingSymbol.missingQualifier requestMissingSymbol.missingName
+                      <> " because MissingTargetImport with target "
+                      <> T.unpack requestTargetModule
+                  pure []
+            Just buildOperation -> do
+              let selectedSymbol =
+                    listToMaybe
+                      [ symbol
+                      | symbol <- matchingExportedSymbols,
+                        selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
                       ]
               maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
               pure $
@@ -295,6 +316,17 @@ deduplicateTexts :: [Text] -> [Text]
 deduplicateTexts =
   nubBy (==)
 
+prioritizeCustomPrelude :: Maybe Text -> [Text] -> [Text]
+prioritizeCustomPrelude maybeCustomPrelude preferredModules =
+  deduplicateTexts (maybeToList maybeCustomPrelude <> preferredModules)
+
+selectCustomPreludeModule :: Maybe Text -> [ExportedSymbol] -> Maybe Text
+selectCustomPreludeModule maybeCustomPrelude exportedSymbols = do
+  customPreludeModule <- maybeCustomPrelude
+  if customPreludeModule `elem` candidateModulesForSymbols exportedSymbols
+    then Just customPreludeModule
+    else Nothing
+
 sortOnDescending :: (Ord b) => (a -> b) -> [a] -> [a]
 sortOnDescending score =
   sortBy (\left right -> compare (score right) (score left))
@@ -327,11 +359,21 @@ renderMissingSymbol maybeQualifier missingName =
       (\qualifier -> qualifier <> "." <> missingName)
       maybeQualifier
 
-buildResolveImportOperation :: MissingImportRequest -> Text -> Maybe Text -> Maybe ImportOperation
-buildResolveImportOperation MissingImportRequest {requestMissingSymbol = MissingSymbol {missingQualifier = Just qualifier}} moduleName _ =
+renderCustomPreludeSelection :: MissingSymbol -> Text -> String
+renderCustomPreludeSelection MissingSymbol {missingName, missingQualifier} moduleName =
+  "Auto-refact: selected custom prelude module "
+    <> T.unpack moduleName
+    <> " for "
+    <> renderMissingSymbol missingQualifier missingName
+
+buildResolveImportOperation :: Maybe Text -> MissingImportRequest -> Text -> Maybe Text -> Maybe ImportOperation
+buildResolveImportOperation _ MissingImportRequest {requestMissingSymbol = MissingSymbol {missingQualifier = Just qualifier}} moduleName _ =
   Just (EnsureQualifiedImport moduleName qualifier)
-buildResolveImportOperation MissingImportRequest {} moduleName maybeImportItem =
-  AddUnqualifiedItem moduleName <$> maybeImportItem
+buildResolveImportOperation maybeCustomPrelude MissingImportRequest {} moduleName maybeImportItem
+  | maybeCustomPrelude == Just moduleName =
+      Just (EnsureUnqualifiedOpenImport moduleName)
+  | otherwise =
+      AddUnqualifiedItem moduleName <$> maybeImportItem
 
 buildExtendExistingImportOperation :: [ParsedImport] -> MissingSymbol -> Text -> Maybe (Maybe Text -> Maybe ImportOperation)
 buildExtendExistingImportOperation parsedImports MissingSymbol {missingQualifier = Just qualifier} moduleName

@@ -21,7 +21,7 @@ import qualified GHC.Types.SourceError as GHC.SourceError
 import Lore.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (..), ghcMessagesToDiagnostics)
 import Lore.Internal.Lookup.ModSummaries (getModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
-import Lore.Internal.Session (PreludeImportRule (..), SessionContext (..))
+import Lore.Internal.Session (SessionContext (..))
 import Lore.Monad (MonadLore)
 import System.Directory (removeFile)
 import System.IO (hClose, openTempFile)
@@ -45,23 +45,18 @@ invalidateInterpreterContext = do
 
 refreshInterpreterContext :: (MonadLore m) => m ()
 refreshInterpreterContext = do
-  preludeRule <- asks interpreterPreludeImportRule
+  maybeCustomPrelude <- asks customPrelude
   ModSummaries modSummaries <- getModSummaries
   loadedModuleNames <- Set.toAscList . Set.fromList <$> mapMMaybe loadedHomeModuleName (Map.elems modSummaries)
-  GHC.setContext (preludeImports preludeRule <> map importModule loadedModuleNames)
+  GHC.setContext (preludeImports maybeCustomPrelude <> map importModule loadedModuleNames)
   cacheVar <- asks interpreterContextCache
   modifyMVar cacheVar $ \_ -> pure (Just loadedModuleNames, ())
   where
     importModule =
       GHC.IIDecl . GHC.simpleImportDecl
 
-    preludeImports = \case
-      NoPrelude ->
-        []
-      ImportBasePrelude ->
-        [importModule (GHC.mkModuleName "Prelude")]
-      ImportCustomPrelude moduleName ->
-        [importModule (GHC.mkModuleName (T.unpack moduleName))]
+    preludeImports maybeCustomPrelude =
+      [importModule (GHC.mkModuleName (T.unpack (maybe "Prelude" id maybeCustomPrelude)))]
 
     loadedHomeModuleName summary = do
       maybeInfo <- GHC.getModuleInfo (GHC.ms_mod summary)
