@@ -274,10 +274,7 @@ extractLeadingQuoted text =
   case T.uncons (T.stripStart text) of
     Just (quoteStart, afterOpen)
       | isQuoteChar quoteStart ->
-          case T.breakOn (matchingQuote quoteStart) afterOpen of
-            (segment, afterClose)
-              | T.null afterClose -> Nothing
-              | otherwise -> Just segment
+          fst <$> splitQuotedSegment quoteStart afterOpen
     _ ->
       Nothing
 
@@ -293,11 +290,39 @@ quotedSegments =
       case firstQuote remaining of
         Nothing -> reverse acc
         Just (quoteStart, afterOpen) ->
-          case T.breakOn (matchingQuote quoteStart) afterOpen of
-            (segment, afterClose)
-              | T.null afterClose -> reverse acc
-              | otherwise ->
-                  go (segment : acc) (T.drop 1 afterClose)
+          case splitQuotedSegment quoteStart afterOpen of
+            Nothing -> reverse acc
+            Just (segment, afterClose) ->
+              go (segment : acc) afterClose
+
+splitQuotedSegment :: Char -> Text -> Maybe (Text, Text)
+splitQuotedSegment quoteStart =
+  go []
+  where
+    closingQuote = matchingQuoteChar quoteStart
+
+    go acc remaining =
+      case T.uncons remaining of
+        Nothing ->
+          Nothing
+        Just (ch, rest)
+          | ch == closingQuote,
+            canCloseQuotedSegment closingQuote rest ->
+              Just (T.pack (reverse acc), rest)
+          | otherwise ->
+              go (ch : acc) rest
+
+canCloseQuotedSegment :: Char -> Text -> Bool
+canCloseQuotedSegment '\'' remaining =
+  case T.uncons remaining of
+    Nothing -> True
+    Just (nextChar, _) -> isQuotedSegmentBoundary nextChar
+canCloseQuotedSegment _ _ =
+  True
+
+isQuotedSegmentBoundary :: Char -> Bool
+isQuotedSegmentBoundary ch =
+  isSpace ch || ch `elem` [',', ';', ':', ')', ']', '}', '.']
 
 firstQuote :: Text -> Maybe (Char, Text)
 firstQuote text =
@@ -307,15 +332,14 @@ firstQuote text =
       let quoteStart = T.index text index
        in Just (quoteStart, T.drop (index + 1) text)
 
-matchingQuote :: Char -> Text
-matchingQuote quoteStart =
-  T.singleton $
-    case quoteStart of
-      '‘' -> '’'
-      '`' -> '\''
-      '\'' -> '\''
-      '"' -> '"'
-      other -> other
+matchingQuoteChar :: Char -> Char
+matchingQuoteChar quoteStart =
+  case quoteStart of
+    '‘' -> '’'
+    '`' -> '\''
+    '\'' -> '\''
+    '"' -> '"'
+    other -> other
 
 isQuoteChar :: Char -> Bool
 isQuoteChar ch =

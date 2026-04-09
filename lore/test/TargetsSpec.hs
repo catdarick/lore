@@ -289,6 +289,35 @@ spec =
         importHeaderFor "import AutoRefactFixture.Imports" demoSource
           `shouldBe` Just "import AutoRefactFixture.Imports (FixtureBox(..))"
 
+    it "adds an import for missing quoted constructors from another module" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+        ensureCrossModuleContextDataFixture fixtureRoot
+        appendDemoDefinitions
+          demoFile
+          [ "renderContextData :: ContextData -> String",
+            "renderContextData ContextData'Today = \"Today's date\"",
+            "renderContextData ContextData'UserOverview = \"User overview data\""
+          ]
+
+        logsRef <- newIORef []
+        let loggerHandle =
+              LoggerHandle \logMessage ->
+                modifyIORef' logsRef (<> [logMessage.content])
+
+        loaded <- fixtureLoreAtWithLogger loggerHandle fixtureRoot do
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
+
+        demoSource <- TIO.readFile demoFile
+        logs <- readIORef logsRef
+        if loaded
+          then pure ()
+          else expectationFailure (unlines logs <> "\n" <> T.unpack demoSource)
+        loaded `shouldBe` True
+        importHeaderFor "import Schema.InternalClients.Agents.Types" demoSource
+          `shouldBe` Just "import Schema.InternalClients.Agents.Types (ContextData(..))"
+
     it "extends an existing import list for a missing record field used via dot syntax" do
       withFixtureCopy \fixtureRoot -> do
         let demoFile = fixtureRoot </> "src" </> "Demo.hs"
@@ -872,6 +901,17 @@ ensureReexportFixtureModules fixtureRoot = do
   TIO.writeFile (moduleDir </> "ReA.hs") reexportedShortModuleSource
   TIO.writeFile (moduleDir </> "ReexportLongName.hs") reexportedLongModuleSource
 
+ensureCrossModuleContextDataFixture :: FilePath -> IO ()
+ensureCrossModuleContextDataFixture fixtureRoot = do
+  let schemaDir =
+        fixtureRoot
+          </> "src"
+          </> "Schema"
+          </> "InternalClients"
+          </> "Agents"
+  createDirectoryIfMissing True schemaDir
+  TIO.writeFile (schemaDir </> "Types.hs") crossModuleContextDataTypesSource
+
 autoRefactFixtureModuleSource :: T.Text
 autoRefactFixtureModuleSource =
   T.unlines
@@ -1006,6 +1046,19 @@ competingPreludePreferenceModuleSource =
       "",
       "preludePreferred :: Int",
       "preludePreferred = 7"
+    ]
+
+crossModuleContextDataTypesSource :: T.Text
+crossModuleContextDataTypesSource =
+  T.unlines
+    [ "module Schema.InternalClients.Agents.Types",
+      "  ( ContextData(..)",
+      "  )",
+      "where",
+      "",
+      "data ContextData",
+      "  = ContextData'Today",
+      "  | ContextData'UserOverview"
     ]
 
 countImportHeaders :: T.Text -> T.Text -> Int

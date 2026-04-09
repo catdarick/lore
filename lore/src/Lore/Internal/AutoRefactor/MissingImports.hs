@@ -71,7 +71,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
               maybeImportItem <- renderImportItem requestMissingSymbol selectedSymbol
               pure $
                 maybeToList $
-                      buildResolveImportOperation maybeCustomPrelude request moduleName maybeImportItem
+                  buildResolveImportOperation maybeCustomPrelude request moduleName maybeImportItem
         ExtendExistingImport ExtendExistingImportDetails {requestTargetModule, requestImportItemOverride} ->
           let matchingExportedSymbols =
                 filter (matchesMissingKind requestMissingSymbol) $
@@ -81,38 +81,38 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
                   requestTargetModule
                   (selectCustomPreludeModule maybeCustomPrelude matchingExportedSymbols)
            in case buildExtendExistingImportOperation parsedImports requestMissingSymbol selectedTargetModule of
-            Nothing -> do
-              let selectedSymbol =
-                    listToMaybe
-                      [ symbol
-                      | symbol <- matchingExportedSymbols,
-                        selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
-                      ]
-              maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
-              if selectedTargetModule /= requestTargetModule
-                then do
-                  Log.debug (renderCustomPreludeSelection requestMissingSymbol selectedTargetModule)
+                Nothing -> do
+                  let selectedSymbol =
+                        listToMaybe
+                          [ symbol
+                          | symbol <- matchingExportedSymbols,
+                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
+                          ]
+                  maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
+                  if selectedTargetModule /= requestTargetModule
+                    then do
+                      Log.debug (renderCustomPreludeSelection requestMissingSymbol selectedTargetModule)
+                      pure $
+                        maybeToList $
+                          buildResolveImportOperation maybeCustomPrelude request selectedTargetModule maybeImportItem
+                    else do
+                      Log.debug $
+                        "Auto-refact: skipping import-list extension for "
+                          <> renderMissingSymbol requestMissingSymbol.missingQualifier requestMissingSymbol.missingName
+                          <> " because MissingTargetImport with target "
+                          <> T.unpack requestTargetModule
+                      pure []
+                Just buildOperation -> do
+                  let selectedSymbol =
+                        listToMaybe
+                          [ symbol
+                          | symbol <- matchingExportedSymbols,
+                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
+                          ]
+                  maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
                   pure $
                     maybeToList $
-                      buildResolveImportOperation maybeCustomPrelude request selectedTargetModule maybeImportItem
-                else do
-                  Log.debug $
-                    "Auto-refact: skipping import-list extension for "
-                      <> renderMissingSymbol requestMissingSymbol.missingQualifier requestMissingSymbol.missingName
-                      <> " because MissingTargetImport with target "
-                      <> T.unpack requestTargetModule
-                  pure []
-            Just buildOperation -> do
-              let selectedSymbol =
-                    listToMaybe
-                      [ symbol
-                      | symbol <- matchingExportedSymbols,
-                        selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
-                      ]
-              maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
-              pure $
-                maybeToList $
-                  buildOperation maybeImportItem
+                      buildOperation maybeImportItem
 
 data ModuleSelectionDecision
   = SelectModule Text ModuleSelectionReason
