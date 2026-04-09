@@ -1,5 +1,5 @@
-module Lore.Mcp.Tools.ExecuteStatement
-  ( executeStatementTool,
+module Lore.Mcp.Tools.ExecuteCode
+  ( executeCodeTool,
   )
 where
 
@@ -20,10 +20,10 @@ import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..),
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartialLoadWarning)
 
-newtype ExecuteStatementArgs (fieldType :: FieldType) = ExecuteStatementArgs
+newtype ExecuteCodeArgs (fieldType :: FieldType) = ExecuteCodeArgs
   { statement ::
       Field fieldType Text
-        `WithMeta` '[ Description "Haskell statement to execute in the current interpreter context. Supports GHCi style variable bindings, function definitions, and IO actions. For multi-line statements, use `do` or `let ... in` syntax.",
+        `WithMeta` '[ Description "Haskell code to execute in the current interpreter context. Supports expressions, variable bindings, function definitions, and IO actions. For multi-line statements, use `do` or `let ... in` syntax.",
                       Example
                         "do\
                         \  let x = 1 + 2\
@@ -34,21 +34,21 @@ newtype ExecuteStatementArgs (fieldType :: FieldType) = ExecuteStatementArgs
   }
   deriving stock (Generic)
 
-instance J.FromJSON (ExecuteStatementArgs 'ValueType)
+instance J.FromJSON (ExecuteCodeArgs 'ValueType)
 
-instance ToSchema (ExecuteStatementArgs 'MetadataType)
+instance ToSchema (ExecuteCodeArgs 'MetadataType)
 
-executeStatementTool :: (MonadLore m) => SomeTool m
-executeStatementTool =
+executeCodeTool :: (MonadLore m) => SomeTool m
+executeCodeTool =
   SomeToolWithArgs
     ToolWithArgs
-      { name = "executeStatement",
-        description = Just "Execute a Haskell statement in the current project interpreter context.",
-        handler = executeStatementHandler
+      { name = "executeCode",
+        description = Just "Execute Haskell code in the current project interpreter context. Interpreter bindings are reset when reloadHomeModules runs.",
+        handler = executeCodeHandler
       }
 
-executeStatementHandler :: (MonadLore m) => ExecuteStatementArgs 'ValueType -> m Text
-executeStatementHandler ExecuteStatementArgs {statement} = do
+executeCodeHandler :: (MonadLore m) => ExecuteCodeArgs 'ValueType -> m Text
+executeCodeHandler ExecuteCodeArgs {statement} = do
   maybeLoadResult <- getLastLoadTargetsResult
   contextReady <- interpreterContextIsReady
   case maybeLoadResult of

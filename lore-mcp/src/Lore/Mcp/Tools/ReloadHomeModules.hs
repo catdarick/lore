@@ -26,7 +26,7 @@ reloadHomeModulesTool =
   SomeToolWithoutArgs
     ToolWithoutArgs
       { name = "reloadHomeModules",
-        description = Just "Reloads all the home modules checking for errors and applying auto-fixes when possible. Run this command before using other tools that require up-to-date module information.",
+        description = Just "Reloads all home modules, checks for errors, and applies safe auto-fixes when possible. This resets interpreter state (interactive bindings are cleared). Run this before tools that need up-to-date module information.",
         handler = reloadHomeModulesHandler
       }
 

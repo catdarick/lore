@@ -30,7 +30,7 @@ executable lore-mcp
       Lore.Mcp.Protocol.Request
       Lore.Mcp.Protocol.Server
       Lore.Mcp.Server
-      Lore.Mcp.Tools.ExecuteStatement
+      Lore.Mcp.Tools.ExecuteCode
       Lore.Mcp.Tools.GetDefinition
       Lore.Mcp.Tools.GetTypeOfExpression
       Lore.Mcp.Tools.LookupInstances

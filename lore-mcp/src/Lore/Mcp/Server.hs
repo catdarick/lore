@@ -5,7 +5,7 @@ where
 
 import Lore (ParallelWorkersCount (..), PreludeImportRule (..), SessionConfig (..), noLogHandle, runLore)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
-import Lore.Mcp.Tools.ExecuteStatement (executeStatementTool)
+import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
 import Lore.Mcp.Tools.GetDefinition (getDefinitionTool)
 import Lore.Mcp.Tools.GetTypeOfExpression (getTypeOfExpressionTool)
 import Lore.Mcp.Tools.LookupInstances (lookupInstancesTool)
@@ -18,7 +18,7 @@ runLoreMcpServer = runLore sessionConfig do
     McpServer
       { name = "lore",
         initialize = pure (),
-        tools = [reloadHomeModulesTool, executeStatementTool, getTypeOfExpressionTool, lookupSymbolInfoTool, lookupInstancesTool, getDefinitionTool]
+        tools = [reloadHomeModulesTool, executeCodeTool, getTypeOfExpressionTool, lookupSymbolInfoTool, lookupInstancesTool, getDefinitionTool]
       }
   where
     sessionConfig =
