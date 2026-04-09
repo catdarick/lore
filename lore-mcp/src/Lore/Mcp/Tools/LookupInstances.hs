@@ -18,7 +18,7 @@ import Lore
     MatchingInstance (..),
     MonadLore,
     getLastLoadTargetsResult,
-    lookupIntersectingRootInstances,
+    lookupIntersectingInstances,
   )
 import Lore.Mcp.Internal.Annotated
   ( Description,
@@ -50,7 +50,7 @@ lookupInstancesTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "lookupInstances",
-        description = Just "Find class or family instance declarations whose instance head mentions all queried symbols. Example: [\"Show\", \"Int\"] matches `instance Show Int`; [\"Int\", \"String\"] matches only instances where both types appear together. Queries are resolved to root declarations automatically.",
+        description = Just "Find class or family instance declarations whose instance head mentions all queried symbols. Example: [\"Show\", \"Int\"] matches `instance Show Int`; [\"Int\", \"String\"] matches only instances where both types appear together.",
         handler = lookupInstancesHandler
       }
 
@@ -61,7 +61,7 @@ lookupInstancesHandler LookupInstancesArgs {names} = do
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
-      lookupResult <- lookupIntersectingRootInstances names
+      lookupResult <- lookupIntersectingInstances names
       pure (renderLookupInstancesResult loadResult lookupResult)
 
 renderLookupInstancesResult :: LoadTargetsResult -> LookupInstancesResult -> Text
