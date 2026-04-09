@@ -93,6 +93,36 @@ spec =
         result
           `shouldSatisfy` all (\symbolInfo -> elem "Prelude" (map (GHC.moduleNameString . GHC.moduleName) symbolInfo.exportedFrom))
 
+      it "supports module-qualified dotted operators" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            lookupRootSymbolInfo "Demo.Support..+."
+
+        length result `shouldBe` 1
+        fmap (Outputable.showSDocUnsafe . Outputable.ppr . symbolName) result
+          `shouldSatisfy` any (isInfixOf ".+.")
+
+      it "supports parenthesized operator queries" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            lookupRootSymbolInfo "(.+.)"
+
+        length result `shouldBe` 1
+        fmap (Outputable.showSDocUnsafe . Outputable.ppr . symbolName) result
+          `shouldSatisfy` any (isInfixOf ".+.")
+
+      it "supports module-qualified parenthesized operator queries" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            lookupRootSymbolInfo "Demo.Support.(.+.)"
+
+        length result `shouldBe` 1
+        fmap (Outputable.showSDocUnsafe . Outputable.ppr . symbolName) result
+          `shouldSatisfy` any (isInfixOf ".+.")
+
     describe "findSymbols" do
       it "supports module-qualified hints before filtering candidates" do
         result <-
@@ -103,6 +133,36 @@ spec =
         length result `shouldBe` 1
         fmap (\exportedSymbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe exportedSymbol.name)) result
           `shouldBe` ["Demo.Support"]
+
+      it "supports module-qualified dotted operators" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            findSymbols "Demo.Support..+."
+
+        length result `shouldBe` 1
+        fmap (Outputable.showSDocUnsafe . Outputable.ppr . name) result
+          `shouldSatisfy` any (isInfixOf ".+.")
+
+      it "supports parenthesized operator queries" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            findSymbols "(.+.)"
+
+        length result `shouldBe` 1
+        fmap (Outputable.showSDocUnsafe . Outputable.ppr . name) result
+          `shouldSatisfy` any (isInfixOf ".+.")
+
+      it "supports module-qualified parenthesized operator queries" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            findSymbols "Demo.Support.(.+.)"
+
+        length result `shouldBe` 1
+        fmap (Outputable.showSDocUnsafe . Outputable.ppr . name) result
+          `shouldSatisfy` any (isInfixOf ".+.")
 
     describe "lookupIntersectingInstances" do
       it "intersects class instances across multiple symbol queries" do

@@ -3,6 +3,7 @@ module Demo.Support
     supportStep,
     SupportRecord,
     mkSupportRecord,
+    (.+.),
   )
 where
 
@@ -23,3 +24,6 @@ mkSupportRecord value =
   SupportRecord
     { supportValues = Map.singleton "value" value
     }
+
+(.+.) :: Int -> Int -> Int
+left .+. right = left + right

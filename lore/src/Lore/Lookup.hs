@@ -19,6 +19,7 @@ module Lore.Lookup
 where
 
 import Control.Monad (forM)
+import Data.Char (isAlphaNum, isUpper)
 import Data.Containers.ListUtils (nubOrdOn)
 import Data.List (foldl', intercalate, sortOn)
 import Data.Maybe (catMaybes, mapMaybe)
@@ -233,18 +234,12 @@ findResolvedSymbolNames resolveRoot needle = do
 findExportedSymbols :: Text -> SymbolsMap -> [ExportedSymbol]
 findExportedSymbols queryText symbolsMap =
   filterExportedSymbolsByModuleHint moduleHint $
-    SymbolsMap.lookupSymbolsInMap occName symbolsMap
+    SymbolsMap.lookupSymbolsInMap normalizedOccName symbolsMap
   where
     (moduleHint, occName) =
-      case reverse (T.splitOn "." queryText) of
-        parsedOccName : reversedModuleHintSegments
-          | not (T.null parsedOccName),
-            let moduleHintSegments = reverse reversedModuleHintSegments,
-            not (null moduleHintSegments),
-            all (not . T.null) moduleHintSegments ->
-              (Just (T.intercalate "." moduleHintSegments), parsedOccName)
-        _ ->
-          (Nothing, queryText)
+      splitQualifiedSymbolQuery queryText
+    normalizedOccName =
+      normalizeQueryOccName occName
 
     filterExportedSymbolsByModuleHint Nothing exportedSymbols =
       exportedSymbols
@@ -260,6 +255,57 @@ findExportedSymbols queryText symbolsMap =
 
     moduleMatchesHint hintedModule module_ =
       T.pack (GHC.moduleNameString (GHC.moduleName module_)) == hintedModule
+
+splitQualifiedSymbolQuery :: Text -> (Maybe Text, Text)
+splitQualifiedSymbolQuery queryText =
+  case qualifiedCandidates of
+    (moduleHint, occName) : _ ->
+      (Just moduleHint, occName)
+    [] ->
+      (Nothing, queryText)
+  where
+    segments = T.splitOn "." queryText
+    qualifiedCandidates =
+      reverse $
+        mapMaybe mkCandidate [1 .. length segments - 1]
+
+    mkCandidate prefixLen = do
+      let moduleSegments = take prefixLen segments
+          occSegments = drop prefixLen segments
+          moduleHint = T.intercalate "." moduleSegments
+          occName = T.intercalate "." occSegments
+      if all isModuleNameSegment moduleSegments && not (T.null occName)
+        then Just (moduleHint, occName)
+        else Nothing
+
+isModuleNameSegment :: Text -> Bool
+isModuleNameSegment segment =
+  case T.uncons segment of
+    Nothing ->
+      False
+    Just (firstChar, rest) ->
+      isUpper firstChar && T.all isModuleNameChar rest
+
+isModuleNameChar :: Char -> Bool
+isModuleNameChar char =
+  isAlphaNum char || char == '_' || char == '\''
+
+normalizeQueryOccName :: Text -> Text
+normalizeQueryOccName occName =
+  case T.stripPrefix "(" occName >>= T.stripSuffix ")" of
+    Just strippedOccName
+      | isOperatorOccName strippedOccName ->
+          strippedOccName
+    _ ->
+      occName
+
+isOperatorOccName :: Text -> Bool
+isOperatorOccName text =
+  not (T.null text) && T.all isOperatorChar text
+
+isOperatorChar :: Char -> Bool
+isOperatorChar char =
+  char `elem` ("!#$%&*+./<=>?@\\^|-~:" :: String)
 
 resolveExportedSymbolName :: (MonadLore m) => Bool -> ExportedSymbol -> m GHC.Name
 resolveExportedSymbolName resolveRoot exportedSymbol
