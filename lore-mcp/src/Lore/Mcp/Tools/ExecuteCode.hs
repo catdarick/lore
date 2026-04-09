@@ -21,7 +21,7 @@ import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartialLoadWarning)
 
 newtype ExecuteCodeArgs (fieldType :: FieldType) = ExecuteCodeArgs
-  { statement ::
+  { code ::
       Field fieldType Text
         `WithMeta` '[ Description "Haskell code to execute in the current interpreter context. Supports expressions, variable bindings, function definitions, and IO actions. For multi-line statements, use `do` or `let ... in` syntax.",
                       Example
@@ -48,7 +48,7 @@ executeCodeTool =
       }
 
 executeCodeHandler :: (MonadLore m) => ExecuteCodeArgs 'ValueType -> m Text
-executeCodeHandler ExecuteCodeArgs {statement} = do
+executeCodeHandler ExecuteCodeArgs {code} = do
   maybeLoadResult <- getLastLoadTargetsResult
   contextReady <- interpreterContextIsReady
   case maybeLoadResult of
@@ -58,7 +58,7 @@ executeCodeHandler ExecuteCodeArgs {statement} = do
       | not contextReady ->
           pure "Interpreter context is not ready. Run reloadHomeModules again."
       | otherwise -> do
-          executionResult <- executeStatement statement
+          executionResult <- executeStatement code
           pure $
             case executionResult of
               Right rendered ->

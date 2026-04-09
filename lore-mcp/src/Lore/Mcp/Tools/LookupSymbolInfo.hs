@@ -21,7 +21,7 @@ import Lore
     MonadLore,
     SymbolInfo (..),
     getLastLoadTargetsResult,
-    lookupRootSymbolInfo,
+    lookupSymbolInfo,
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
@@ -46,7 +46,7 @@ lookupSymbolInfoTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "lookupSymbolInfo",
-        description = Just "Look up information about an exported symbol in the currently loaded project. Queries are resolved to root declarations automatically.",
+        description = Just "Look up information about an exported symbol visible in the loaded session (home modules and visible dependencies).",
         handler = lookupSymbolInfoHandler
       }
 
@@ -57,7 +57,7 @@ lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol} = do
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
-      symbolInfos <- lookupRootSymbolInfo symbol
+      symbolInfos <- lookupSymbolInfo symbol
       pure (renderLookupResult loadResult symbol symbolInfos)
 
 renderLookupResult :: LoadTargetsResult -> Text -> [SymbolInfo] -> Text

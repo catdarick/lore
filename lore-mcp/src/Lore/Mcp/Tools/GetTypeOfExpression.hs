@@ -33,7 +33,7 @@ import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartial
 newtype GetTypeOfExpressionArgs (fieldType :: FieldType) = GetTypeOfExpressionArgs
   { expression ::
       Field fieldType Text
-        `WithMeta` '[ Description "Haskell expression to infer in the current interpreter context.",
+        `WithMeta` '[ Description "Haskell expression to infer in the current interpreter context (expressions only; declarations and statements are not supported).",
                       Example "map (+1) [1, 2, 3]"
                     ]
   }
@@ -48,7 +48,7 @@ getTypeOfExpressionTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "getTypeOfExpression",
-        description = Just "Infer the Haskell type of an expression in the current project interpreter context.",
+        description = Just "Infer the type of a Haskell expression in the current project interpreter context. Run reloadHomeModules first.",
         handler = getTypeOfExpressionHandler
       }
 
