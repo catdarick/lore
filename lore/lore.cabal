@@ -132,6 +132,7 @@ test-suite lore-test
       InterpreterSpec
       ImportNormalizeSpec
       LookupSpec
+      LoggerSpec
       TargetsSpec
       TestSupport
       SomeModule

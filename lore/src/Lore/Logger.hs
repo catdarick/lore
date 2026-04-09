@@ -14,6 +14,7 @@ where
 
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.Time (UTCTime, defaultTimeLocale, formatTime, getCurrentTime)
+import System.IO (hPutStrLn, stderr)
 
 newtype LoggerHandle = LoggerHandle
   { putLog :: LogMessage -> IO ()
@@ -54,9 +55,11 @@ warn = logMsg Warning
 err :: (MonadLogger m) => String -> m ()
 err = logMsg Error
 
-prettyLoggerHandle :: LoggerHandle
-prettyLoggerHandle = LoggerHandle $ \msg -> do
-  putStrLn (formatLog msg)
+prettyLoggerHandle :: LogLevel -> LoggerHandle
+prettyLoggerHandle minimumLevel = LoggerHandle $ \msg -> do
+  if msg.level >= minimumLevel
+    then hPutStrLn stderr (formatLog msg)
+    else pure ()
   where
     formatLog LogMessage {timestamp, level, content} =
       let severityStr = case level of

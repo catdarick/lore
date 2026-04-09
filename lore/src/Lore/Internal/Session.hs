@@ -19,7 +19,7 @@ import Lore.Internal.Ghc.DynFlags
 import Lore.Internal.Lookup.Types (ModSummaries, NameToInstancesIndex, SymbolsMap)
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
 import Lore.Internal.Targets.Result (LoadTargetsResult)
-import Lore.Logger (LoggerHandle, prettyLoggerHandle)
+import Lore.Logger (LoggerHandle, noLogHandle)
 
 data SessionContext = SessionContext
   { projectRoot :: FilePath,
@@ -48,7 +48,7 @@ defaultSessionConfig =
   SessionConfig
     { projectRoot = ".",
       ghcWorkDir = ".lore-work",
-      loggerHandle = prettyLoggerHandle,
+      loggerHandle = noLogHandle,
       customPrelude = Nothing,
       parallelWorkersLimit = WorkersAsNumProcessors
     }

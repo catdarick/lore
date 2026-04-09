@@ -7,7 +7,7 @@ import Control.Applicative ((<|>))
 import Data.Maybe (fromMaybe)
 import Data.Text (pack)
 import qualified Data.Text as T
-import Lore (ParallelWorkersCount (..), SessionConfig (..), noLogHandle, runLore)
+import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConfig (..), noLogHandle, prettyLoggerHandle, runLore)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
 import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
 import Lore.Mcp.Tools.GetDefinition (getDefinitionTool)
@@ -42,10 +42,12 @@ runLoreMcpServer = do
       ghcWorkDirOverride <- lookupEnv "LORE_MCP_GHC_WORK_DIR"
       customPreludeOverride <- lookupOptionalEnvParsed "LORE_MCP_CUSTOM_PRELUDE" parseCustomPrelude
       parallelWorkersLimitOverride <- lookupOptionalEnvParsed "LORE_MCP_PARALLEL_WORKERS_LIMIT" parseParallelWorkersCount
+      loggerHandleOverride <- resolveLoggerHandle
       pure
         defaultSessionConfig
           { projectRoot = fromMaybe (projectRoot defaultSessionConfig) projectRootOverride,
             ghcWorkDir = fromMaybe (ghcWorkDir defaultSessionConfig) ghcWorkDirOverride,
+            loggerHandle = loggerHandleOverride,
             customPrelude = customPreludeOverride <|> customPrelude defaultSessionConfig,
             parallelWorkersLimit = fromMaybe (parallelWorkersLimit defaultSessionConfig) parallelWorkersLimitOverride
           }
@@ -75,3 +77,21 @@ parseParallelWorkersCount rawValue
       if workersCount > 0
         then Just (ThisWorkersCount workersCount)
         else Nothing
+
+resolveLoggerHandle :: IO LoggerHandle
+resolveLoggerHandle = do
+  maybeLogLevel <- lookupOptionalEnvParsed "LORE_MCP_LOG_LEVEL" parseLogLevel
+  pure $
+    case maybeLogLevel of
+      Just logLevel -> prettyLoggerHandle logLevel
+      Nothing -> noLogHandle
+
+parseLogLevel :: String -> Maybe LogLevel
+parseLogLevel rawValue =
+  case T.toLower (T.strip (pack rawValue)) of
+    "debug" -> Just Debug
+    "info" -> Just Info
+    "warning" -> Just Warning
+    "warn" -> Just Warning
+    "error" -> Just Error
+    _ -> Nothing
