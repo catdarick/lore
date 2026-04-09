@@ -23,8 +23,13 @@ import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartial
 newtype ExecuteStatementArgs (fieldType :: FieldType) = ExecuteStatementArgs
   { statement ::
       Field fieldType Text
-        `WithMeta` '[ Description "Haskell statement to execute in the current interpreter context. Supports GHCi style variable bindings, function definitions, and IO actions.",
-                      Example "print (map (+1) [1, 2, 3])"
+        `WithMeta` '[ Description "Haskell statement to execute in the current interpreter context. Supports GHCi style variable bindings, function definitions, and IO actions. For multi-line statements, use `do` or `let ... in` syntax.",
+                      Example
+                        "do\
+                        \  let x = 1 + 2\
+                        \  print x",
+                      Example "let add a b = a + b",
+                      Example "5 * 10"
                     ]
   }
   deriving stock (Generic)
