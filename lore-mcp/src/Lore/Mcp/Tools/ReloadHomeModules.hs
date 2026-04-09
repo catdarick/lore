@@ -4,7 +4,7 @@ import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace, toLower)
-import Data.List (foldl')
+import Data.List (foldl', stripPrefix)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -26,7 +26,7 @@ reloadHomeModulesTool =
   SomeToolWithoutArgs
     ToolWithoutArgs
       { name = "reloadHomeModules",
-        description = Just "Reloads all home modules, checks for errors, and applies safe auto-fixes when possible. This resets interpreter state (interactive bindings are cleared). Run this before tools that need up-to-date module information.",
+        description = Just "Reloads all home modules, checks for errors, and applies safe auto-fixes when possible. Auto-fixes may modify source files. This resets interpreter state (interactive bindings are cleared). Run this before tools that need up-to-date module information.",
         handler = reloadHomeModulesHandler
       }
 
@@ -41,7 +41,7 @@ renderReloadHomeModulesResult loadResult@LoadTargetsResult {loadTargetsDiagnosti
       pure $
         T.pack $
           unlines
-            [statusLine]
+            ([statusLine] <> autoFixedSummarySection loadResult)
   | otherwise =
       do
         let (visibleDiagnostics, hiddenDiagnostics) = splitAt maxRenderedDiagnostics loadTargetsDiagnostics
@@ -52,6 +52,8 @@ renderReloadHomeModulesResult loadResult@LoadTargetsResult {loadTargetsDiagnosti
             [ statusLine,
               ""
             ]
+              <> autoFixedSummarySection loadResult
+              <> ["" | not (null (autoFixedSummarySection loadResult))]
               <> concatMap (<> [""]) renderedGroups
               <> hiddenDiagnosticsSummary hiddenDiagnostics
   where
@@ -86,6 +88,23 @@ hiddenDiagnosticsSummary hiddenDiagnostics =
   where
     hiddenCount = length hiddenDiagnostics
     hiddenModuleCount = length (groupDiagnostics hiddenDiagnostics)
+
+autoFixedSummarySection :: LoadTargetsResult -> [String]
+autoFixedSummarySection loadResult
+  | null loadResult.loadTargetsAutofixSummaryByFile = []
+  | otherwise =
+      [ "Auto-fixed files (source files were modified):"
+      ]
+        <> concatMap renderAutofixedFileSummary loadResult.loadTargetsAutofixSummaryByFile
+
+renderAutofixedFileSummary :: (FilePath, [String]) -> [String]
+renderAutofixedFileSummary (filePath, summaries) =
+  ["  - " <> filePath]
+    <> map (("      * " <>) . stripAutofixPrefix) summaries
+
+stripAutofixPrefix :: String -> String
+stripAutofixPrefix summary =
+  fromMaybe summary (stripPrefix "Auto-refact: " summary)
 
 data DiagnosticGroupKey
   = DiagnosticFileGroup FilePath

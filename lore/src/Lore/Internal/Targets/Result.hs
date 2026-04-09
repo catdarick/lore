@@ -11,6 +11,8 @@ data LoadTargetsResult = LoadTargetsResult
     loadTargetsModulesLoaded :: Int,
     loadTargetsModulesFailed :: Int,
     loadTargetsModulesAutofixed :: Int,
+    loadTargetsAutofixedFiles :: [FilePath],
+    loadTargetsAutofixSummaryByFile :: [(FilePath, [String])],
     loadTargetsModulesTotal :: Int
   }
   deriving (Eq, Show)

@@ -2,7 +2,7 @@ module DefinitionSpec (spec) where
 
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
-import Data.List (find, intercalate, sort)
+import Data.List (find, intercalate, isPrefixOf, sort, tails)
 import Data.Text (pack, unpack)
 import qualified GHC
 import qualified GHC.Plugins
@@ -11,6 +11,7 @@ import Lore.Lookup (ExportedSymbol (..), findSymbols)
 import Lore.Monad (MonadLore)
 import Lore.Targets (defaultLoadTargetsOptions)
 import qualified Lore.Targets as Targets
+import System.Directory (makeAbsolute)
 import Test.Hspec
 import TestSupport (fixtureLore)
 
@@ -298,45 +299,33 @@ spec = do
 
     it "renders recursive closures grouped by file with reduced imports" do
       rendered <- fixtureRenderedDefinitionClosure 2 "crossModuleRecord"
+      renderedSupportSection <-
+        renderExpectedRenderedModuleFromFile
+          "src/Demo/Support.hs"
+          "test/fixtures/demo/src/Demo/Support.hs"
+          ["import qualified Data.Map.Strict as Map"]
+          [ "supportSeed :: Int\nsupportSeed = 5",
+            "supportStep :: Int -> Int\nsupportStep value = value + supportSeed",
+            "data SupportRecord = SupportRecord\n  { supportValues :: Map.Map String Int\n  }",
+            "mkSupportRecord :: Int -> SupportRecord\nmkSupportRecord value =\n  SupportRecord\n    { supportValues = Map.singleton \"value\" value\n    }"
+          ]
 
       rendered
         `shouldBe` intercalate
           "\n"
-          [ "=== src/Demo.hs ===",
-            "",
-            "--- imports ---",
-            "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)",
-            "",
-            "--- lines 60-62 ---",
-            "crossModuleRecord :: Int -> Support.SupportRecord",
-            "crossModuleRecord value =",
-            "  Support.mkSupportRecord (Support.supportStep value)",
-            "",
-            "=== src/Demo/Support.hs ===",
-            "",
-            "--- imports ---",
-            "import qualified Data.Map.Strict as Map",
-            "",
-            "--- lines 11-12 ---",
-            "supportSeed :: Int",
-            "supportSeed = 5",
-            "",
-            "--- lines 14-15 ---",
-            "supportStep :: Int -> Int",
-            "supportStep value = value + supportSeed",
-            "",
-            "--- lines 17-19 ---",
-            "data SupportRecord = SupportRecord",
-            "  { supportValues :: Map.Map String Int",
-            "  }",
-            "",
-            "--- lines 21-25 ---",
-            "mkSupportRecord :: Int -> SupportRecord",
-            "mkSupportRecord value =",
-            "  SupportRecord",
-            "    { supportValues = Map.singleton \"value\" value",
-            "    }"
-          ]
+          ( [ "=== src/Demo.hs ===",
+              "",
+              "--- imports ---",
+              "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)",
+              "",
+              "--- lines 60-62 ---",
+              "crossModuleRecord :: Int -> Support.SupportRecord",
+              "crossModuleRecord value =",
+              "  Support.mkSupportRecord (Support.supportStep value)",
+              ""
+            ]
+              <> renderedSupportSection
+          )
 
 shouldHaveSingleDefinitionText ::
   DefinitionSlice ->
@@ -445,6 +434,36 @@ fixtureRenderedDefinitionClosure depth symbol =
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
     definitionClosure <- resolveDefinitionClosure depth targetName
     unpack <$> liftIO (renderDefinitionModulesText definitionClosure)
+
+renderExpectedRenderedModuleFromFile :: FilePath -> FilePath -> [String] -> [String] -> IO [String]
+renderExpectedRenderedModuleFromFile renderedPath sourcePath renderedImports renderedDefinitions = do
+  absoluteSourcePath <- makeAbsolute sourcePath
+  sourceLines <- lines <$> readFile absoluteSourcePath
+  pure $
+    [ "=== " <> renderedPath <> " ===",
+      "",
+      "--- imports ---"
+    ]
+      <> renderedImports
+      <> [""]
+      <> intercalate [""] (map (renderExpectedDefinitionBlock sourceLines) renderedDefinitions)
+
+renderExpectedDefinitionBlock :: [String] -> String -> [String]
+renderExpectedDefinitionBlock sourceLines renderedDefinition =
+  let definitionLines = lines renderedDefinition
+      startLine = findDefinitionStartLine sourceLines definitionLines
+      endLine = startLine + length definitionLines - 1
+   in [ "--- lines " <> show startLine <> "-" <> show endLine <> " ---"
+      ]
+        <> definitionLines
+
+findDefinitionStartLine :: [String] -> [String] -> Int
+findDefinitionStartLine sourceLines definitionLines =
+  case [lineNo | (lineNo, suffix) <- zip [1 ..] (tails sourceLines), definitionLines `isPrefixOf` suffix] of
+    startLine : _ ->
+      startLine
+    [] ->
+      error ("definition block not found in fixture source: " <> intercalate "\\n" definitionLines)
 
 findFixtureSymbol :: String -> [ExportedSymbol] -> Maybe GHC.Name
 findFixtureSymbol symbol =

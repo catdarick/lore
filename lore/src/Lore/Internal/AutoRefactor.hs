@@ -30,22 +30,35 @@ import System.FilePath (normalise)
 
 data AutoRefactorResult = AutoRefactorResult
   { autoRefactorApplied :: Bool,
-    autoRefactorOriginalContents :: Map.Map FilePath Text
+    autoRefactorOriginalContents :: Map.Map FilePath Text,
+    autoRefactorSummaryByFile :: Map.Map FilePath [String]
   }
 
 applyAutoRefactor :: (MonadLore m) => NonEmpty AutoRefactorIssue -> m AutoRefactorResult
 applyAutoRefactor issues = do
   symbolsMap <- getSymbolsMap
   modSummariesByFile <- currentModSummariesByFile
-  rewriteResults <- mapM (rewriteIssuesInFile symbolsMap modSummariesByFile) (Map.toList (groupIssuesByFile issues))
+  let groupedIssues = Map.toList (groupIssuesByFile issues)
+  rewriteResults <- mapM (rewriteIssuesInFile symbolsMap modSummariesByFile) groupedIssues
   let edits = concatMap rewriteEdits rewriteResults
       logs = concatMap rewriteLogs rewriteResults
+      rewriteLogsByFile =
+        Map.fromList
+          [ (filePath, rewriteLogs result)
+          | ((filePath, _), result) <- zip groupedIssues rewriteResults
+          ]
   forM_ logs Log.info
   AppliedFileEdits {appliedChangedFiles, appliedOriginalContents} <- applyFileEdits edits
   pure
     AutoRefactorResult
       { autoRefactorApplied = not (null appliedChangedFiles),
-        autoRefactorOriginalContents = appliedOriginalContents
+        autoRefactorOriginalContents = appliedOriginalContents,
+        autoRefactorSummaryByFile =
+          Map.fromList
+            [ (filePath, fileLogs)
+            | filePath <- appliedChangedFiles,
+              fileLogs <- maybeToList (Map.lookup filePath rewriteLogsByFile)
+            ]
       }
 
 rollbackAutoRefactorEdits :: (MonadLore m) => Map.Map FilePath Text -> m ()

@@ -89,6 +89,12 @@ spec =
           loadResult.loadTargetsModulesLoaded `shouldBe` loadResult.loadTargetsModulesTotal
           loadResult.loadTargetsModulesFailed `shouldBe` 0
           loadResult.loadTargetsModulesAutofixed `shouldBe` 1
+          loadResult.loadTargetsAutofixSummaryByFile
+            `shouldSatisfy` any
+              ( \(filePath, summaries) ->
+                  filePath == demoFile
+                    && any (\summary -> "Data.Maybe" `T.isInfixOf` T.pack summary) summaries
+              )
 
     it "opens a qualified aliased import when a used item is missing" do
       withFixtureCopy \fixtureRoot -> do

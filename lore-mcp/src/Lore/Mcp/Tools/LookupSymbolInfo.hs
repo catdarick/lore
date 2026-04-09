@@ -46,7 +46,7 @@ lookupSymbolInfoTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "lookupSymbolInfo",
-        description = Just "Look up information about an exported symbol visible in the loaded session (home modules and visible dependencies).",
+        description = Just "Look up information about an exported symbol visible in the currently loaded session state (successfully loaded home modules and visible dependencies). During partial load, 'No symbols found' only means no loaded/exported match was available in the session; it does not prove the symbol is absent from source.",
         handler = lookupSymbolInfoHandler
       }
 
@@ -67,9 +67,18 @@ renderLookupResult loadResult symbol symbolInfos =
     renderedBody =
       case symbolInfos of
         [] ->
-          "No symbols found for " <> quoteText symbol <> "."
+          renderNoSymbolsFound loadResult symbol
         _ ->
           T.intercalate "\n\n" (map renderSymbolInfo symbolInfos)
+
+renderNoSymbolsFound :: LoadTargetsResult -> Text -> Text
+renderNoSymbolsFound loadResult symbol
+  | loadResult.loadTargetsModulesFailed > 0 =
+      "No loaded/exported symbols found for "
+        <> quoteText symbol
+        <> " in the current session state. Because the project is only partially loaded, this does not mean the symbol is absent from source."
+  | otherwise =
+      "No symbols found for " <> quoteText symbol <> "."
 
 renderSymbolInfo :: SymbolInfo -> Text
 renderSymbolInfo symbolInfo =

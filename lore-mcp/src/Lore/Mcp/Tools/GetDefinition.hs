@@ -55,7 +55,7 @@ getDefinitionTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "getDefinition",
-        description = Just "Render source definitions for one or more exported symbols when source is available. Use recursionDepth to include referenced definitions. Returned imports are minified and may not exactly match original module import formatting.",
+        description = Just "Render source definitions for one or more exported symbols when source is available. Use recursionDepth to include referenced definitions. Returned imports are minified and may not exactly match original module import formatting. This can still succeed usefully during partial load if the requested definition is available.",
         handler = getDefinitionHandler
       }
 
