@@ -50,7 +50,7 @@ lookupInstancesTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "lookupInstances",
-        description = Just "Find class or family instance declarations whose instance head mentions all queried symbols. Example: [\"Show\", \"Int\"] matches `instance Show Int`; [\"Int\", \"String\"] matches only instances where both types appear together.",
+        description = Just "Find loaded class or family instance declarations whose instance head mentions all queried symbols. This matches what is currently indexed in the loaded session; it does not infer likely instances beyond the indexed results. Example: [\"Show\", \"Int\"] matches `instance Show Int`; [\"Int\", \"String\"] matches only instances where both types appear together.",
         handler = lookupInstancesHandler
       }
 

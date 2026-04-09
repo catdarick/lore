@@ -44,7 +44,7 @@ executeCodeTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "executeCode",
-        description = Just "Execute Haskell code in the current project interpreter context, not a forgiving scratchpad. Normal parsing, shadowing, and type-defaulting rules apply. Avoid `where` in snippets because it may produce parse errors; use `let` inside `do` blocks instead. Polymorphic expressions may require explicit type annotations, and printing values requires `Show`. Interpreter bindings are reset when `reloadHomeModules` runs.",
+        description = Just "Execute Haskell code in the current project interpreter context, not a forgiving scratchpad. Normal import, ambiguity, shadowing, type-defaulting, and `Show` constraints apply. Avoid `where` in snippets because it may produce parse errors; use `let` bindings inside `do` blocks instead. Polymorphic expressions may require explicit type annotations. Interpreter bindings are reset whenever `reloadHomeModules` runs.",
         handler = executeCodeHandler
       }
 
