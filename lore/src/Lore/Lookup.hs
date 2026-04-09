@@ -102,28 +102,31 @@ getSymbolInfo' resolveRoot needle = do
     if resolveRoot
       then resolveRootExportedSymbols symbolsMap names
       else pure names
-  catMaybes <$> forM resolvedSymbols (getExportedSymbolInfo resolveRoot)
+  Log.debug $ "Found " <> show (length resolvedSymbols) <> " symbols matching query \"" <> T.unpack needle <> "\"."
+  catMaybes <$> forM resolvedSymbols getExportedSymbolInfo
 
-getExportedSymbolInfo :: (MonadLore m) => Bool -> ExportedSymbol -> m (Maybe SymbolInfo)
-getExportedSymbolInfo resolveRoot es = do
+getExportedSymbolInfo :: (MonadLore m) => ExportedSymbol -> m (Maybe SymbolInfo)
+getExportedSymbolInfo es = do
   case GHC.nameModule_maybe es.name of
     Nothing -> do
       Log.warn $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr es.name) <> " does not have an associated module. Skipping instance resolution."
       pure Nothing
     Just m -> do
-      targetName <- if resolveRoot then resolveRootName es.name else pure es.name
-      tyThing <- GHC.lookupName targetName
+      Log.debug $ "Looking up symbol: " <> GHC.showSDocUnsafe (GHC.ppr es.name)
+      tyThing <- GHC.lookupName es.name
       let symbolCategory = classifySymbolCategory tyThing
           symbolType = case tyThing of
             Nothing -> Nothing
             Just tt -> case tt of
               GHC.AnId id' -> Just (GHC.idType id')
               _ -> Nothing
-      instancesInfo <- resolveInstances targetName
+      Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr es.name) <> " is categorized as " <> show symbolCategory <> "."
+      instancesInfo <- resolveInstances es.name
+      Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr es.name) <> " has " <> show (maybe 0 (length . classInstances) instancesInfo) <> " class instances and " <> show (maybe 0 (length . familyInstances) instancesInfo) <> " family instances."
       pure $
         Just
           SymbolInfo
-            { symbolName = targetName,
+            { symbolName = es.name,
               definedIn = m,
               exportedFrom = es.exportedFrom,
               symbolThing = tyThing,
@@ -156,8 +159,11 @@ classifySymbolCategory = \case
         | otherwise -> SymbolUnknown
 
 resolveRootExportedSymbols :: (MonadLore m) => Map.Map Text [ExportedSymbol] -> [ExportedSymbol] -> m [ExportedSymbol]
-resolveRootExportedSymbols symbolsMap exportedSymbols =
-  deduplicateExportedSymbols <$> mapM (resolveRootExportedSymbol symbolsMap) exportedSymbols
+resolveRootExportedSymbols symbolsMap exportedSymbols = do
+  Log.debug $ "Resolving root symbols for " <> show (length exportedSymbols) <> " exported symbols."
+  r <- deduplicateExportedSymbols <$> mapM (resolveRootExportedSymbol symbolsMap) exportedSymbols
+  Log.debug "Finished resolving root symbols."
+  pure r
 
 resolveRootExportedSymbol :: (MonadLore m) => Map.Map Text [ExportedSymbol] -> ExportedSymbol -> m ExportedSymbol
 resolveRootExportedSymbol symbolsMap exportedSymbol = do

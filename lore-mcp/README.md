@@ -14,5 +14,13 @@ Executable package for exposing `lore` through an MCP server.
 - `LORE_MCP_PARALLEL_WORKERS_LIMIT`: overrides parallel worker limit
   - `auto`: `WorkersAsNumProcessors` (default)
   - positive integer (for example `4`): `ThisWorkersCount 4`
+- `LORE_MCP_LOG_LEVEL`: enables server logging and sets the minimum emitted level
+  - unset: disable logging
+  - `debug`: emit debug, info, warning, and error logs
+  - `info`: emit info, warning, and error logs
+  - `warn` or `warning`: emit warning and error logs
+  - `error`: emit only error logs
+
+When enabled, logs are written to `stderr`. This keeps MCP protocol traffic on `stdout`.
 
 Invalid values fail fast during server startup with a descriptive error message.

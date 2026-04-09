@@ -9,6 +9,7 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Aeson (Value, object, (.=))
 import qualified Data.Aeson as J
 import Data.Bifunctor (first)
+import qualified Data.ByteString.Lazy.Char8 as BL8
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
 import Data.Text (Text)
@@ -20,6 +21,7 @@ import Lore.JsonRpc.Server
     JsonRpcResponse (..),
     runJsonRpcLoop,
   )
+import qualified Lore.Logger as Log
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..), getSomeToolSpec, getToolName)
 import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Notification (..), McpRequest'Tools (..), parseMcpRequest)
 import UnliftIO (MonadUnliftIO, try)
@@ -39,22 +41,26 @@ data McpServer m = McpServer
     tools :: [SomeTool m]
   }
 
-runMcpServer :: (MonadUnliftIO m) => McpServer m -> m ()
+runMcpServer :: (MonadUnliftIO m, Log.MonadLogger m) => McpServer m -> m ()
 runMcpServer mcpServer = do
   state <- liftIO initialMcpServerState
   runJsonRpcLoop (handleJsonRpcRequest state mcpServer)
 
-handleJsonRpcRequest :: (MonadUnliftIO m) => McpServerState -> McpServer m -> JsonRpcRequest -> m JsonRpcHandlerResult
-handleJsonRpcRequest state server jsonRpcRequest = case parseMcpRequest jsonRpcRequest of
-  Left err ->
-    pure
-      JsonRpcHandlerResult
-        { jsonRpcHandlerResponse = JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32602, jsonRpcErrorMessage = "invalid request: " <> err},
-          jsonRpcShouldExit = False
-        }
-  Right mcpRequest -> do
-    response <- handleMcpRequest state server mcpRequest
-    pure $ JsonRpcHandlerResult {jsonRpcHandlerResponse = response, jsonRpcShouldExit = False}
+handleJsonRpcRequest :: (MonadUnliftIO m, Log.MonadLogger m) => McpServerState -> McpServer m -> JsonRpcRequest -> m JsonRpcHandlerResult
+handleJsonRpcRequest state server jsonRpcRequest = do
+  Log.debug $ "Got JSON-RPC request: " <> T.unpack (jsonRpcMethod jsonRpcRequest) <> " with params: " <> BL8.unpack (J.encode jsonRpcRequest.jsonRpcParams)
+  res <- case parseMcpRequest jsonRpcRequest of
+    Left err ->
+      pure
+        JsonRpcHandlerResult
+          { jsonRpcHandlerResponse = JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32602, jsonRpcErrorMessage = "invalid request: " <> err},
+            jsonRpcShouldExit = False
+          }
+    Right mcpRequest -> do
+      response <- handleMcpRequest state server mcpRequest
+      pure $ JsonRpcHandlerResult {jsonRpcHandlerResponse = response, jsonRpcShouldExit = False}
+  Log.debug $ "Finished handling request"
+  pure res
 
 handleMcpRequest :: (MonadUnliftIO m) => McpServerState -> McpServer m -> McpRequest -> m JsonRpcResponse
 handleMcpRequest state server mcpRequest = case mcpRequest of

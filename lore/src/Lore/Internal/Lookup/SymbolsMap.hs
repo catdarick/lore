@@ -34,8 +34,11 @@ invalidateSymbolsMapCache = do
 
 prepareSymbolsMap :: (MonadLore m) => m SymbolsMap
 prepareSymbolsMap = do
+  Log.debug "Preparing symbols map for all visible modules..."
   homeModules <- enumerateHomeModules
+  Log.debug $ "Enumerated " <> show (length homeModules) <> " home modules."
   externalModules <- enumerateVisiblePackageModules
+  Log.debug $ "Enumerated " <> show (length externalModules) <> " visible package modules."
   let modules = homeModules <> externalModules
   namedSymbols <- forM modules \m -> do
     safeGetModuleExports m >>= \case
@@ -47,7 +50,9 @@ prepareSymbolsMap = do
         pure []
       ModuleExportsLoaded names -> do
         pure [(T.pack (GHC.getOccString n), n, m) | n <- names]
+  Log.debug $ "Collected " <> show (length (concat namedSymbols)) <> " exported symbols from all visible modules."
   let grouped = buildGroupedMap (concat namedSymbols)
+  Log.debug $ "Prepared symbols map with " <> show (Map.size grouped) <> " unique symbol names."
   pure $ SymbolsMap $ fmap toExportedSymbols grouped
   where
     buildGroupedMap :: [(Text, GHC.Name, GHC.Module)] -> Map.Map Text (Map.Map GHC.Name [GHC.Module])

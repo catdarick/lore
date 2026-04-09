@@ -33,10 +33,14 @@ invalidateNameToInstancesIndex = do
 
 prepareNameToInstancesIndex :: (MonadLore m) => m NameToInstancesIndex
 prepareNameToInstancesIndex = do
+  Log.debug "Preparing name-to-instances index..."
   moduleGraph <- GHC.getModuleGraph
   let candidateMods = [GHC.ms_mod ms | ms <- GHC.mgModSummaries moduleGraph]
+  Log.debug $ "Preparing name-to-instances index. There are " <> show (length candidateMods) <> " candidate modules to consider."
   mods <- catMaybes <$> mapM keepLoadedModule candidateMods
+  Log.debug $ "Loaded " <> show (length mods) <> " modules for name-to-instances index."
   (_, mIndex) <- GHC.getNameToInstancesIndex mods (Just mods)
+  Log.debug $ "Name-to-instances index prepared with " <> show (GHC.sizeUFM (fromMaybe GHC.emptyNameEnv mIndex)) <> " entries."
   pure $ NameToInstancesIndex (fromMaybe GHC.emptyNameEnv mIndex)
   where
     keepLoadedModule mod' =

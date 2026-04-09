@@ -9,6 +9,7 @@ import qualified Data.Map as Map
 import qualified GHC
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Session (SessionContext (..))
+import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import UnliftIO (modifyMVar)
 
@@ -28,6 +29,8 @@ invalidateModSummaries = do
 
 prepareModSummaries :: (MonadLore m) => m ModSummaries
 prepareModSummaries = do
+  Log.debug "Preparing module summaries map..."
   moduleGraph <- GHC.getModuleGraph
   let modSummariesMap = Map.fromList [(GHC.ms_mod ms, ms) | ms <- GHC.mgModSummaries moduleGraph]
+  Log.debug $ "Prepared module summaries map with " <> show (Map.size modSummariesMap) <> " entries."
   pure $ ModSummaries modSummariesMap
