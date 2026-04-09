@@ -4,7 +4,7 @@ import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace, toLower)
-import Data.List (foldl', stripPrefix)
+import Data.List (foldl', nub, stripPrefix)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -100,7 +100,7 @@ autoFixedSummarySection loadResult
 renderAutofixedFileSummary :: (FilePath, [String]) -> [String]
 renderAutofixedFileSummary (filePath, summaries) =
   ["  - " <> filePath]
-    <> map (("      * " <>) . stripAutofixPrefix) summaries
+    <> map (("      * " <>) . stripAutofixPrefix) (nub summaries)
 
 stripAutofixPrefix :: String -> String
 stripAutofixPrefix summary =

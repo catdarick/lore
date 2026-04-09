@@ -21,13 +21,7 @@ import qualified GHC.Types.Avail as GHC
 import qualified GHC.Unit.Env as GHC
 import qualified GHC.Unit.Home.ModInfo as GHC
 import Lore.Internal.Lookup.ModSummaries (getModSummaries)
-import Lore.Internal.Lookup.Types
-  ( ExportedSymbol (..),
-    ExternalPackagesSymbolsCache (..),
-    ModSummaries (..),
-    SymbolsIndex (..),
-    SymbolsMap (..),
-  )
+import Lore.Internal.Lookup.Types (ExportedSymbol (..), ExternalPackagesSymbolsCache (..), ModSummaries (..), SymbolsIndex (..), SymbolsMap (..))
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
