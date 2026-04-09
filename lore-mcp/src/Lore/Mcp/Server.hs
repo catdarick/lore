@@ -8,6 +8,8 @@ import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
 import Lore.Mcp.Tools.ExecuteStatement (executeStatementTool)
 import Lore.Mcp.Tools.GetTypeOfExpression (getTypeOfExpressionTool)
 import Lore.Mcp.Tools.LoadTargets (loadTargetsTool)
+import Lore.Mcp.Tools.LookupInstances (lookupInstancesTool)
+import Lore.Mcp.Tools.LookupSymbolInfo (lookupSymbolInfoTool)
 
 runLoreMcpServer :: IO ()
 runLoreMcpServer = runLore sessionConfig do
@@ -15,7 +17,7 @@ runLoreMcpServer = runLore sessionConfig do
     McpServer
       { name = "lore-mcp",
         initialize = pure (),
-        tools = [loadTargetsTool, executeStatementTool, getTypeOfExpressionTool]
+        tools = [loadTargetsTool, executeStatementTool, getTypeOfExpressionTool, lookupSymbolInfoTool, lookupInstancesTool]
       }
   where
     sessionConfig =

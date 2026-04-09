@@ -77,7 +77,7 @@ renderLoadTargetsResult loadResult@LoadTargetsResult {loadTargetsDiagnostics}
 hiddenDiagnosticsSummary :: [Diagnostic] -> [String]
 hiddenDiagnosticsSummary [] = []
 hiddenDiagnosticsSummary hiddenDiagnostics =
-  [ "and "
+  [ "... and "
       <> show hiddenCount
       <> " more diagnostics in "
       <> show hiddenModuleCount

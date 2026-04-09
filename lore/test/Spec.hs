@@ -6,6 +6,7 @@ where
 import qualified DefinitionSpec
 import qualified ImportNormalizeSpec
 import qualified InterpreterSpec
+import qualified LookupSpec
 import qualified TargetsSpec
 import Test.Hspec
 
@@ -15,4 +16,5 @@ main =
     DefinitionSpec.spec
     ImportNormalizeSpec.spec
     InterpreterSpec.spec
+    LookupSpec.spec
     TargetsSpec.spec

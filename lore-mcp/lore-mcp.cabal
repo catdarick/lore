@@ -33,6 +33,8 @@ executable lore-mcp
       Lore.Mcp.Tools.ExecuteStatement
       Lore.Mcp.Tools.GetTypeOfExpression
       Lore.Mcp.Tools.LoadTargets
+      Lore.Mcp.Tools.LookupInstances
+      Lore.Mcp.Tools.LookupSymbolInfo
       Lore.Mcp.Tools.Shared
       Paths_lore_mcp
   autogen-modules:

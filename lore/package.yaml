@@ -97,6 +97,7 @@ tests:
     - DefinitionSpec
     - InterpreterSpec
     - ImportNormalizeSpec
+    - LookupSpec
     - TargetsSpec
     - TestSupport
     - SomeModule
