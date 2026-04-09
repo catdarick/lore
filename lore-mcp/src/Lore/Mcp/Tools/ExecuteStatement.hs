@@ -22,14 +22,10 @@ import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartial
 
 newtype ExecuteStatementArgs (fieldType :: FieldType) = ExecuteStatementArgs
   { statement ::
-      Field
-        fieldType
-        ( WithMeta
-            Text
-            '[ Description "Haskell statement to execute in the current interpreter context. Supports GHCi style variable bindings, function definitions, and IO actions.",
-               Example "print (map (+1) [1, 2, 3])"
-             ]
-        )
+      Field fieldType Text
+        `WithMeta` '[ Description "Haskell statement to execute in the current interpreter context. Supports GHCi style variable bindings, function definitions, and IO actions.",
+                      Example "print (map (+1) [1, 2, 3])"
+                    ]
   }
   deriving stock (Generic)
 

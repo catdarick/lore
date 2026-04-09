@@ -27,16 +27,12 @@ import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..),
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
 
-data LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
+newtype LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
   { symbol ::
-      Field
-        fieldType
-        ( WithMeta
-            Text
-            '[ Description "Exact symbol name to look up in the loaded project symbol table.",
-               Example "lookupOrZero"
-             ]
-        )
+      Field fieldType Text
+        `WithMeta` '[ Description "Exact symbol name to look up in the loaded project symbol table.",
+                      Example "lookupOrZero"
+                    ]
   }
   deriving stock (Generic)
 

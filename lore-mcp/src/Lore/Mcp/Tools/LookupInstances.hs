@@ -31,17 +31,13 @@ import Lore.Mcp.Internal.Annotated
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
 
-data LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs
+newtype LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs
   { names ::
-      Field
-        fieldType
-        ( WithMeta
-            [Text]
-            '[ Description "The tool returns only instances associated with every queried name. Provide two or more symbol names.",
-               ExampleList '["HasIndex", "Indexed"],
-               MinItems 2
-             ]
-        )
+      Field fieldType [Text]
+        `WithMeta` '[ Description "The tool returns only instances associated with every queried name. Provide two or more symbol names.",
+                      ExampleList '["HasIndex", "Indexed"],
+                      MinItems 2
+                    ]
   }
   deriving stock (Generic)
 

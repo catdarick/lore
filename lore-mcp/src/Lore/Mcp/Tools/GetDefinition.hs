@@ -35,13 +35,12 @@ data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
                       MinItems 1
                     ],
     recursionDepth ::
-      WithMeta
-        (Field fieldType (Maybe Int))
-        '[ Description "Maximum recursive definition depth. Defaults to 0. If greater than 0, definitions will be resolved recursively to the specified depth, where 1 means only directly referenced definitions will be included, 2 means definitions directly referenced by those definitions will also be included, and so on.",
-           Example 2,
-           Minimum 0,
-           Maximum 20
-         ]
+      Field fieldType (Maybe Int)
+        `WithMeta` '[ Description "Maximum recursive definition depth. Defaults to 0. If greater than 0, definitions will be resolved recursively to the specified depth, where 1 means only directly referenced definitions will be included, 2 means definitions directly referenced by those definitions will also be included, and so on.",
+                      Example 2,
+                      Minimum 0,
+                      Maximum 20
+                    ]
   }
   deriving stock (Generic)
 

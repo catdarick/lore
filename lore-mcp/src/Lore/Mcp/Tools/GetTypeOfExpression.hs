@@ -32,14 +32,10 @@ import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartial
 
 newtype GetTypeOfExpressionArgs (fieldType :: FieldType) = GetTypeOfExpressionArgs
   { expression ::
-      Field
-        fieldType
-        ( WithMeta
-            Text
-            '[ Description "Haskell expression to infer in the current interpreter context.",
-               Example "map (+1) [1, 2, 3]"
-             ]
-        )
+      Field fieldType Text
+        `WithMeta` '[ Description "Haskell expression to infer in the current interpreter context.",
+                      Example "map (+1) [1, 2, 3]"
+                    ]
   }
   deriving stock (Generic)
 
