@@ -33,6 +33,7 @@ executable lore-mcp
       Lore.Mcp.Tools.ExecuteCode
       Lore.Mcp.Tools.GetDefinition
       Lore.Mcp.Tools.GetTypeOfExpression
+      Lore.Mcp.Tools.ListExportedSymbols
       Lore.Mcp.Tools.LookupInstances
       Lore.Mcp.Tools.LookupSymbolInfo
       Lore.Mcp.Tools.ReloadHomeModules

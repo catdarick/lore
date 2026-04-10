@@ -10,15 +10,18 @@ import qualified GHC
 import qualified GHC.Plugins as Plugins
 import qualified GHC.Utils.Outputable as Outputable
 import Lore
-  ( LookupInstancesQuery (..),
+  ( ExportedSymbolNode (..),
+    LookupInstancesQuery (..),
     LookupInstancesResult (..),
     MatchingInstance (..),
     Symbol (..),
     SymbolCategory (..),
     SymbolInfo (..),
     SymbolVisibility (..),
+    classifySymbolCategory,
     defaultLoadTargetsOptions,
     findSymbols,
+    listExportedSymbolsByModule,
     loadTargets,
     lookupIntersectingInstances,
     lookupIntersectingRootInstances,
@@ -176,6 +179,28 @@ spec =
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . name) result
           `shouldSatisfy` any (isInfixOf ".+.")
 
+    describe "listExportedSymbolsByModule" do
+      it "lists exported symbols for the requested module and excludes unexported ones" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            listExportedSymbolsByModule "Demo.Support" Nothing Nothing
+
+        let occNames = exportedNodeOccNames result
+        occNames `shouldSatisfy` elem "supportSeed"
+        occNames `shouldSatisfy` elem "supportStep"
+        occNames `shouldSatisfy` elem "mkSupportRecord"
+        occNames `shouldSatisfy` elem ".+."
+        occNames `shouldSatisfy` not . elem "supportValues"
+
+      it "returns an empty list when the module is not visible" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            listExportedSymbolsByModule "No.Such.Module" Nothing Nothing
+
+        null result `shouldBe` True
+
     describe "lookupIntersectingInstances" do
       it "intersects class instances across multiple symbol queries" do
         withFixtureInstances \fixtureRoot -> do
@@ -216,6 +241,11 @@ spec =
 
           lookupInstancesQueryMatchCounts result `shouldSatisfy` all (> 0)
           renderMatchingInstances result `shouldSatisfy` matchesRenderedInstance "Elem (Indexed a) = a"
+
+exportedNodeOccNames :: [ExportedSymbolNode] -> [String]
+exportedNodeOccNames nodes =
+  map (Plugins.getOccString . (.nodeName)) nodes
+    <> concatMap (map (Plugins.getOccString . (.nodeName)) . (.nodeChildren)) nodes
 
 withFixtureInstances :: (FilePath -> IO a) -> IO a
 withFixtureInstances action =
@@ -274,5 +304,5 @@ matchesRenderedInstance expected = \case
 
 demoCategories :: [SymbolInfo] -> [SymbolCategory]
 demoCategories =
-  map symbolCategory
+  map (classifySymbolCategory . symbolThing)
     . filter ((== "Demo") . GHC.moduleNameString . GHC.moduleName . definedIn)

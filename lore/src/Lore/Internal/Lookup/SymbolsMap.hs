@@ -208,10 +208,10 @@ buildSymbolsIndex moduleSymbols =
       Map.insertWith
         (Map.unionWith (<>))
         (T.pack (GHC.getOccString symbol.name))
-        (Map.singleton symbol.name (symbolExportedFrom symbol.visibility))
+        (Map.singleton symbol.name (visibilityExportedFrom symbol.visibility))
         grouped
 
-    symbolExportedFrom = \case
+    visibilityExportedFrom = \case
       Symbol'ExportedFrom modules_ -> modules_
       Symbol'Unexported -> []
 

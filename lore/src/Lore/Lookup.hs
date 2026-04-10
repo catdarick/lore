@@ -3,13 +3,16 @@
 module Lore.Lookup
   ( Symbol (..),
     SymbolVisibility (..),
+    ExportedSymbolNode (..),
     SymbolCategory (..),
+    classifySymbolCategory,
     SymbolInfo (..),
     Instances (..),
     LookupInstancesQuery (..),
     MatchingInstance (..),
     LookupInstancesResult (..),
     findSymbols,
+    listExportedSymbolsByModule,
     lookupSymbolInfo,
     lookupRootSymbolInfo,
     lookupIntersectingInstances,
@@ -23,31 +26,143 @@ import Control.Monad (forM)
 import Data.Char (isAlphaNum, isUpper)
 import Data.Containers.ListUtils (nubOrdOn)
 import Data.List (foldl', intercalate, sortOn)
+import qualified Data.Map as Map
 import Data.Maybe (catMaybes, mapMaybe)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Core.FamInstEnv as GHC
+import qualified GHC.Data.FastString as FastString
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
 import Lore.Definition (DefinitionSlice, resolveDefinitionSlice)
+import qualified Lore.Internal.Ghc.TyThing as TyThing
 import Lore.Internal.Lookup.NameToInstances (getNameToInstancesIndex)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
 import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolVisibility (..), SymbolsMap, symbolExportedFrom)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
+import UnliftIO (SomeException, handle)
 
 findSymbols :: (MonadLore m) => Text -> m [Symbol]
 findSymbols needle = do
   symbolsMap <- SymbolsMap.getSymbolsMap
   pure (findMatchingSymbols needle symbolsMap)
 
+listExportedSymbolsByModule :: (MonadLore m) => Text -> Maybe Text -> Maybe Text -> m [ExportedSymbolNode]
+listExportedSymbolsByModule moduleName maybePackageName maybeTypeHint = do
+  hscEnv <- GHC.getSession
+  maybeModule <- resolveModule hscEnv moduleName maybePackageName
+  case maybeModule of
+    Nothing ->
+      pure []
+    Just module_ -> do
+      exportedSymbols <- loadExportedSymbolsForModule hscEnv module_
+      pure $
+        sortOn
+          (renderOutputable . nodeName)
+          (maybe exportedSymbols (`filterExportedSymbolNodesByTypeHint` exportedSymbols) (normalizeQueryOccName <$> maybeTypeHint))
+
+resolveModule :: (MonadLore m) => GHC.HscEnv -> Text -> Maybe Text -> m (Maybe GHC.Module)
+resolveModule _hscEnv moduleName maybePackageName =
+  handle
+    ( \(err :: SomeException) -> do
+        Log.warn $ "Failed to resolve module " <> renderModuleRequest moduleName maybePackageName <> ": " <> show err
+        pure Nothing
+    )
+    do
+      let moduleName' = GHC.mkModuleName (T.unpack moduleName)
+          packageQualifier = fmap (FastString.mkFastString . T.unpack) maybePackageName
+      Just <$> GHC.lookupModule moduleName' packageQualifier
+
+renderModuleRequest :: Text -> Maybe Text -> String
+renderModuleRequest moduleName maybePackageName =
+  case maybePackageName of
+    Nothing ->
+      show (T.unpack moduleName)
+    Just packageName ->
+      show (T.unpack moduleName) <> " in package " <> show (T.unpack packageName)
+
+loadExportedSymbolsForModule :: (MonadLore m) => GHC.HscEnv -> GHC.Module -> m [ExportedSymbolNode]
+loadExportedSymbolsForModule hscEnv module_ = do
+  exportedNames <- loadExportedNamesForModule hscEnv module_
+  rootToExportedNames <- buildRootToExportedNames exportedNames
+  sortOn (renderOutputable . nodeName) . catMaybes <$> mapM buildRootNode (Map.toList rootToExportedNames)
+
+buildRootToExportedNames :: (MonadLore m) => [GHC.Name] -> m (Map.Map GHC.Name (Set.Set GHC.Name))
+buildRootToExportedNames exportedNames = do
+  rootPairs <- mapM (\exportedName -> (\rootName -> (rootName, exportedName)) <$> resolveRootName exportedName) exportedNames
+  pure $
+    foldl'
+      ( \grouped (rootName, exportedName) ->
+          Map.insertWith Set.union rootName (Set.fromList [rootName, exportedName]) grouped
+      )
+      Map.empty
+      rootPairs
+
+buildRootNode :: (MonadLore m) => (GHC.Name, Set.Set GHC.Name) -> m (Maybe ExportedSymbolNode)
+buildRootNode (rootName, relatedNames) = do
+  maybeRootThing <- GHC.lookupName rootName
+  case maybeRootThing of
+    Nothing ->
+      pure Nothing
+    Just rootThing -> do
+      let childNames =
+            sortOn renderOutputable $
+              Set.toList $
+                Set.delete rootName relatedNames
+      childNodes <- catMaybes <$> mapM buildLeafNode childNames
+      pure $
+        Just
+          ExportedSymbolNode
+            { nodeName = rootName,
+              nodeThing = rootThing,
+              nodeChildren = childNodes
+            }
+
+buildLeafNode :: (MonadLore m) => GHC.Name -> m (Maybe ExportedSymbolNode)
+buildLeafNode childName = do
+  maybeChildThing <- GHC.lookupName childName
+  pure $
+    fmap
+      ( \childThing ->
+          ExportedSymbolNode
+            { nodeName = childName,
+              nodeThing = childThing,
+              nodeChildren = []
+            }
+      )
+      maybeChildThing
+
+filterExportedSymbolNodesByTypeHint :: Text -> [ExportedSymbolNode] -> [ExportedSymbolNode]
+filterExportedSymbolNodesByTypeHint typeHint =
+  mapMaybe (filterExportedSymbolNodeByTypeHint typeHint)
+
+filterExportedSymbolNodeByTypeHint :: Text -> ExportedSymbolNode -> Maybe ExportedSymbolNode
+filterExportedSymbolNodeByTypeHint typeHint node =
+  if nodeMatches || not (null matchingChildren)
+    then Just node {nodeChildren = matchingChildren}
+    else Nothing
+  where
+    nodeMatches = TyThing.isMentionedByOccString (T.unpack typeHint) node.nodeThing
+    matchingChildren = mapMaybe (filterExportedSymbolNodeByTypeHint typeHint) node.nodeChildren
+
+loadExportedNamesForModule :: (MonadLore m) => GHC.HscEnv -> GHC.Module -> m [GHC.Name]
+loadExportedNamesForModule _hscEnv module_ = do
+  maybeModuleInfo <- GHC.getModuleInfo module_
+  case maybeModuleInfo of
+    Just moduleInfo ->
+      pure (deduplicateNames (GHC.modInfoExports moduleInfo))
+    Nothing -> do
+      Log.warn $ "Failed to get exports for module " <> show (GHC.moduleNameString (GHC.moduleName module_)) <> ": getModuleInfo returned Nothing."
+      pure []
+
 data SymbolInfo = SymbolInfo
   { symbolName :: GHC.Name,
     definedIn :: GHC.Module,
     exportedFrom :: [GHC.Module],
-    symbolThing :: Maybe GHC.TyThing,
-    symbolCategory :: SymbolCategory,
+    symbolThing :: GHC.TyThing,
     symbolType :: Maybe GHC.Type,
     associatedClassInstances :: [GHC.ClsInst],
     associatedFamilyInstances :: [GHC.FamInst]
@@ -65,6 +180,12 @@ data SymbolCategory
   | SymbolCoercionAxiom
   | SymbolUnknown
   deriving stock (Eq, Show)
+
+data ExportedSymbolNode = ExportedSymbolNode
+  { nodeName :: GHC.Name,
+    nodeThing :: GHC.TyThing,
+    nodeChildren :: [ExportedSymbolNode]
+  }
 
 instance Show SymbolInfo where
   show si =
@@ -114,50 +235,49 @@ getSymbolInfo symbol = do
       pure Nothing
     Just m -> do
       Log.debug $ "Looking up symbol: " <> GHC.showSDocUnsafe (GHC.ppr symbol.name)
-      tyThing <- GHC.lookupName symbol.name
-      let symbolCategory = classifySymbolCategory tyThing
-          symbolType = case tyThing of
-            Nothing -> Nothing
-            Just tt -> case tt of
-              GHC.AnId id' -> Just (GHC.idType id')
-              _ -> Nothing
-      Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr symbol.name) <> " is categorized as " <> show symbolCategory <> "."
-      instancesInfo <- resolveInstances symbol.name
-      Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr symbol.name) <> " has " <> show (maybe 0 (length . classInstances) instancesInfo) <> " class instances and " <> show (maybe 0 (length . familyInstances) instancesInfo) <> " family instances."
-      pure $
-        Just
-          SymbolInfo
-            { symbolName = symbol.name,
-              definedIn = m,
-              exportedFrom = symbolExportedFrom symbol,
-              symbolThing = tyThing,
-              symbolCategory = symbolCategory,
-              symbolType = symbolType,
-              associatedClassInstances = maybe [] classInstances instancesInfo,
-              associatedFamilyInstances = maybe [] familyInstances instancesInfo
-            }
+      maybeTyThing <- GHC.lookupName symbol.name
+      case maybeTyThing of
+        Nothing -> do
+          Log.warn $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr symbol.name) <> " does not have a TyThing in the loaded session state. Skipping."
+          pure Nothing
+        Just tyThing -> do
+          let symbolCategory = classifySymbolCategory tyThing
+              symbolType = case tyThing of
+                GHC.AnId id' -> Just (GHC.idType id')
+                _ -> Nothing
+          Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr symbol.name) <> " is categorized as " <> show symbolCategory <> "."
+          instancesInfo <- resolveInstances symbol.name
+          Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr symbol.name) <> " has " <> show (maybe 0 (length . classInstances) instancesInfo) <> " class instances and " <> show (maybe 0 (length . familyInstances) instancesInfo) <> " family instances."
+          pure $
+            Just
+              SymbolInfo
+                { symbolName = symbol.name,
+                  definedIn = m,
+                  exportedFrom = symbolExportedFrom symbol,
+                  symbolThing = tyThing,
+                  symbolType = symbolType,
+                  associatedClassInstances = maybe [] classInstances instancesInfo,
+                  associatedFamilyInstances = maybe [] familyInstances instancesInfo
+                }
 
 data Instances = Instances
   { classInstances :: [GHC.ClsInst],
     familyInstances :: [GHC.FamInst]
   }
 
-classifySymbolCategory :: Maybe GHC.TyThing -> SymbolCategory
+classifySymbolCategory :: GHC.TyThing -> SymbolCategory
 classifySymbolCategory = \case
-  Nothing -> SymbolUnknown
-  Just tyThing ->
-    case tyThing of
-      GHC.AnId {} -> SymbolValue
-      GHC.AConLike {} -> SymbolConstructor
-      GHC.ACoAxiom {} -> SymbolCoercionAxiom
-      GHC.ATyCon tyCon
-        | GHC.isClassTyCon tyCon -> SymbolClass
-        | GHC.isDataFamilyTyCon tyCon -> SymbolDataFamily
-        | GHC.isTypeFamilyTyCon tyCon -> SymbolTypeFamily
-        | GHC.isTypeSynonymTyCon tyCon -> SymbolTypeAlias
-        | GHC.isNewTyCon tyCon -> SymbolNewtype
-        | GHC.isDataTyCon tyCon -> SymbolData
-        | otherwise -> SymbolUnknown
+  GHC.AnId {} -> SymbolValue
+  GHC.AConLike {} -> SymbolConstructor
+  GHC.ACoAxiom {} -> SymbolCoercionAxiom
+  GHC.ATyCon tyCon
+    | GHC.isClassTyCon tyCon -> SymbolClass
+    | GHC.isDataFamilyTyCon tyCon -> SymbolDataFamily
+    | GHC.isTypeFamilyTyCon tyCon -> SymbolTypeFamily
+    | GHC.isTypeSynonymTyCon tyCon -> SymbolTypeAlias
+    | GHC.isNewTyCon tyCon -> SymbolNewtype
+    | GHC.isDataTyCon tyCon -> SymbolData
+    | otherwise -> SymbolUnknown
 
 resolveRootSymbols :: (MonadLore m) => SymbolsMap -> [Symbol] -> m [Symbol]
 resolveRootSymbols symbolsMap symbols = do

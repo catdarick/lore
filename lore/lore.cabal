@@ -41,13 +41,14 @@ library
       Lore.Internal.AutoRefactor.ImportDecl
       Lore.Internal.AutoRefactor.ImportNormalize
       Lore.Internal.AutoRefactor.ImportOps
-      Lore.Internal.AutoRefactor.Issue
       Lore.Internal.AutoRefactor.ImportRewrite
+      Lore.Internal.AutoRefactor.Issue
       Lore.Internal.AutoRefactor.MissingImports
       Lore.Internal.AutoRefactor.MissingImports.Diagnostic
       Lore.Internal.AutoRefactor.RedundantImports
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags
+      Lore.Internal.Ghc.TyThing
       Lore.Internal.Interpreter
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.NameToInstances
@@ -59,6 +60,9 @@ library
       Lore.Internal.Session
       Lore.Internal.Targets
       Lore.Internal.Targets.Result
+      Paths_lore
+  autogen-modules:
+      Paths_lore
   hs-source-dirs:
       src
   default-extensions:

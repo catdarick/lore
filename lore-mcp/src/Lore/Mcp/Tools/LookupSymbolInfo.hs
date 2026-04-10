@@ -46,7 +46,7 @@ lookupSymbolInfoTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "lookupSymbolInfo",
-        description = Just "Look up information about an exported symbol visible in the currently loaded session state (successfully loaded home modules and visible dependencies). During partial load, 'No symbols found' only means no loaded/exported match was available in the session; it does not prove the symbol is absent from source.",
+        description = Just "Look up information about a symbol visible in the current session state. For home modules, unexported top-level symbols may also be available. For visible package modules, exported symbols can still be resolved after a failed home-module load, as long as a load was attempted. During partial load, 'No symbols found' only means no loaded match was available in the session; it does not prove the symbol is absent from source.",
         handler = lookupSymbolInfoHandler
       }
 
@@ -93,13 +93,11 @@ renderSymbolInfo symbolInfo =
 renderSymbolHeader :: SymbolInfo -> Text
 renderSymbolHeader symbolInfo =
   case symbolInfo.symbolThing of
-    Just (TyThing.AnId {}) ->
+    TyThing.AnId {} ->
       renderQualifiedName symbolInfo.symbolName
         <> maybe "" (" :: " <>) (renderType <$> symbolInfo.symbolType)
-    Just tyThing ->
+    tyThing ->
       renderTyThing tyThing
-    Nothing ->
-      renderQualifiedName symbolInfo.symbolName
 
 renderTyThing :: GHC.TyThing -> Text
 renderTyThing =
