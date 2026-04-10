@@ -4,7 +4,9 @@ module Lore.Internal.Lookup.Types
     ExternalPackagesSymbolsCache (..),
     ModSummaries (..),
     NameToInstancesIndex (..),
-    ExportedSymbol (..),
+    Symbol (..),
+    SymbolVisibility (..),
+    symbolExportedFrom,
   )
 where
 
@@ -16,7 +18,7 @@ import qualified GHC
 import qualified GHC.Plugins as GHC
 
 newtype SymbolsIndex = SymbolsIndex
-  { unSymbolsIndex :: Map.Map Text [ExportedSymbol]
+  { unSymbolsIndex :: Map.Map Text [Symbol]
   }
 
 data SymbolsMap = SymbolsMap
@@ -37,16 +39,31 @@ newtype NameToInstancesIndex = NameToInstancesIndex
   { unNameToInstancesIndex :: GHC.NameEnv ([GHC.ClsInst], [GHC.FamInst])
   }
 
-data ExportedSymbol = ExportedSymbol
+data Symbol = Symbol
   { name :: GHC.Name,
-    exportedFrom :: [GHC.Module]
+    visibility :: SymbolVisibility
   }
 
-instance Show ExportedSymbol where
-  show es = showName es.name <> " (exported from: " <> showModules es.exportedFrom <> ")"
+data SymbolVisibility
+  = Symbol'ExportedFrom [GHC.Module]
+  | Symbol'Unexported
+  deriving stock (Eq)
+
+symbolExportedFrom :: Symbol -> [GHC.Module]
+symbolExportedFrom symbol =
+  case symbol.visibility of
+    Symbol'ExportedFrom modules_ -> modules_
+    Symbol'Unexported -> []
+
+instance Show Symbol where
+  show symbol = showName symbol.name <> " (" <> showVisibility symbol.visibility <> ")"
     where
       showName n = case GHC.nameModule_maybe n of
         Nothing -> "<UNKNOWN>." <> GHC.occNameString (GHC.nameOccName n)
         Just m -> GHC.moduleNameString (GHC.moduleName m) <> "." <> GHC.occNameString (GHC.nameOccName n)
       showModule m = GHC.moduleNameString (GHC.moduleName m)
       showModules xs = intercalate ", " (map showModule xs)
+      showVisibility visibility_ =
+        case visibility_ of
+          Symbol'ExportedFrom modules_ -> "exported from: " <> showModules modules_
+          Symbol'Unexported -> "unexported"

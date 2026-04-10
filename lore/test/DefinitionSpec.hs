@@ -2,12 +2,12 @@ module DefinitionSpec (spec) where
 
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
-import Data.List (find, intercalate, isPrefixOf, sort, tails)
+import Data.List (find, intercalate, isInfixOf, isPrefixOf, sort, tails)
 import Data.Text (pack, unpack)
 import qualified GHC
 import qualified GHC.Plugins
 import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderDefinitionModulesText, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice)
-import Lore.Lookup (ExportedSymbol (..), findSymbols)
+import Lore.Lookup (Symbol (..), findSymbols)
 import Lore.Monad (MonadLore)
 import Lore.Targets (defaultLoadTargetsOptions)
 import qualified Lore.Targets as Targets
@@ -54,6 +54,25 @@ spec = do
       fmap renderImport slice.requiredImports
         `shouldBe` [ "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)"
                    ]
+
+    it "resolves definitions for unexported symbols from another home module" do
+      slice <-
+        fixtureLore do
+          loadTargets defaultLoadTargetsOptions
+          symbols <- findSymbols "Demo.Support.supportValues"
+          targetName <-
+            maybe
+              (error "symbol not found: Demo.Support.supportValues")
+              pure
+              (findFixtureSymbolInModule "Demo.Support" "supportValues" symbols)
+          maybe
+            (error "definition not found: Demo.Support.supportValues")
+            pure
+            =<< resolveDefinitionSlice targetName
+
+      definitionTexts <- traverse definitionTextFromSpans slice.declarationSpans
+      GHC.moduleNameString (GHC.moduleName slice.definitionModule) `shouldBe` "Demo.Support"
+      definitionTexts `shouldSatisfy` any (isInfixOf "supportValues :: Map.Map String Int")
 
     it "includes references used inside a where block" do
       slice <- fixtureDefinition "lookupWithWhere"
@@ -465,11 +484,15 @@ findDefinitionStartLine sourceLines definitionLines =
     [] ->
       error ("definition block not found in fixture source: " <> intercalate "\\n" definitionLines)
 
-findFixtureSymbol :: String -> [ExportedSymbol] -> Maybe GHC.Name
+findFixtureSymbol :: String -> [Symbol] -> Maybe GHC.Name
 findFixtureSymbol symbol =
+  findFixtureSymbolInModule "Demo" symbol
+
+findFixtureSymbolInModule :: String -> String -> [Symbol] -> Maybe GHC.Name
+findFixtureSymbolInModule moduleName symbol =
   fmap name
     . find
-      ( \exportedSymbol ->
-          GHC.Plugins.getOccString exportedSymbol.name == symbol
-            && maybe False ((== "Demo") . GHC.moduleNameString . GHC.moduleName) (GHC.Plugins.nameModule_maybe exportedSymbol.name)
+      ( \matchedSymbol ->
+          GHC.Plugins.getOccString matchedSymbol.name == symbol
+            && maybe False ((== moduleName) . GHC.moduleNameString . GHC.moduleName) (GHC.Plugins.nameModule_maybe matchedSymbol.name)
       )

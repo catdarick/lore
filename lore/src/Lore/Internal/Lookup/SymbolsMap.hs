@@ -3,14 +3,15 @@ module Lore.Internal.Lookup.SymbolsMap
     invalidateHomeSymbolsMapCache,
     setSymbolsMapDependencies,
     lookupSymbolsInMap,
-    lookupExportedSymbolByNameInMap,
+    lookupSymbolByNameInMap,
   )
 where
 
 import Control.Monad (forM, when)
 import Control.Monad.Reader (MonadIO (..), asks)
-import Data.List (find, foldl')
+import Data.List (find, foldl', nub)
 import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -18,10 +19,8 @@ import qualified GHC
 import qualified GHC.Driver.Main as GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Avail as GHC
-import qualified GHC.Unit.Env as GHC
-import qualified GHC.Unit.Home.ModInfo as GHC
 import Lore.Internal.Lookup.ModSummaries (getModSummaries)
-import Lore.Internal.Lookup.Types (ExportedSymbol (..), ExternalPackagesSymbolsCache (..), ModSummaries (..), SymbolsIndex (..), SymbolsMap (..))
+import Lore.Internal.Lookup.Types (ExternalPackagesSymbolsCache (..), ModSummaries (..), Symbol (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
@@ -48,12 +47,12 @@ setSymbolsMapDependencies dependencies = do
     cacheVar <- asks externalPackagesSymbolsCache
     modifyMVar cacheVar $ \_ -> pure (Nothing, ())
 
-lookupSymbolsInMap :: Text -> SymbolsMap -> [ExportedSymbol]
+lookupSymbolsInMap :: Text -> SymbolsMap -> [Symbol]
 lookupSymbolsInMap queryText SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
   lookupSymbolsInIndex queryText homeSymbolsMap <> lookupSymbolsInIndex queryText externalSymbolsMap
 
-lookupExportedSymbolByNameInMap :: GHC.Name -> SymbolsMap -> Maybe ExportedSymbol
-lookupExportedSymbolByNameInMap name symbolsMap =
+lookupSymbolByNameInMap :: GHC.Name -> SymbolsMap -> Maybe Symbol
+lookupSymbolByNameInMap name symbolsMap =
   find (\candidate -> candidate.name == name) (lookupSymbolsInMap occName symbolsMap)
   where
     occName = T.pack (GHC.getOccString name)
@@ -90,11 +89,10 @@ prepareHomeSymbolsMap = do
   Log.debug "Preparing symbols map for home modules..."
   homeModules <- enumerateHomeModules
   Log.debug $ "Enumerated " <> show (length homeModules) <> " home modules."
-  hscEnv <- GHC.getSession
-  homeModulesExports <- liftIO $ forM homeModules $ getHomeModuleExports hscEnv
-  Log.debug $ "Fetched exports for " <> show (length homeModulesExports) <> " home modules."
-  logModuleExportIssues homeModulesExports
-  let symbolsMap = buildSymbolsIndex homeModulesExports
+  homeModulesSymbols <- forM homeModules getHomeModuleSymbols
+  Log.debug $ "Fetched symbols for " <> show (length homeModulesSymbols) <> " home modules."
+  logModuleSymbolIssues homeModulesSymbols
+  let symbolsMap = buildSymbolsIndex homeModulesSymbols
   logPreparedSymbolsIndex "home modules" symbolsMap
   pure symbolsMap
 
@@ -104,10 +102,10 @@ prepareExternalSymbolsMap dependencies = do
   externalModules <- enumerateVisiblePackageModules
   Log.debug $ "Enumerated " <> show (length externalModules) <> " visible package modules."
   hscEnv <- GHC.getSession
-  externalModulesExports <- liftIO $ forM externalModules $ getExternalModuleExports hscEnv
-  Log.debug $ "Fetched exports for " <> show (length externalModulesExports) <> " external modules."
-  logModuleExportIssues externalModulesExports
-  let symbolsMap = buildSymbolsIndex externalModulesExports
+  externalModulesSymbols <- liftIO $ forM externalModules $ getExternalModuleSymbols hscEnv
+  Log.debug $ "Fetched symbols for " <> show (length externalModulesSymbols) <> " external modules."
+  logModuleSymbolIssues externalModulesSymbols
+  let symbolsMap = buildSymbolsIndex externalModulesSymbols
   logPreparedSymbolsIndex "external modules" symbolsMap
   pure symbolsMap
 
@@ -128,69 +126,120 @@ enumerateVisiblePackageModules = do
         ]
   pure mods
 
-data ModuleExportsResult
-  = ModuleExportsLoaded GHC.Module [GHC.Name]
-  | ModuleExportsMissing GHC.Module
-  | ModuleExportsFailed GHC.Module SomeException
+data ModuleSymbolsResult
+  = ModuleSymbolsLoaded GHC.Module [Symbol]
+  | ModuleSymbolsMissing GHC.Module
+  | ModuleSymbolsFailed GHC.Module SomeException
 
-getExternalModuleExports :: GHC.HscEnv -> GHC.Module -> IO ModuleExportsResult
-getExternalModuleExports hsc_env mdl = do
+getExternalModuleSymbols :: GHC.HscEnv -> GHC.Module -> IO ModuleSymbolsResult
+getExternalModuleSymbols hsc_env mdl = do
   handle
-    do \(e :: SomeException) -> pure (ModuleExportsFailed mdl e)
+    do \(e :: SomeException) -> pure (ModuleSymbolsFailed mdl e)
     do
       iface <- GHC.hscGetModuleInterface hsc_env mdl
-      pure $ ModuleExportsLoaded mdl $ concatMap GHC.availNames $ GHC.mi_exports iface
+      pure $
+        ModuleSymbolsLoaded
+          mdl
+          [ Symbol
+              { name = exportedName,
+                visibility = Symbol'ExportedFrom [mdl]
+              }
+          | exportedName <- deduplicateNames (concatMap GHC.availNames (GHC.mi_exports iface))
+          ]
 
-getHomeModuleExports :: GHC.HscEnv -> GHC.Module -> IO ModuleExportsResult
-getHomeModuleExports hsc_env mdl = do
+getHomeModuleSymbols :: (MonadLore m) => GHC.Module -> m ModuleSymbolsResult
+getHomeModuleSymbols mdl = do
   handle
-    do \(e :: SomeException) -> pure (ModuleExportsFailed mdl e)
+    do \(e :: SomeException) -> pure (ModuleSymbolsFailed mdl e)
     do
-      case GHC.lookupHugByModule mdl (GHC.hsc_HUG hsc_env) of
-        Nothing -> pure (ModuleExportsMissing mdl)
-        Just hmi -> pure $ ModuleExportsLoaded mdl $ concatMap GHC.availNames $ GHC.mi_exports $ GHC.hm_iface hmi
+      maybeModuleInfo <- GHC.getModuleInfo mdl
+      case maybeModuleInfo of
+        Nothing ->
+          pure (ModuleSymbolsMissing mdl)
+        Just moduleInfo -> do
+          let exportedNameSet =
+                Set.fromList (GHC.modInfoExports moduleInfo)
+              topLevelNameSet =
+                Set.fromList (fromMaybe [] (GHC.modInfoTopLevelScope moduleInfo))
+              definedTopLevelNameSet =
+                Set.filter isDefinedInCurrentModule topLevelNameSet
+              unexportedNameSet =
+                Set.difference definedTopLevelNameSet exportedNameSet
+              exportedSymbols =
+                [ Symbol
+                    { name = exportedName,
+                      visibility = Symbol'ExportedFrom [mdl]
+                    }
+                | exportedName <- Set.toList exportedNameSet
+                ]
+              unexportedSymbols =
+                [ Symbol
+                    { name = unexportedName,
+                      visibility = Symbol'Unexported
+                    }
+                | unexportedName <- Set.toList unexportedNameSet
+                ]
+          pure (ModuleSymbolsLoaded mdl (exportedSymbols <> unexportedSymbols))
+  where
+    isDefinedInCurrentModule name =
+      case GHC.nameModule_maybe name of
+        Just module_ -> module_ == mdl
+        Nothing -> False
 
-lookupSymbolsInIndex :: Text -> SymbolsIndex -> [ExportedSymbol]
+lookupSymbolsInIndex :: Text -> SymbolsIndex -> [Symbol]
 lookupSymbolsInIndex queryText (SymbolsIndex symbolsMap) =
   Map.findWithDefault [] queryText symbolsMap
 
-buildSymbolsIndex :: [ModuleExportsResult] -> SymbolsIndex
-buildSymbolsIndex moduleExports =
+buildSymbolsIndex :: [ModuleSymbolsResult] -> SymbolsIndex
+buildSymbolsIndex moduleSymbols =
   SymbolsIndex $
-    fmap toExportedSymbols $
-      foldl' insertModuleExports Map.empty moduleExports
+    fmap toSymbols $
+      foldl' insertModuleSymbols Map.empty moduleSymbols
   where
-    insertModuleExports grouped = \case
-      ModuleExportsLoaded exportedFrom names ->
-        foldl' (insertExportedName exportedFrom) grouped names
-      ModuleExportsMissing _ ->
+    insertModuleSymbols grouped = \case
+      ModuleSymbolsLoaded _ symbols ->
+        foldl' insertSymbol grouped symbols
+      ModuleSymbolsMissing _ ->
         grouped
-      ModuleExportsFailed _ _ ->
+      ModuleSymbolsFailed _ _ ->
         grouped
 
-    insertExportedName exportedFrom grouped exportedName =
+    insertSymbol grouped symbol =
       Map.insertWith
         (Map.unionWith (<>))
-        (T.pack (GHC.getOccString exportedName))
-        (Map.singleton exportedName [exportedFrom])
+        (T.pack (GHC.getOccString symbol.name))
+        (Map.singleton symbol.name (symbolExportedFrom symbol.visibility))
         grouped
 
-    toExportedSymbols =
-      map (\(exportedName, modules) -> ExportedSymbol exportedName modules)
+    symbolExportedFrom = \case
+      Symbol'ExportedFrom modules_ -> modules_
+      Symbol'Unexported -> []
+
+    toSymbols =
+      map (\(symbolName, modules) -> Symbol symbolName (toVisibility modules))
         . Map.toList
+
+    toVisibility modules =
+      case nub modules of
+        [] -> Symbol'Unexported
+        deduplicatedModules -> Symbol'ExportedFrom deduplicatedModules
+
+deduplicateNames :: [GHC.Name] -> [GHC.Name]
+deduplicateNames =
+  Set.toList . Set.fromList
 
 logPreparedSymbolsIndex :: (MonadLore m) => String -> SymbolsIndex -> m ()
 logPreparedSymbolsIndex scope (SymbolsIndex symbolsMap) = do
-  let exportedSymbolsCount = sum (map length (Map.elems symbolsMap))
-  Log.debug $ "Collected " <> show exportedSymbolsCount <> " exported symbols from " <> scope <> "."
+  let symbolsCount = sum (map length (Map.elems symbolsMap))
+  Log.debug $ "Collected " <> show symbolsCount <> " symbols from " <> scope <> "."
   Log.debug $ "Prepared symbols map with " <> show (Map.size symbolsMap) <> " unique symbol names for " <> scope <> "."
 
-logModuleExportIssues :: (MonadLore m) => [ModuleExportsResult] -> m ()
-logModuleExportIssues =
+logModuleSymbolIssues :: (MonadLore m) => [ModuleSymbolsResult] -> m ()
+logModuleSymbolIssues =
   mapM_ \case
-    ModuleExportsLoaded _ _ ->
+    ModuleSymbolsLoaded _ _ ->
       pure ()
-    ModuleExportsMissing module_ ->
+    ModuleSymbolsMissing module_ ->
       Log.warn $ "Module info not found for " <> show module_.moduleName
-    ModuleExportsFailed module_ err ->
+    ModuleSymbolsFailed module_ err ->
       Log.err $ "Failed to get module info for " <> show module_.moduleName <> ": " <> show err

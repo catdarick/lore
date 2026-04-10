@@ -1,7 +1,8 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Lore.Lookup
-  ( ExportedSymbol (..),
+  ( Symbol (..),
+    SymbolVisibility (..),
     SymbolCategory (..),
     SymbolInfo (..),
     Instances (..),
@@ -32,14 +33,14 @@ import qualified GHC.Types.TyThing as GHC
 import Lore.Definition (DefinitionSlice, resolveDefinitionSlice)
 import Lore.Internal.Lookup.NameToInstances (getNameToInstancesIndex)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
-import Lore.Internal.Lookup.Types (ExportedSymbol (..), NameToInstancesIndex (..), SymbolsMap)
+import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolVisibility (..), SymbolsMap, symbolExportedFrom)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 
-findSymbols :: (MonadLore m) => Text -> m [ExportedSymbol]
+findSymbols :: (MonadLore m) => Text -> m [Symbol]
 findSymbols needle = do
   symbolsMap <- SymbolsMap.getSymbolsMap
-  pure (findExportedSymbols needle symbolsMap)
+  pure (findMatchingSymbols needle symbolsMap)
 
 data SymbolInfo = SymbolInfo
   { symbolName :: GHC.Name,
@@ -97,38 +98,38 @@ lookupRootSymbolInfo = getSymbolInfo' True
 getSymbolInfo' :: (MonadLore m) => Bool -> Text -> m [SymbolInfo]
 getSymbolInfo' resolveRoot needle = do
   symbolsMap <- SymbolsMap.getSymbolsMap
-  let names = findExportedSymbols needle symbolsMap
+  let symbols = findMatchingSymbols needle symbolsMap
   resolvedSymbols <-
     if resolveRoot
-      then resolveRootExportedSymbols symbolsMap names
-      else pure names
+      then resolveRootSymbols symbolsMap symbols
+      else pure symbols
   Log.debug $ "Found " <> show (length resolvedSymbols) <> " symbols matching query \"" <> T.unpack needle <> "\"."
-  catMaybes <$> forM resolvedSymbols getExportedSymbolInfo
+  catMaybes <$> forM resolvedSymbols getSymbolInfo
 
-getExportedSymbolInfo :: (MonadLore m) => ExportedSymbol -> m (Maybe SymbolInfo)
-getExportedSymbolInfo es = do
-  case GHC.nameModule_maybe es.name of
+getSymbolInfo :: (MonadLore m) => Symbol -> m (Maybe SymbolInfo)
+getSymbolInfo symbol = do
+  case GHC.nameModule_maybe symbol.name of
     Nothing -> do
-      Log.warn $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr es.name) <> " does not have an associated module. Skipping instance resolution."
+      Log.warn $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr symbol.name) <> " does not have an associated module. Skipping instance resolution."
       pure Nothing
     Just m -> do
-      Log.debug $ "Looking up symbol: " <> GHC.showSDocUnsafe (GHC.ppr es.name)
-      tyThing <- GHC.lookupName es.name
+      Log.debug $ "Looking up symbol: " <> GHC.showSDocUnsafe (GHC.ppr symbol.name)
+      tyThing <- GHC.lookupName symbol.name
       let symbolCategory = classifySymbolCategory tyThing
           symbolType = case tyThing of
             Nothing -> Nothing
             Just tt -> case tt of
               GHC.AnId id' -> Just (GHC.idType id')
               _ -> Nothing
-      Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr es.name) <> " is categorized as " <> show symbolCategory <> "."
-      instancesInfo <- resolveInstances es.name
-      Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr es.name) <> " has " <> show (maybe 0 (length . classInstances) instancesInfo) <> " class instances and " <> show (maybe 0 (length . familyInstances) instancesInfo) <> " family instances."
+      Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr symbol.name) <> " is categorized as " <> show symbolCategory <> "."
+      instancesInfo <- resolveInstances symbol.name
+      Log.debug $ "Symbol " <> GHC.showSDocUnsafe (GHC.ppr symbol.name) <> " has " <> show (maybe 0 (length . classInstances) instancesInfo) <> " class instances and " <> show (maybe 0 (length . familyInstances) instancesInfo) <> " family instances."
       pure $
         Just
           SymbolInfo
-            { symbolName = es.name,
+            { symbolName = symbol.name,
               definedIn = m,
-              exportedFrom = es.exportedFrom,
+              exportedFrom = symbolExportedFrom symbol,
               symbolThing = tyThing,
               symbolCategory = symbolCategory,
               symbolType = symbolType,
@@ -158,29 +159,29 @@ classifySymbolCategory = \case
         | GHC.isDataTyCon tyCon -> SymbolData
         | otherwise -> SymbolUnknown
 
-resolveRootExportedSymbols :: (MonadLore m) => SymbolsMap -> [ExportedSymbol] -> m [ExportedSymbol]
-resolveRootExportedSymbols symbolsMap exportedSymbols = do
-  Log.debug $ "Resolving root symbols for " <> show (length exportedSymbols) <> " exported symbols."
-  r <- deduplicateExportedSymbols <$> mapM (resolveRootExportedSymbol symbolsMap) exportedSymbols
+resolveRootSymbols :: (MonadLore m) => SymbolsMap -> [Symbol] -> m [Symbol]
+resolveRootSymbols symbolsMap symbols = do
+  Log.debug $ "Resolving root symbols for " <> show (length symbols) <> " symbols."
+  r <- deduplicateSymbols <$> mapM (resolveRootSymbol symbolsMap) symbols
   Log.debug "Finished resolving root symbols."
   pure r
 
-resolveRootExportedSymbol :: (MonadLore m) => SymbolsMap -> ExportedSymbol -> m ExportedSymbol
-resolveRootExportedSymbol symbolsMap exportedSymbol = do
-  rootName <- resolveRootName exportedSymbol.name
+resolveRootSymbol :: (MonadLore m) => SymbolsMap -> Symbol -> m Symbol
+resolveRootSymbol symbolsMap symbol = do
+  rootName <- resolveRootName symbol.name
   pure $
-    case SymbolsMap.lookupExportedSymbolByNameInMap rootName symbolsMap of
-      Just rootExportedSymbol -> rootExportedSymbol
-      Nothing -> exportedSymbol
+    case SymbolsMap.lookupSymbolByNameInMap rootName symbolsMap of
+      Just rootSymbol -> rootSymbol
+      Nothing -> symbol
 
-deduplicateExportedSymbols :: [ExportedSymbol] -> [ExportedSymbol]
-deduplicateExportedSymbols =
-  sortOn (renderOutputable . exportedSymbolName)
-    . nubOrdOn exportedSymbolName
+deduplicateSymbols :: [Symbol] -> [Symbol]
+deduplicateSymbols =
+  sortOn (renderOutputable . symbolKeyName)
+    . nubOrdOn symbolKeyName
 
-exportedSymbolName :: ExportedSymbol -> GHC.Name
-exportedSymbolName exportedSymbol =
-  exportedSymbol.name
+symbolKeyName :: Symbol -> GHC.Name
+symbolKeyName symbol =
+  symbol.name
 
 data LookupInstancesQuery = LookupInstancesQuery
   { lookupInstancesQueryText :: Text,
@@ -228,12 +229,12 @@ resolveLookupInstancesQuery resolveRoot queryText = do
 findResolvedSymbolNames :: (MonadLore m) => Bool -> Text -> m [GHC.Name]
 findResolvedSymbolNames resolveRoot needle = do
   symbolsMap <- SymbolsMap.getSymbolsMap
-  let exportedSymbols = findExportedSymbols needle symbolsMap
-  deduplicateNames <$> mapM (resolveExportedSymbolName resolveRoot) exportedSymbols
+  let symbols = findMatchingSymbols needle symbolsMap
+  deduplicateNames <$> mapM (resolveSymbolName resolveRoot) symbols
 
-findExportedSymbols :: Text -> SymbolsMap -> [ExportedSymbol]
-findExportedSymbols queryText symbolsMap =
-  filterExportedSymbolsByModuleHint moduleHint $
+findMatchingSymbols :: Text -> SymbolsMap -> [Symbol]
+findMatchingSymbols queryText symbolsMap =
+  filterSymbolsByModuleHint moduleHint $
     SymbolsMap.lookupSymbolsInMap normalizedOccName symbolsMap
   where
     (moduleHint, occName) =
@@ -241,17 +242,17 @@ findExportedSymbols queryText symbolsMap =
     normalizedOccName =
       normalizeQueryOccName occName
 
-    filterExportedSymbolsByModuleHint Nothing exportedSymbols =
-      exportedSymbols
-    filterExportedSymbolsByModuleHint (Just hintedModule) exportedSymbols =
-      filter (exportedSymbolMatchesModuleHint hintedModule) exportedSymbols
+    filterSymbolsByModuleHint Nothing symbols =
+      symbols
+    filterSymbolsByModuleHint (Just hintedModule) symbols =
+      filter (symbolMatchesModuleHint hintedModule) symbols
 
-    exportedSymbolMatchesModuleHint hintedModule exportedSymbol =
-      symbolDefinedInModuleHint hintedModule exportedSymbol
-        || any (moduleMatchesHint hintedModule) exportedSymbol.exportedFrom
+    symbolMatchesModuleHint hintedModule symbol =
+      symbolDefinedInModuleHint hintedModule symbol
+        || any (moduleMatchesHint hintedModule) (symbolExportedFrom symbol)
 
-    symbolDefinedInModuleHint hintedModule exportedSymbol =
-      maybe False (moduleMatchesHint hintedModule) (GHC.nameModule_maybe exportedSymbol.name)
+    symbolDefinedInModuleHint hintedModule symbol =
+      maybe False (moduleMatchesHint hintedModule) (GHC.nameModule_maybe symbol.name)
 
     moduleMatchesHint hintedModule module_ =
       T.pack (GHC.moduleNameString (GHC.moduleName module_)) == hintedModule
@@ -307,12 +308,12 @@ isOperatorChar :: Char -> Bool
 isOperatorChar char =
   char `elem` ("!#$%&*+./<=>?@\\^|-~:" :: String)
 
-resolveExportedSymbolName :: (MonadLore m) => Bool -> ExportedSymbol -> m GHC.Name
-resolveExportedSymbolName resolveRoot exportedSymbol
+resolveSymbolName :: (MonadLore m) => Bool -> Symbol -> m GHC.Name
+resolveSymbolName resolveRoot symbol
   | resolveRoot =
-      resolveRootName exportedSymbol.name
+      resolveRootName symbol.name
   | otherwise =
-      pure exportedSymbol.name
+      pure symbol.name
 
 lookupMatchingInstancesForNames :: (MonadLore m) => [GHC.Name] -> m [MatchingInstance]
 lookupMatchingInstancesForNames names = do

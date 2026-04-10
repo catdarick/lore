@@ -10,12 +10,13 @@ import qualified GHC
 import qualified GHC.Plugins as Plugins
 import qualified GHC.Utils.Outputable as Outputable
 import Lore
-  ( ExportedSymbol (..),
-    LookupInstancesQuery (..),
+  ( LookupInstancesQuery (..),
     LookupInstancesResult (..),
     MatchingInstance (..),
+    Symbol (..),
     SymbolCategory (..),
     SymbolInfo (..),
+    SymbolVisibility (..),
     defaultLoadTargetsOptions,
     findSymbols,
     loadTargets,
@@ -132,6 +133,17 @@ spec =
 
         length result `shouldBe` 1
         fmap (\exportedSymbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe exportedSymbol.name)) result
+          `shouldBe` ["Demo.Support"]
+
+      it "includes non-exported top-level symbols from home modules" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            findSymbols "supportValues"
+
+        length result `shouldBe` 1
+        all (== Symbol'Unexported) (fmap visibility result) `shouldBe` True
+        fmap (\symbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name)) result
           `shouldBe` ["Demo.Support"]
 
       it "supports module-qualified dotted operators" do

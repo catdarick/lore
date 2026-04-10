@@ -32,7 +32,7 @@ import Lore.Internal.AutoRefactor.MissingImports.Diagnostic
     ResolveMissingImportDetails (..),
   )
 import Lore.Internal.Lookup.SymbolsMap (lookupSymbolsInMap)
-import Lore.Internal.Lookup.Types (ExportedSymbol (..), SymbolsMap)
+import Lore.Internal.Lookup.Types (Symbol (..), SymbolVisibility (..), SymbolsMap, symbolExportedFrom)
 import Lore.Internal.Session (SessionContext (customPrelude))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
@@ -47,7 +47,8 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
         ResolveMissingImport ResolveMissingImportDetails {requestPreferredModules, requestSuggestedImportTargets} -> do
           let matchingExportedSymbols =
                 filter (matchesMissingKind requestMissingSymbol) $
-                  lookupSymbolsInMap requestMissingSymbol.missingName symbolsMap
+                  filter isExportedSymbol $
+                    lookupSymbolsInMap requestMissingSymbol.missingName symbolsMap
               selectionDecision =
                 decideModuleSelection
                   requestMissingSymbol
@@ -65,7 +66,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
                     listToMaybe
                       [ symbol
                       | symbol <- matchingExportedSymbols,
-                        moduleName `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
+                        moduleName `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) (symbolExportedFrom symbol)
                       ]
               maybeImportItem <- renderImportItem requestMissingSymbol selectedSymbol
               pure $
@@ -74,7 +75,8 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
         ExtendExistingImport ExtendExistingImportDetails {requestTargetModule, requestImportItemOverride} ->
           let matchingExportedSymbols =
                 filter (matchesMissingKind requestMissingSymbol) $
-                  lookupSymbolsInMap requestMissingSymbol.missingName symbolsMap
+                  filter isExportedSymbol $
+                    lookupSymbolsInMap requestMissingSymbol.missingName symbolsMap
               selectedTargetModule =
                 fromMaybe
                   requestTargetModule
@@ -85,7 +87,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
                         listToMaybe
                           [ symbol
                           | symbol <- matchingExportedSymbols,
-                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
+                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) (symbolExportedFrom symbol)
                           ]
                   maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
                   if selectedTargetModule /= requestTargetModule
@@ -106,7 +108,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
                         listToMaybe
                           [ symbol
                           | symbol <- matchingExportedSymbols,
-                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) symbol.exportedFrom
+                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) (symbolExportedFrom symbol)
                           ]
                   maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
                   pure $
@@ -132,7 +134,7 @@ data ModuleRejectionReason
   | NoReexportHeuristicMatch
   deriving (Eq, Show)
 
-decideModuleSelection :: MissingSymbol -> [Text] -> [Text] -> [ParsedImport] -> [ExportedSymbol] -> ModuleSelectionDecision
+decideModuleSelection :: MissingSymbol -> [Text] -> [Text] -> [ParsedImport] -> [Symbol] -> ModuleSelectionDecision
 decideModuleSelection missingSymbol preferredModules suggestedImportTargets parsedImports exportedSymbols =
   let matchingExportedSymbols =
         filter (matchesMissingKind missingSymbol) exportedSymbols
@@ -145,7 +147,7 @@ decideModuleSelection missingSymbol preferredModules suggestedImportTargets pars
           else preferredMatches
    in decideAmongCandidates missingSymbol suggestedImportTargets parsedImports matchingExportedSymbols baseCandidates
 
-decideAmongCandidates :: MissingSymbol -> [Text] -> [ParsedImport] -> [ExportedSymbol] -> [Text] -> ModuleSelectionDecision
+decideAmongCandidates :: MissingSymbol -> [Text] -> [ParsedImport] -> [Symbol] -> [Text] -> ModuleSelectionDecision
 decideAmongCandidates missingSymbol suggestedImportTargets parsedImports matchingExportedSymbols = \case
   [] ->
     RejectSelection NoCandidateModules
@@ -161,7 +163,7 @@ decideAmongCandidates missingSymbol suggestedImportTargets parsedImports matchin
       Nothing ->
         decideUnqualifiedReexportSelection suggestedImportTargets parsedImports matchingExportedSymbols
 
-decideUnqualifiedReexportSelection :: [Text] -> [ParsedImport] -> [ExportedSymbol] -> ModuleSelectionDecision
+decideUnqualifiedReexportSelection :: [Text] -> [ParsedImport] -> [Symbol] -> ModuleSelectionDecision
 decideUnqualifiedReexportSelection suggestedImportTargets parsedImports exportedSymbols =
   case sameSymbolReexportCandidates exportedSymbols of
     Nothing ->
@@ -179,14 +181,14 @@ decideUnqualifiedReexportSelection suggestedImportTargets parsedImports exported
           | otherwise ->
               RejectSelection AmbiguousUnqualifiedCandidates
 
-candidateModulesForSymbols :: [ExportedSymbol] -> [Text]
+candidateModulesForSymbols :: [Symbol] -> [Text]
 candidateModulesForSymbols =
   deduplicateTexts
     . concatMap candidateModulesForSymbol
 
-candidateModulesForSymbol :: ExportedSymbol -> [Text]
+candidateModulesForSymbol :: Symbol -> [Text]
 candidateModulesForSymbol =
-  map (T.pack . GHC.moduleNameString . GHC.moduleName) . exportedFrom
+  map (T.pack . GHC.moduleNameString . GHC.moduleName) . symbolExportedFrom
 
 existingUnqualifiedImportCandidate :: [ParsedImport] -> [Text] -> Maybe Text
 existingUnqualifiedImportCandidate parsedImports candidateModules =
@@ -194,7 +196,7 @@ existingUnqualifiedImportCandidate parsedImports candidateModules =
     [moduleName] -> Just moduleName
     _ -> Nothing
 
-sameSymbolReexportCandidates :: [ExportedSymbol] -> Maybe [Text]
+sameSymbolReexportCandidates :: [Symbol] -> Maybe [Text]
 sameSymbolReexportCandidates exportedSymbols =
   case exportedSymbols of
     [exportedSymbol] ->
@@ -248,12 +250,12 @@ shortestModuleName modules =
         GT -> right
         _ -> left
 
-matchesMissingKind :: MissingSymbol -> ExportedSymbol -> Bool
+matchesMissingKind :: MissingSymbol -> Symbol -> Bool
 matchesMissingKind MissingSymbol {missingKind = MissingThing} _ = True
-matchesMissingKind MissingSymbol {missingKind = MissingDataConstructor} exportedSymbol =
-  GHC.isDataOcc (GHC.nameOccName exportedSymbol.name)
-matchesMissingKind MissingSymbol {missingKind = MissingTypeConstructorOrClass} exportedSymbol =
-  GHC.isTcOcc (GHC.nameOccName exportedSymbol.name)
+matchesMissingKind MissingSymbol {missingKind = MissingDataConstructor} symbol =
+  GHC.isDataOcc (GHC.nameOccName symbol.name)
+matchesMissingKind MissingSymbol {missingKind = MissingTypeConstructorOrClass} symbol =
+  GHC.isTcOcc (GHC.nameOccName symbol.name)
 
 selectByQualifier :: Text -> [Text] -> Maybe Text
 selectByQualifier qualifier modules =
@@ -268,21 +270,21 @@ selectByQualifier qualifier modules =
     _ ->
       Nothing
 
-renderImportItem :: (MonadLore m) => MissingSymbol -> Maybe ExportedSymbol -> m (Maybe Text)
-renderImportItem MissingSymbol {missingName, missingKind} maybeExportedSymbol =
+renderImportItem :: (MonadLore m) => MissingSymbol -> Maybe Symbol -> m (Maybe Text)
+renderImportItem MissingSymbol {missingName, missingKind} maybeSymbol =
   case missingKind of
     MissingDataConstructor -> do
       maybeParent <-
-        case maybeExportedSymbol of
-          Just exportedSymbol -> resolveParentName exportedSymbol
+        case maybeSymbol of
+          Just symbol -> resolveParentName symbol
           Nothing -> pure Nothing
       pure (fmap (<> "(..)") maybeParent)
     _ ->
       pure (Just missingName)
 
-resolveParentName :: (MonadLore m) => ExportedSymbol -> m (Maybe Text)
-resolveParentName exportedSymbol = do
-  maybeTyThing <- Ghc.lookupName exportedSymbol.name
+resolveParentName :: (MonadLore m) => Symbol -> m (Maybe Text)
+resolveParentName symbol = do
+  maybeTyThing <- Ghc.lookupName symbol.name
   pure do
     parentTyThing <- maybeTyThing >>= TyThing.tyThingParent_maybe
     pure $
@@ -319,7 +321,7 @@ prioritizeCustomPrelude :: Maybe Text -> [Text] -> [Text]
 prioritizeCustomPrelude maybeCustomPrelude preferredModules =
   deduplicateTexts (maybeToList maybeCustomPrelude <> preferredModules)
 
-selectCustomPreludeModule :: Maybe Text -> [ExportedSymbol] -> Maybe Text
+selectCustomPreludeModule :: Maybe Text -> [Symbol] -> Maybe Text
 selectCustomPreludeModule maybeCustomPrelude exportedSymbols = do
   customPreludeModule <- maybeCustomPrelude
   if customPreludeModule `elem` candidateModulesForSymbols exportedSymbols
@@ -330,7 +332,7 @@ sortOnDescending :: (Ord b) => (a -> b) -> [a] -> [a]
 sortOnDescending score =
   sortBy (\left right -> compare (score right) (score left))
 
-renderSelectionChoice :: MissingSymbol -> Text -> ModuleSelectionReason -> [ExportedSymbol] -> String
+renderSelectionChoice :: MissingSymbol -> Text -> ModuleSelectionReason -> [Symbol] -> String
 renderSelectionChoice MissingSymbol {missingName, missingQualifier} moduleName selectionReason exportedSymbols =
   "Auto-refact: selected import module "
     <> T.unpack moduleName
@@ -341,7 +343,7 @@ renderSelectionChoice MissingSymbol {missingName, missingQualifier} moduleName s
     <> " from candidates "
     <> show (candidateModulesForSymbols exportedSymbols)
 
-renderSelectionRejection :: MissingSymbol -> ModuleRejectionReason -> [ExportedSymbol] -> String
+renderSelectionRejection :: MissingSymbol -> ModuleRejectionReason -> [Symbol] -> String
 renderSelectionRejection MissingSymbol {missingName, missingQualifier} rejectionReason exportedSymbols =
   "Auto-refact: skipping import fix for "
     <> renderMissingSymbol missingQualifier missingName
@@ -383,3 +385,9 @@ buildExtendExistingImportOperation parsedImports MissingSymbol {missingQualifier
       Just (fmap (AddUnqualifiedItemToExistingImport moduleName))
 buildExtendExistingImportOperation _ _ _ =
   Nothing
+
+isExportedSymbol :: Symbol -> Bool
+isExportedSymbol symbol =
+  case symbol.visibility of
+    Symbol'ExportedFrom _ -> True
+    Symbol'Unexported -> False
