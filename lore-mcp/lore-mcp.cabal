@@ -38,9 +38,7 @@ executable lore-mcp
       Lore.Mcp.Tools.LookupSymbolInfo
       Lore.Mcp.Tools.ReloadHomeModules
       Lore.Mcp.Tools.Shared
-      Paths_lore_mcp
-  autogen-modules:
-      Paths_lore_mcp
+      Lore.Mcp.Tools.Shared.Diagnostics
   hs-source-dirs:
       app
       src

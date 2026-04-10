@@ -9,6 +9,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Lore (LoadTargetsResult (..))
 import Lore.Diagnostics (Diagnostic (..))
+import Lore.Mcp.Tools.Shared.Diagnostics (renderDiagnosticSummary)
 
 appendPartialLoadWarning :: LoadTargetsResult -> Text -> Text -> Text
 appendPartialLoadWarning loadResult partialLoadSuffix body
@@ -26,7 +27,9 @@ renderFailureWithPartialLoadWarning loadResult partialLoadSuffix heading diagnos
     renderedBody =
       T.unlines $
         [heading]
-          <> map renderDiagnosticSummary diagnostics
+          <> case diagnostics of
+            [] -> ["- No diagnostics were produced."]
+            _ -> map renderDiagnosticSummary diagnostics
 
 renderPartialLoadWarning :: LoadTargetsResult -> Text -> Text
 renderPartialLoadWarning loadResult partialLoadSuffix =
@@ -36,18 +39,3 @@ renderPartialLoadWarning loadResult partialLoadSuffix =
     <> T.pack (show loadResult.loadTargetsModulesTotal)
     <> " modules loaded successfully. "
     <> partialLoadSuffix
-
-renderDiagnosticSummary :: Diagnostic -> Text
-renderDiagnosticSummary Diagnostic {diagnosticMessage} =
-  "- " <> firstMessageLine
-  where
-    firstMessageLine =
-      case filter (not . T.null) (map T.strip (T.lines diagnosticMessage)) of
-        line : _ -> stripBulletPrefix line
-        [] -> "<empty>"
-
-stripBulletPrefix :: Text -> Text
-stripBulletPrefix text =
-  case T.stripPrefix "* " text of
-    Just stripped -> stripped
-    Nothing -> text
