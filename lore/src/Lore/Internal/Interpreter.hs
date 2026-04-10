@@ -48,15 +48,25 @@ refreshInterpreterContext = do
   maybeCustomPrelude <- asks customPrelude
   ModSummaries modSummaries <- getModSummaries
   loadedModuleNames <- Set.toAscList . Set.fromList <$> mapMMaybe loadedHomeModuleName (Map.elems modSummaries)
-  GHC.setContext (preludeImports maybeCustomPrelude <> map importModule loadedModuleNames)
+
+  let preludeName = maybe "Prelude" T.unpack maybeCustomPrelude
+      preludeIsHomeModule = any (\summary -> GHC.moduleNameString (GHC.moduleName (GHC.ms_mod summary)) == preludeName) (Map.elems modSummaries)
+      preludeSuccessfullyLoaded = GHC.mkModuleName preludeName `elem` loadedModuleNames
+
+      -- Only explicitly import the prelude if it's an external module,
+      -- or if it's a home module that successfully loaded (though in the latter case it's mostly redundant).
+      shouldAddPrelude = not preludeIsHomeModule || preludeSuccessfullyLoaded
+      preludeContext = if shouldAddPrelude then [importModule (GHC.mkModuleName preludeName)] else []
+
+  catches
+    (GHC.setContext (preludeContext <> map importModule loadedModuleNames))
+    [Handler \(_ :: GHC.SourceError.SourceError) -> pure ()]
+
   cacheVar <- asks interpreterContextCache
   modifyMVar cacheVar $ \_ -> pure (Just loadedModuleNames, ())
   where
     importModule =
       GHC.IIDecl . GHC.simpleImportDecl
-
-    preludeImports maybeCustomPrelude =
-      [importModule (GHC.mkModuleName (T.unpack (maybe "Prelude" id maybeCustomPrelude)))]
 
     loadedHomeModuleName summary = do
       maybeInfo <- GHC.getModuleInfo (GHC.ms_mod summary)
