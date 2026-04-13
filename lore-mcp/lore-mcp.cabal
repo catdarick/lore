@@ -26,13 +26,13 @@ executable lore-mcp
   other-modules:
       Lore.JsonRpc.Server
       Lore.Mcp.Internal.Annotated
-      Lore.Mcp.Internal.Output.Pagination
-      Lore.Mcp.Internal.Output.Render
+      Lore.Mcp.Internal.Render
       Lore.Mcp.Internal.Tool
       Lore.Mcp.Protocol.Request
       Lore.Mcp.Protocol.Server
       Lore.Mcp.Server
       Lore.Mcp.Tools.ExecuteCode
+      Lore.Mcp.Tools.FindReferences
       Lore.Mcp.Tools.GetDefinition
       Lore.Mcp.Tools.GetTypeOfExpression
       Lore.Mcp.Tools.ListExportedSymbols

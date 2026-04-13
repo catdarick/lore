@@ -8,11 +8,13 @@ module Lore.Internal.Session
 where
 
 import qualified Control.Concurrent as GHC
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
 import qualified GHC.Plugins as GHC
+import Lore.Internal.Definition.Types (ReferenceModuleAnalysis, ReferenceModuleSearch)
 import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Lore.Internal.Ghc.DynFlags
   ( ParallelWorkersCount (..),
@@ -34,6 +36,8 @@ data SessionContext = SessionContext
     symbolsMapDependencySet :: MVar (Set.Set String),
     modSummariesCache :: MVar (Maybe ModSummaries),
     nameToInstancesIndexCache :: MVar (Maybe NameToInstancesIndex),
+    referenceModuleSearchCache :: MVar (Map.Map GHC.Module (Maybe ReferenceModuleSearch)),
+    referenceModuleAnalysisCache :: MVar (Map.Map GHC.Module (Maybe ReferenceModuleAnalysis)),
     interpreterContextCache :: MVar (Maybe [GHC.ModuleName]),
     lastLoadTargetsResult :: MVar (Maybe LoadTargetsResult)
   }
@@ -66,6 +70,8 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
   symbolsMapDependencySet <- GHC.newMVar Set.empty
   modSummariesCache <- GHC.newMVar Nothing
   nameToInstancesIndexCache <- GHC.newMVar Nothing
+  referenceModuleSearchCache <- GHC.newMVar Map.empty
+  referenceModuleAnalysisCache <- GHC.newMVar Map.empty
   interpreterContextCache <- GHC.newMVar Nothing
   lastLoadTargetsResult <- GHC.newMVar Nothing
   case eiPackageDbPaths of
@@ -85,6 +91,8 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
               symbolsMapDependencySet,
               modSummariesCache,
               nameToInstancesIndexCache,
+              referenceModuleSearchCache,
+              referenceModuleAnalysisCache,
               interpreterContextCache,
               lastLoadTargetsResult
             }

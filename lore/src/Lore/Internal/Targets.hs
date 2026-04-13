@@ -32,6 +32,7 @@ import GHC.Utils.Monad (mapMaybeM)
 import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor, rollbackAutoRefactorEdits)
 import Lore.Internal.AutoRefactor.Issue (classifyAutoRefactorIssues)
+import Lore.Internal.Definition.Cache (invalidateReferenceCaches)
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
 import Lore.Internal.Interpreter (invalidateInterpreterContext, refreshInterpreterContext)
 import Lore.Internal.Lookup.ModSummaries (getModSummaries, invalidateModSummaries)
@@ -123,6 +124,7 @@ loadTargets options = do
   invalidateHomeSymbolsMapCache
   invalidateModSummaries
   invalidateNameToInstancesIndex
+  invalidateReferenceCaches
   modifySessionDynFlagsM
     ( setGhcOptionsAndExtensions targetsPlan.commonLanguage (Set.toList $ commonGhcOptions targetsPlan) (Set.toList $ commonExtensions targetsPlan)
         . setGhcSourceDirs (Set.toList sourceDirs)
@@ -218,6 +220,7 @@ loadTargets' options targetsPlan =
                       Log.info "Auto-refact applied import fixes. Retrying target load."
                       invalidateHomeSymbolsMapCache
                       invalidateModSummaries
+                      invalidateReferenceCaches
                       invalidateNameToInstancesIndex
                       go
                         (attemptNo + 1)
@@ -258,6 +261,7 @@ rollbackUnresolvedAutoRefact targetsPlan rollbackState failedAttempt
       rollbackAutoRefactorEdits rollbackState
       invalidateHomeSymbolsMapCache
       invalidateModSummaries
+      invalidateReferenceCaches
       invalidateNameToInstancesIndex
       loadTargetsOnce targetsPlan
 

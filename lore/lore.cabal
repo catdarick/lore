@@ -46,6 +46,8 @@ library
       Lore.Internal.AutoRefactor.MissingImports
       Lore.Internal.AutoRefactor.MissingImports.Diagnostic
       Lore.Internal.AutoRefactor.RedundantImports
+      Lore.Internal.Definition.Cache
+      Lore.Internal.Definition.Types
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing

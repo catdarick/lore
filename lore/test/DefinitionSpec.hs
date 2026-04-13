@@ -4,16 +4,20 @@ import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import Data.List (find, intercalate, isInfixOf, isPrefixOf, sort, tails)
 import Data.Text (pack, unpack)
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import qualified GHC
 import qualified GHC.Plugins
-import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderDefinitionModulesText, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice)
+import Lore (RootSymbolInfo (..), lookupRootSymbolInfoWithChain)
+import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderDefinitionModulesText, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice, resolveReferenceDefinitions, resolveReferenceDefinitionsForNames)
 import Lore.Lookup (Symbol (..), findSymbols)
 import Lore.Monad (MonadLore)
 import Lore.Targets (defaultLoadTargetsOptions)
 import qualified Lore.Targets as Targets
-import System.Directory (makeAbsolute)
+import System.Directory (createDirectoryIfMissing, makeAbsolute)
+import System.FilePath ((</>))
 import Test.Hspec
-import TestSupport (fixtureLore)
+import TestSupport (fixtureLore, fixtureLoreAt, withFixtureCopy)
 
 loadTargets :: (MonadLore m) => Targets.LoadTargetsOptions -> m ()
 loadTargets options = void (Targets.loadTargets options)
@@ -297,6 +301,94 @@ spec = do
                                         )
                                       ]
 
+    it "includes the concretely used class instance in recursive closure output" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "Render.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile usedInstanceClosureFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.Render.renderInt"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.Render.renderInt")
+                pure
+                (findFixtureSymbolInModule "TestClosure.Render" "renderInt" exportedSymbols)
+            resolveDefinitionClosure 1 targetName
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.Render",
+                                            [ "class Render a where\n  render :: a -> String",
+                                              "instance Render Int where\n  render value = \"int:\" <> show value",
+                                              "renderInt :: Int -> String\nrenderInt = render"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
+  describe "resolveReferenceDefinitions" do
+    it "finds top-level definitions and instance definitions that reference the target" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+        enableFlexibleInstances fixtureRoot
+        TIO.appendFile demoFile referenceInstanceDefinitions
+
+        references <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "Demo.Support.supportSeed"
+            targetName <-
+              maybe
+                (error "symbol not found: Demo.Support.supportSeed")
+                pure
+                (findFixtureSymbolInModule "Demo.Support" "supportSeed" exportedSymbols)
+            resolveReferenceDefinitions targetName
+
+        references
+          `shouldHaveModuleDefinitions` [ ( "Demo",
+                                            [ "crossModuleSeed :: Int\ncrossModuleSeed = Support.supportSeed",
+                                              "instance HasIndex Support.SupportRecord where\n  toIndex _ =\n    Map.singleton (show Support.supportSeed) (Support.mkSupportRecord Support.supportSeed)"
+                                            ],
+                                            [ "import qualified Data.Map.Strict as Map",
+                                              "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed)"
+                                            ]
+                                          ),
+                                          ( "Demo.Support",
+                                            [ "supportStep :: Int -> Int\nsupportStep value = value + supportSeed"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
+    it "merges root chains with the same root before matching references" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestChain"
+            moduleFile = moduleDir </> "Roots.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile mergedRootChainFixtureModuleSource
+
+        references <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            resolvedRoots <- lookupRootSymbolInfoWithChain "TestChain.Roots.Wrapped"
+            case resolvedRoots of
+              [resolvedRoot] ->
+                resolveReferenceDefinitionsForNames resolvedRoot.rootSymbolChain
+              _ ->
+                error ("unexpected resolved roots count: " <> show (length resolvedRoots))
+
+        references
+          `shouldHaveModuleDefinitions` [ ( "TestChain.Roots",
+                                            [ "mkWrapped :: Int -> Wrapped\nmkWrapped = Wrapped",
+                                              "unwrapWrapped :: Wrapped -> Int\nunwrapWrapped (Wrapped value) = value"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
   describe "renderDefinitionModulesText" do
     it "renders a single definition as a minified module fragment" do
       rendered <- fixtureRenderedDefinition "lookupOrZero"
@@ -496,3 +588,60 @@ findFixtureSymbolInModule moduleName symbol =
           GHC.Plugins.getOccString matchedSymbol.name == symbol
             && maybe False ((== moduleName) . GHC.moduleNameString . GHC.moduleName) (GHC.Plugins.nameModule_maybe matchedSymbol.name)
       )
+
+enableFlexibleInstances :: FilePath -> IO ()
+enableFlexibleInstances fixtureRoot = do
+  let packageFile = fixtureRoot </> "package.yaml"
+  packageSource <- TIO.readFile packageFile
+  TIO.writeFile
+    packageFile
+    (T.replace "- KindSignatures\n" "- KindSignatures\n- FlexibleInstances\n" packageSource)
+
+referenceInstanceDefinitions :: T.Text
+referenceInstanceDefinitions =
+  T.unlines
+    [ "",
+      "instance HasIndex Support.SupportRecord where",
+      "  toIndex _ =",
+      "    Map.singleton (show Support.supportSeed) (Support.mkSupportRecord Support.supportSeed)"
+    ]
+
+mergedRootChainFixtureModuleSource :: T.Text
+mergedRootChainFixtureModuleSource =
+  T.unlines
+    [ "module TestChain.Roots",
+      "  ( Wrapped(..),",
+      "    mkWrapped,",
+      "    unwrapWrapped",
+      "  )",
+      "where",
+      "",
+      "newtype Wrapped = Wrapped Int",
+      "",
+      "mkWrapped :: Int -> Wrapped",
+      "mkWrapped = Wrapped",
+      "",
+      "unwrapWrapped :: Wrapped -> Int",
+      "unwrapWrapped (Wrapped value) = value"
+    ]
+
+usedInstanceClosureFixtureModuleSource :: T.Text
+usedInstanceClosureFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.Render",
+      "  ( Render(..),",
+      "    renderInt",
+      "  ) where",
+      "",
+      "class Render a where",
+      "  render :: a -> String",
+      "",
+      "instance Render Int where",
+      "  render value = \"int:\" <> show value",
+      "",
+      "instance Render Bool where",
+      "  render value = if value then \"true\" else \"false\"",
+      "",
+      "renderInt :: Int -> String",
+      "renderInt = render"
+    ]

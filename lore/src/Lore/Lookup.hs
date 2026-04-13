@@ -2,6 +2,7 @@
 
 module Lore.Lookup
   ( Symbol (..),
+    RootSymbolInfo (..),
     SymbolVisibility (..),
     ExportedSymbolNode (..),
     SymbolCategory (..),
@@ -16,6 +17,7 @@ module Lore.Lookup
     filterExportedSymbolNodesByTypeHint,
     lookupSymbolInfo,
     lookupRootSymbolInfo,
+    lookupRootSymbolInfoWithChain,
     lookupIntersectingInstances,
     lookupIntersectingRootInstances,
     resolveInstances,
@@ -166,6 +168,11 @@ data SymbolInfo = SymbolInfo
     associatedFamilyInstances :: [GHC.FamInst]
   }
 
+data RootSymbolInfo = RootSymbolInfo
+  { rootSymbolInfo :: SymbolInfo,
+    rootSymbolChain :: [GHC.Name]
+  }
+
 data SymbolCategory
   = SymbolValue
   | SymbolData
@@ -212,18 +219,27 @@ lookupSymbolInfo :: (MonadLore m) => Text -> m [SymbolInfo]
 lookupSymbolInfo = getSymbolInfo' False
 
 lookupRootSymbolInfo :: (MonadLore m) => Text -> m [SymbolInfo]
-lookupRootSymbolInfo = getSymbolInfo' True
+lookupRootSymbolInfo =
+  fmap (map rootSymbolInfo) . lookupRootSymbolInfoWithChain
+
+lookupRootSymbolInfoWithChain :: (MonadLore m) => Text -> m [RootSymbolInfo]
+lookupRootSymbolInfoWithChain =
+  getRootSymbolInfo' True
 
 getSymbolInfo' :: (MonadLore m) => Bool -> Text -> m [SymbolInfo]
-getSymbolInfo' resolveRoot needle = do
+getSymbolInfo' resolveRoot =
+  fmap (map rootSymbolInfo) . getRootSymbolInfo' resolveRoot
+
+getRootSymbolInfo' :: (MonadLore m) => Bool -> Text -> m [RootSymbolInfo]
+getRootSymbolInfo' resolveRoot needle = do
   symbolsMap <- SymbolsMap.getSymbolsMap
   let symbols = findMatchingSymbols needle symbolsMap
-  resolvedSymbols <-
+  resolvedRoots <-
     if resolveRoot
-      then resolveRootSymbols symbolsMap symbols
-      else pure symbols
-  Log.debug $ "Found " <> show (length resolvedSymbols) <> " symbols matching query \"" <> T.unpack needle <> "\"."
-  catMaybes <$> forM resolvedSymbols getSymbolInfo
+      then resolveRootSymbolsWithChain symbolsMap symbols
+      else pure [ResolvedRootSymbol symbol [symbol.name] | symbol <- symbols]
+  Log.debug $ "Found " <> show (length resolvedRoots) <> " symbols matching query \"" <> T.unpack needle <> "\"."
+  catMaybes <$> forM resolvedRoots getRootSymbolInfo
 
 getSymbolInfo :: (MonadLore m) => Symbol -> m (Maybe SymbolInfo)
 getSymbolInfo symbol = do
@@ -258,6 +274,29 @@ getSymbolInfo symbol = do
                   associatedFamilyInstances = maybe [] familyInstances instancesInfo
                 }
 
+getRootSymbolInfo :: (MonadLore m) => ResolvedRootSymbol -> m (Maybe RootSymbolInfo)
+getRootSymbolInfo resolvedRoot = do
+  maybeSymbolInfo <- getSymbolInfo resolvedRoot.resolvedRootSymbol
+  pure $
+    fmap
+      ( \symbolInfo ->
+          RootSymbolInfo
+            { rootSymbolInfo = symbolInfo,
+              rootSymbolChain =
+                deduplicateNames
+                  (resolvedRoot.resolvedRootChain <> relatedRootNames symbolInfo.symbolThing)
+            }
+      )
+      maybeSymbolInfo
+
+relatedRootNames :: GHC.TyThing -> [GHC.Name]
+relatedRootNames = \case
+  GHC.ATyCon tyCon ->
+    GHC.getName tyCon
+      : maybe [] (map GHC.dataConName) (GHC.tyConDataCons_maybe tyCon)
+  _ ->
+    []
+
 data Instances = Instances
   { classInstances :: [GHC.ClsInst],
     familyInstances :: [GHC.FamInst]
@@ -277,29 +316,58 @@ classifySymbolCategory = \case
     | GHC.isDataTyCon tyCon -> SymbolData
     | otherwise -> SymbolUnknown
 
-resolveRootSymbols :: (MonadLore m) => SymbolsMap -> [Symbol] -> m [Symbol]
-resolveRootSymbols symbolsMap symbols = do
+data ResolvedRootSymbol = ResolvedRootSymbol
+  { resolvedRootSymbol :: Symbol,
+    resolvedRootChain :: [GHC.Name]
+  }
+
+resolveRootSymbolsWithChain :: (MonadLore m) => SymbolsMap -> [Symbol] -> m [ResolvedRootSymbol]
+resolveRootSymbolsWithChain symbolsMap symbols = do
   Log.debug $ "Resolving root symbols for " <> show (length symbols) <> " symbols."
-  r <- deduplicateSymbols <$> mapM (resolveRootSymbol symbolsMap) symbols
+  resolvedRoots <- mergeResolvedRoots <$> mapM (resolveRootSymbolWithChain symbolsMap) symbols
   Log.debug "Finished resolving root symbols."
-  pure r
+  pure resolvedRoots
 
-resolveRootSymbol :: (MonadLore m) => SymbolsMap -> Symbol -> m Symbol
-resolveRootSymbol symbolsMap symbol = do
-  rootName <- resolveRootName symbol.name
-  pure $
-    case SymbolsMap.lookupSymbolByNameInMap rootName symbolsMap of
-      Just rootSymbol -> rootSymbol
-      Nothing -> symbol
+resolveRootSymbolWithChain :: (MonadLore m) => SymbolsMap -> Symbol -> m ResolvedRootSymbol
+resolveRootSymbolWithChain symbolsMap symbol = do
+  rootChain <- resolveRootNameChain symbol.name
+  let rootName = lastOr symbol.name rootChain
+      rootSymbol =
+        case SymbolsMap.lookupSymbolByNameInMap rootName symbolsMap of
+          Just foundRootSymbol -> foundRootSymbol
+          Nothing -> symbol {name = rootName}
+  pure
+    ResolvedRootSymbol
+      { resolvedRootSymbol = rootSymbol,
+        resolvedRootChain = deduplicateNames rootChain
+      }
 
-deduplicateSymbols :: [Symbol] -> [Symbol]
-deduplicateSymbols =
-  sortOn (renderOutputable . symbolKeyName)
-    . nubOrdOn symbolKeyName
+mergeResolvedRoots :: [ResolvedRootSymbol] -> [ResolvedRootSymbol]
+mergeResolvedRoots =
+  sortOn (renderResolvedRootKey . resolvedRootKey)
+    . foldr mergeResolvedRoot []
+  where
+    mergeResolvedRoot resolvedRoot [] =
+      [resolvedRoot]
+    mergeResolvedRoot resolvedRoot (existingRoot : rest)
+      | resolvedRootKey existingRoot == resolvedRootKey resolvedRoot =
+          existingRoot
+            { resolvedRootChain =
+                deduplicateNames (existingRoot.resolvedRootChain <> resolvedRoot.resolvedRootChain)
+            }
+            : rest
+      | otherwise =
+          existingRoot : mergeResolvedRoot resolvedRoot rest
 
-symbolKeyName :: Symbol -> GHC.Name
-symbolKeyName symbol =
-  symbol.name
+resolvedRootKey :: ResolvedRootSymbol -> (Maybe GHC.Module, String)
+resolvedRootKey resolvedRoot =
+  ( GHC.nameModule_maybe resolvedRoot.resolvedRootSymbol.name,
+    GHC.occNameString (GHC.nameOccName resolvedRoot.resolvedRootSymbol.name)
+  )
+
+renderResolvedRootKey :: (Maybe GHC.Module, String) -> String
+renderResolvedRootKey (maybeModule, occName) =
+  maybe "<no-module>" (GHC.moduleNameString . GHC.moduleName) maybeModule <> "." <> occName
 
 data LookupInstancesQuery = LookupInstancesQuery
   { lookupInstancesQueryText :: Text,
@@ -498,14 +566,30 @@ resolveInstanceDefinitions name = do
       pure $ mapMaybe id resolved
 
 resolveRootName :: (MonadLore m) => GHC.Name -> m GHC.Name
-resolveRootName name = do
-  mTyThing <- GHC.lookupName name
+resolveRootName name =
+  lastOr name <$> resolveRootNameChain name
+
+resolveRootNameChain :: (MonadLore m) => GHC.Name -> m [GHC.Name]
+resolveRootNameChain name = do
+  maybeTyThing <- GHC.lookupName name
   pure $
-    maybe name (GHC.getName . rootTyThing) mTyThing
+    deduplicateNames $
+      case maybeTyThing of
+        Nothing ->
+          [name]
+        Just tyThing ->
+          map GHC.getName (collectRootTyThingChain tyThing)
   where
-    rootTyThing :: GHC.TyThing -> GHC.TyThing
-    rootTyThing tyThing =
-      maybe tyThing rootTyThing (GHC.tyThingParent_maybe tyThing)
+    collectRootTyThingChain tyThing =
+      tyThing
+        : case GHC.tyThingParent_maybe tyThing of
+          Nothing -> []
+          Just parentTyThing -> collectRootTyThingChain parentTyThing
+
+lastOr :: a -> [a] -> a
+lastOr fallback = \case
+  [] -> fallback
+  values -> last values
 
 renderOutputable :: (GHC.Outputable a) => a -> String
 renderOutputable =

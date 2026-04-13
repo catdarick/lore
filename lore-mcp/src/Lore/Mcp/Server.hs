@@ -10,6 +10,7 @@ import qualified Data.Text as T
 import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConfig (..), noLogHandle, prettyLoggerHandle, runLore)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
 import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
+import Lore.Mcp.Tools.FindReferences (findReferencesTool)
 import Lore.Mcp.Tools.GetDefinition (getDefinitionTool)
 import Lore.Mcp.Tools.GetTypeOfExpression (getTypeOfExpressionTool)
 import Lore.Mcp.Tools.ListExportedSymbols (listExportedSymbolsTool)
@@ -27,7 +28,16 @@ runLoreMcpServer = do
       McpServer
         { name = "lore",
           initialize = pure (),
-          tools = [reloadHomeModulesTool, executeCodeTool, getTypeOfExpressionTool, lookupSymbolInfoTool, listExportedSymbolsTool, lookupInstancesTool, getDefinitionTool]
+          tools =
+            [ reloadHomeModulesTool,
+              executeCodeTool,
+              getTypeOfExpressionTool,
+              lookupSymbolInfoTool,
+              listExportedSymbolsTool,
+              lookupInstancesTool,
+              getDefinitionTool,
+              findReferencesTool
+            ]
         }
   where
     defaultSessionConfig =
