@@ -3,3 +3,5 @@
 .codex
 .hspec-failures
 AGENTS.md
+opencode.json
+lore-mcp-debug.sh

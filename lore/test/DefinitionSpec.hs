@@ -3,13 +3,14 @@ module DefinitionSpec (spec) where
 import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import Data.List (find, intercalate, isInfixOf, isPrefixOf, sort, tails)
+import Data.Maybe (mapMaybe)
 import Data.Text (pack, unpack)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC
 import qualified GHC.Plugins
 import Lore (RootSymbolInfo (..), lookupRootSymbolInfoWithChain)
-import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), declarationSpans, mergeDefinitionSlices, renderDefinitionModulesText, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice, resolveReferenceDefinitions, resolveReferenceDefinitionsForNames)
+import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), ReferenceMatch (..), declarationSpans, mergeDefinitionSlices, renderDefinitionModulesText, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice, resolveReferenceDefinitions, resolveReferenceDefinitionsForNames, resolveReferenceMatches)
 import Lore.Lookup (Symbol (..), findSymbols)
 import Lore.Monad (MonadLore)
 import Lore.Targets (defaultLoadTargetsOptions)
@@ -389,6 +390,32 @@ spec = do
                                           )
                                         ]
 
+  describe "resolveReferenceMatches" do
+    it "returns exact matched reference spans for each occurrence in a definition" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestRefs"
+            moduleFile = moduleDir </> "Snippet.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile preciseReferenceMatchesFixtureModuleSource
+
+        referenceMatches <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestRefs.Snippet.target"
+            targetName <-
+              maybe
+                (error "symbol not found: TestRefs.Snippet.target")
+                pure
+                (findFixtureSymbolInModule "TestRefs.Snippet" "target" exportedSymbols)
+            resolveReferenceMatches targetName
+
+        case referenceMatches of
+          [ReferenceMatch {referenceSlice, matchedReferenceSpans}] -> do
+            GHC.moduleNameString (GHC.moduleName referenceSlice.definitionModule) `shouldBe` "TestRefs.Snippet"
+            sort (mapMaybe matchedSpanStartLine matchedReferenceSpans) `shouldBe` [11, 12, 13]
+          other ->
+            expectationFailure ("expected a single reference match, got: " <> show (length other))
+
   describe "renderDefinitionModulesText" do
     it "renders a single definition as a minified module fragment" do
       rendered <- fixtureRenderedDefinition "lookupOrZero"
@@ -645,3 +672,28 @@ usedInstanceClosureFixtureModuleSource =
       "renderInt :: Int -> String",
       "renderInt = render"
     ]
+
+preciseReferenceMatchesFixtureModuleSource :: T.Text
+preciseReferenceMatchesFixtureModuleSource =
+  T.unlines
+    [ "module TestRefs.Snippet",
+      "  ( target,",
+      "    useTarget",
+      "  ) where",
+      "",
+      "target :: Int",
+      "target = 1",
+      "",
+      "useTarget :: Int",
+      "useTarget =",
+      "  target",
+      "    + target",
+      "    + target"
+    ]
+
+matchedSpanStartLine :: GHC.SrcSpan -> Maybe Int
+matchedSpanStartLine = \case
+  GHC.RealSrcSpan realSrcSpan _ ->
+    Just (GHC.srcSpanStartLine realSrcSpan)
+  GHC.UnhelpfulSpan {} ->
+    Nothing

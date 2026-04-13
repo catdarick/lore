@@ -3,35 +3,36 @@ module Lore.Mcp.Tools.FindReferences
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
 import Data.List (sortOn)
+import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import qualified GHC
 import GHC.Generics (Generic)
-import Lore
-  ( DefinitionSlice,
-    LoadTargetsResult,
-    MonadLore,
-    RootSymbolInfo (..),
-    SymbolInfo (..),
-    getLastLoadTargetsResult,
-    lookupRootSymbolInfoWithChain,
-    renderDefinitionModulesText,
-    resolveReferenceDefinitionsForNames,
-  )
+import qualified GHC.Plugins as Plugins
+import Lore (DeclarationSpans (..), DefinitionSlice (..), LoadTargetsResult, MonadLore, ReferenceMatch (..), RootSymbolInfo (..), definedIn, getLastLoadTargetsResult, lookupRootSymbolInfoWithChain, resolveReferenceMatchesForNames)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
+import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines)
+import System.Directory (getCurrentDirectory)
+import System.FilePath (isRelative, makeRelative, normalise)
 
-newtype FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
+data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
   { symbol ::
       Field fieldType Text
         `WithMeta` '[ Description "Exact symbol name to find references for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
                       Example "lookupOrZero",
                       Example "Some.Module.someFunction"
+                    ],
+    skip ::
+      Maybe (Field fieldType Int)
+        `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
+                      Example 15
                     ]
   }
   deriving stock (Generic)
@@ -50,7 +51,7 @@ findReferencesTool =
       }
 
 findReferencesHandler :: (MonadLore m) => FindReferencesArgs 'ValueType -> m Text
-findReferencesHandler FindReferencesArgs {symbol} = do
+findReferencesHandler FindReferencesArgs {symbol, skip} = do
   maybeLoadResult <- getLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
@@ -61,33 +62,59 @@ findReferencesHandler FindReferencesArgs {symbol} = do
         [] ->
           pure $ renderMissingResult loadResult symbol
         [resolvedRoot] -> do
-          references <- resolveReferenceDefinitionsForNames resolvedRoot.rootSymbolChain
-          renderedReferences <- renderReferenceDefinitions references
-          pure $ renderReferencesResult loadResult symbol renderedReferences
+          references <- resolveReferenceMatchesForNames resolvedRoot.rootSymbolChain
+          renderedReferences <- renderReferenceDefinitions resolvedSkip references
+          liftIO $ renderReferencesResult loadResult symbol renderedReferences
         ambiguousRoots ->
           pure $ renderAmbiguousResult loadResult symbol ambiguousRoots
+  where
+    resolvedSkip =
+      max 0 (fromMaybe 0 skip)
 
-renderReferenceDefinitions :: (MonadLore m) => [DefinitionSlice] -> m (Maybe Text)
-renderReferenceDefinitions definitionSlices =
-  case definitionSlices of
-    [] ->
-      pure Nothing
-    _ ->
-      Just <$> liftIO (renderDefinitionModulesText definitionSlices)
+data PaginatedReferenceMatches = PaginatedReferenceMatches
+  { paginationInfo :: PaginatedDefinitionModules,
+    visibleMatches :: [ReferenceMatch]
+  }
+
+renderReferenceDefinitions :: (MonadLore m) => Int -> [ReferenceMatch] -> m (Maybe PaginatedReferenceMatches)
+renderReferenceDefinitions skip definitionSlices =
+  pure $
+    case sortedMatches of
+      [] ->
+        Nothing
+      _ ->
+        Just
+          PaginatedReferenceMatches
+            { paginationInfo =
+                PaginatedDefinitionModules
+                  { totalItems = length sortedMatches,
+                    skippedItems = resolvedSkip,
+                    shownItems = length pagedMatches,
+                    renderedPage = Nothing
+                  },
+              visibleMatches = pagedMatches
+            }
+  where
+    sortedMatches =
+      sortOn referenceMatchSortKey definitionSlices
+    totalItems = length sortedMatches
+    resolvedSkip = min (max 0 skip) totalItems
+    pagedMatches =
+      take maxRenderedReferenceResults (drop resolvedSkip sortedMatches)
 
 renderMissingResult :: LoadTargetsResult -> Text -> Text
 renderMissingResult loadResult symbol =
   appendPartialLoadWarning loadResult "Reference results may be incomplete." $
     "No symbols found for " <> quoteText symbol <> "."
 
-renderReferencesResult :: LoadTargetsResult -> Text -> Maybe Text -> Text
+renderReferencesResult :: LoadTargetsResult -> Text -> Maybe PaginatedReferenceMatches -> IO Text
 renderReferencesResult loadResult symbol renderedReferences =
-  appendPartialLoadWarning loadResult "Reference results may be incomplete." $
-    case renderedReferences of
-      Nothing ->
-        "No references found for " <> quoteText symbol <> "."
-      Just renderedDefinitions ->
-        renderedDefinitions
+  case renderedReferences of
+    Nothing ->
+      pure ("No references found for " <> quoteText symbol <> ".")
+    Just paginatedReferences ->
+      appendPartialLoadWarning loadResult "Reference results may be incomplete."
+        <$> renderReferenceResultsPage paginatedReferences
 
 renderAmbiguousResult :: LoadTargetsResult -> Text -> [RootSymbolInfo] -> Text
 renderAmbiguousResult loadResult symbol ambiguousMatches =
@@ -106,7 +133,7 @@ ambiguousDefinitionModules =
   map head
     . groupModules
     . sortOn renderModuleName
-    . map (.rootSymbolInfo.definedIn)
+    . map (definedIn . rootSymbolInfo)
   where
     groupModules [] = []
     groupModules (module_ : modules) =
@@ -134,3 +161,248 @@ queryOccName queryText =
 quoteText :: Text -> Text
 quoteText value =
   "\"" <> value <> "\""
+
+referenceResultsSection :: PaginatedDefinitionModules -> [Text]
+referenceResultsSection paginatedReferences =
+  paginationSummaryLines "reference results" "skip" paginatedReferences
+    <> maybe [] pure paginatedReferences.renderedPage
+
+renderReferenceResultsPage :: PaginatedReferenceMatches -> IO Text
+renderReferenceResultsPage paginatedReferences =
+  T.intercalate "\n\n"
+    . (referenceResultsSection paginatedReferences.paginationInfo <>)
+    . pure
+    <$> renderedReferenceMatches paginatedReferences.visibleMatches
+
+renderedReferenceMatches :: [ReferenceMatch] -> IO Text
+renderedReferenceMatches referenceMatches =
+  T.intercalate "\n\n" <$> mapM renderReferenceModuleGroup (groupByModule referenceMatches)
+
+renderReferenceModuleGroup :: [ReferenceMatch] -> IO Text
+renderReferenceModuleGroup [] =
+  pure ""
+renderReferenceModuleGroup moduleMatches@(referenceMatch : _) = do
+  renderedPath <- renderReferenceModulePath referenceMatch.referenceSlice
+  renderedBlocks <- mapM renderReferenceMatchBlock moduleMatches
+  pure $
+    T.intercalate "\n\n" $
+      ["=== " <> renderedPath <> " ==="]
+        <> renderedBlocks
+
+groupByModule :: [ReferenceMatch] -> [[ReferenceMatch]]
+groupByModule [] = []
+groupByModule (referenceMatch : rest) =
+  let (matchingModule, remaining) =
+        span ((== referenceMatch.referenceSlice.definitionModule) . (.referenceSlice.definitionModule)) rest
+   in (referenceMatch : matchingModule) : groupByModule remaining
+
+renderReferenceMatchBlock :: ReferenceMatch -> IO Text
+renderReferenceMatchBlock referenceMatch =
+  case referenceMatch.referenceSlice.declarationSpans of
+    declarationSpans : _ -> do
+      snippetText <- renderReferenceSnippet declarationSpans referenceMatch.matchedReferenceSpans
+      pure $
+        T.intercalate
+          "\n"
+          [ "--- " <> renderReferenceBlockHeader declarationSpans <> " ---",
+            snippetText
+          ]
+    [] ->
+      pure "--- definition ---\n<definition source unavailable>"
+
+renderReferenceSnippet :: DeclarationSpans -> [GHC.SrcSpan] -> IO Text
+renderReferenceSnippet declarationSpans matchedSpans = do
+  declarationLines <- readSpanLines declarationSpans.declarationSpan
+  signatureText <- traverse readSpanText declarationSpans.signatureSpan
+  let selectedRanges =
+        mergeLineRanges $
+          [ firstDefinitionRange (length declarationLines),
+            lastDefinitionRange (length declarationLines)
+          ]
+            <> mapMaybe (referenceContextRange declarationSpans.declarationSpan (length declarationLines)) matchedSpans
+      declarationSnippet =
+        renderLineRanges declarationLines selectedRanges
+  pure $
+    maybe declarationSnippet (<> "\n" <> declarationSnippet) signatureText
+
+renderReferenceBlockHeader :: DeclarationSpans -> Text
+renderReferenceBlockHeader declarationSpans =
+  case declarationSpansLineRange declarationSpans of
+    Nothing ->
+      "definition"
+    Just (startLine, endLine) ->
+      "lines " <> T.pack (show startLine) <> "-" <> T.pack (show endLine)
+
+referenceContextRange :: GHC.SrcSpan -> Int -> GHC.SrcSpan -> Maybe (Int, Int)
+referenceContextRange declarationSpan declarationLineCount matchedSpan = do
+  declarationRealSpan <- realSrcSpanFromSrcSpan declarationSpan
+  matchedRealSpan <- realSrcSpanFromSrcSpan matchedSpan
+  if GHC.srcSpanFile declarationRealSpan /= GHC.srcSpanFile matchedRealSpan
+    then Nothing
+    else do
+      let declarationStart = GHC.srcSpanStartLine declarationRealSpan
+          declarationEnd = GHC.srcSpanEndLine declarationRealSpan
+          matchedStart = GHC.srcSpanStartLine matchedRealSpan
+          matchedEnd = GHC.srcSpanEndLine matchedRealSpan
+      if matchedEnd < declarationStart || matchedStart > declarationEnd
+        then Nothing
+        else
+          Just
+            ( max 1 (matchedStart - declarationStart + 1 - 4),
+              min declarationLineCount (matchedEnd - declarationStart + 1 + 4)
+            )
+
+firstDefinitionRange :: Int -> (Int, Int)
+firstDefinitionRange lineCount =
+  (1, min 3 lineCount)
+
+lastDefinitionRange :: Int -> (Int, Int)
+lastDefinitionRange lineCount =
+  (max 1 (lineCount - 2), lineCount)
+
+mergeLineRanges :: [(Int, Int)] -> [(Int, Int)]
+mergeLineRanges ranges =
+  foldr mergeRange [] (sortOn fst (filter (\(startLine, endLine) -> startLine <= endLine) ranges))
+  where
+    mergeRange currentRange [] =
+      [currentRange]
+    mergeRange (currentStart, currentEnd) ((nextStart, nextEnd) : rest)
+      | currentEnd + 2 < nextStart =
+          (currentStart, currentEnd) : (nextStart, nextEnd) : rest
+      | otherwise =
+          mergeRange (currentStart, max currentEnd nextEnd) rest
+
+renderLineRanges :: [Text] -> [(Int, Int)] -> Text
+renderLineRanges declarationLines ranges =
+  case ranges of
+    [] ->
+      ""
+    firstRange : restRanges ->
+      go firstRange restRanges
+  where
+    go (startLine, endLine) remainingRanges =
+      renderRange (startLine, endLine)
+        <> case remainingRanges of
+          [] ->
+            ""
+          nextRange@(nextStartLine, _) : tailRanges ->
+            "\n"
+              <> renderOmittedLines (nextStartLine - endLine - 1)
+              <> "\n"
+              <> go nextRange tailRanges
+
+    renderRange (startLine, endLine) =
+      T.intercalate "\n" $
+        take (endLine - startLine + 1) $
+          drop (startLine - 1) declarationLines
+
+    renderOmittedLines omittedLineCount =
+      "  <omitted "
+        <> T.pack (show omittedLineCount)
+        <> if omittedLineCount == 1 then " line>" else " lines>"
+
+renderReferenceModulePath :: DefinitionSlice -> IO Text
+renderReferenceModulePath definitionSlice =
+  case definitionSliceRealSrcSpan definitionSlice of
+    Nothing ->
+      pure "<definition source unavailable>"
+    Just realSrcSpan -> do
+      currentDirectory <- getCurrentDirectory
+      pure . T.pack $
+        relativeSourcePath currentDirectory (Plugins.unpackFS (GHC.srcSpanFile realSrcSpan))
+
+definitionSliceRealSrcSpan :: DefinitionSlice -> Maybe GHC.RealSrcSpan
+definitionSliceRealSrcSpan definitionSlice =
+  case mapMaybe declarationSpansRealSrcSpan definitionSlice.declarationSpans of
+    realSrcSpan : _ -> Just realSrcSpan
+    [] -> Nothing
+
+declarationSpansRealSrcSpan :: DeclarationSpans -> Maybe GHC.RealSrcSpan
+declarationSpansRealSrcSpan declarationSpans =
+  realSrcSpanFromSrcSpan declarationSpans.declarationSpan
+    <|> (declarationSpans.signatureSpan >>= realSrcSpanFromSrcSpan)
+
+declarationSpansLineRange :: DeclarationSpans -> Maybe (Int, Int)
+declarationSpansLineRange declarationSpans = do
+  firstSpan <- minimumMaybe realSrcSpans
+  lastSpan <- maximumMaybe realSrcSpans
+  pure (GHC.srcSpanStartLine firstSpan, GHC.srcSpanEndLine lastSpan)
+  where
+    realSrcSpans =
+      mapMaybe realSrcSpanFromSrcSpan $
+        maybeToList declarationSpans.signatureSpan <> [declarationSpans.declarationSpan]
+
+realSrcSpanFromSrcSpan :: GHC.SrcSpan -> Maybe GHC.RealSrcSpan
+realSrcSpanFromSrcSpan = \case
+  GHC.RealSrcSpan realSrcSpan _ ->
+    Just realSrcSpan
+  GHC.UnhelpfulSpan {} ->
+    Nothing
+
+readSpanText :: GHC.SrcSpan -> IO Text
+readSpanText span' =
+  T.intercalate "\n" <$> readSpanLines span'
+
+readSpanLines :: GHC.SrcSpan -> IO [Text]
+readSpanLines = \case
+  GHC.RealSrcSpan realSpan _ ->
+    sliceRealSpan realSpan . T.lines <$> TIO.readFile (Plugins.unpackFS (GHC.srcSpanFile realSpan))
+  GHC.UnhelpfulSpan {} ->
+    pure ["<definition source unavailable>"]
+
+sliceRealSpan :: GHC.RealSrcSpan -> [Text] -> [Text]
+sliceRealSpan realSpan fileLines =
+  case drop (GHC.srcSpanStartLine realSpan - 1) fileLines of
+    [] ->
+      []
+    relevantLines ->
+      zipWith
+        sliceLine
+        [GHC.srcSpanStartLine realSpan .. GHC.srcSpanEndLine realSpan]
+        (take (GHC.srcSpanEndLine realSpan - GHC.srcSpanStartLine realSpan + 1) relevantLines)
+  where
+    sliceLine lineNo line
+      | lineNo == GHC.srcSpanStartLine realSpan && lineNo == GHC.srcSpanEndLine realSpan =
+          T.take width (T.drop startCol line)
+      | lineNo == GHC.srcSpanStartLine realSpan =
+          T.drop startCol line
+      | lineNo == GHC.srcSpanEndLine realSpan =
+          T.take endCol line
+      | otherwise =
+          line
+      where
+        startCol = GHC.srcSpanStartCol realSpan - 1
+        endCol = GHC.srcSpanEndCol realSpan - 1
+        width = endCol - startCol
+
+relativeSourcePath :: FilePath -> FilePath -> FilePath
+relativeSourcePath currentDirectory sourcePath =
+  normalise $
+    if isRelative sourcePath
+      then sourcePath
+      else makeRelative currentDirectory sourcePath
+
+minimumMaybe :: (Ord a) => [a] -> Maybe a
+minimumMaybe = \case
+  [] -> Nothing
+  values -> Just (minimum values)
+
+maximumMaybe :: (Ord a) => [a] -> Maybe a
+maximumMaybe = \case
+  [] -> Nothing
+  values -> Just (maximum values)
+
+referenceMatchSortKey :: ReferenceMatch -> (String, String, Int, Int)
+referenceMatchSortKey referenceMatch =
+  case definitionSliceRealSrcSpan referenceMatch.referenceSlice of
+    Just realSrcSpan ->
+      ( GHC.moduleNameString (GHC.moduleName referenceMatch.referenceSlice.definitionModule),
+        Plugins.unpackFS (GHC.srcSpanFile realSrcSpan),
+        GHC.srcSpanStartLine realSrcSpan,
+        GHC.srcSpanStartCol realSrcSpan
+      )
+    Nothing ->
+      (GHC.moduleNameString (GHC.moduleName referenceMatch.referenceSlice.definitionModule), "", maxBound, maxBound)
+
+maxRenderedReferenceResults :: Int
+maxRenderedReferenceResults = 15

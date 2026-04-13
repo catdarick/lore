@@ -14,7 +14,7 @@ import Data.Text (Text)
 import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
 import qualified GHC.Plugins as GHC
-import Lore.Internal.Definition.Types (ReferenceModuleAnalysis, ReferenceModuleSearch)
+import Lore.Internal.Definition.Types (ReferenceModuleAnalysis, ReferenceOccurrenceIndex)
 import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Lore.Internal.Ghc.DynFlags
   ( ParallelWorkersCount (..),
@@ -36,7 +36,7 @@ data SessionContext = SessionContext
     symbolsMapDependencySet :: MVar (Set.Set String),
     modSummariesCache :: MVar (Maybe ModSummaries),
     nameToInstancesIndexCache :: MVar (Maybe NameToInstancesIndex),
-    referenceModuleSearchCache :: MVar (Map.Map GHC.Module (Maybe ReferenceModuleSearch)),
+    referenceOccurrenceIndexCache :: MVar (Maybe ReferenceOccurrenceIndex),
     referenceModuleAnalysisCache :: MVar (Map.Map GHC.Module (Maybe ReferenceModuleAnalysis)),
     interpreterContextCache :: MVar (Maybe [GHC.ModuleName]),
     lastLoadTargetsResult :: MVar (Maybe LoadTargetsResult)
@@ -70,7 +70,7 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
   symbolsMapDependencySet <- GHC.newMVar Set.empty
   modSummariesCache <- GHC.newMVar Nothing
   nameToInstancesIndexCache <- GHC.newMVar Nothing
-  referenceModuleSearchCache <- GHC.newMVar Map.empty
+  referenceOccurrenceIndexCache <- GHC.newMVar Nothing
   referenceModuleAnalysisCache <- GHC.newMVar Map.empty
   interpreterContextCache <- GHC.newMVar Nothing
   lastLoadTargetsResult <- GHC.newMVar Nothing
@@ -91,7 +91,7 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
               symbolsMapDependencySet,
               modSummariesCache,
               nameToInstancesIndexCache,
-              referenceModuleSearchCache,
+              referenceOccurrenceIndexCache,
               referenceModuleAnalysisCache,
               interpreterContextCache,
               lastLoadTargetsResult

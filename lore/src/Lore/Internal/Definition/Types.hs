@@ -3,8 +3,9 @@ module Lore.Internal.Definition.Types
     DeclarationSpans (..),
     RequiredImport (..),
     RequiredImportItem (..),
+    ReferenceMatch (..),
     DefinitionAnalysis (..),
-    ReferenceModuleSearch (..),
+    ReferenceOccurrenceIndex (..),
     ReferenceModuleAnalysis (..),
   )
 where
@@ -44,14 +45,21 @@ data RequiredImportItem
   | ImportParent GHC.Name [GHC.Name]
   deriving stock (Eq)
 
+data ReferenceMatch = ReferenceMatch
+  { referenceSlice :: DefinitionSlice,
+    matchedReferenceSpans :: [GHC.SrcSpan]
+  }
+  deriving stock (Eq)
+
 data DefinitionAnalysis = DefinitionAnalysis
   { analysisSlice :: DefinitionSlice,
     analysisReferences :: [GHC.Name],
-    analysisUsedInstances :: [GHC.Name]
+    analysisUsedInstances :: [GHC.Name],
+    analysisReferenceSpans :: Map.Map GHC.Name [GHC.SrcSpan]
   }
 
-newtype ReferenceModuleSearch = ReferenceModuleSearch
-  { referenceModuleOccurrenceNames :: Set.Set Text
+newtype ReferenceOccurrenceIndex = ReferenceOccurrenceIndex
+  { referenceOccurrenceModules :: Map.Map Text (Set.Set GHC.Module)
   }
 
 newtype ReferenceModuleAnalysis = ReferenceModuleAnalysis

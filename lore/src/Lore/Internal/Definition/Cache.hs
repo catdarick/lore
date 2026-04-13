@@ -1,6 +1,5 @@
 module Lore.Internal.Definition.Cache
-  ( lookupReferenceModuleSearchCache,
-    cacheReferenceModuleSearch,
+  ( getReferenceOccurrenceIndex,
     lookupReferenceModuleAnalysisCache,
     cacheReferenceModuleAnalysis,
     invalidateReferenceCaches,
@@ -10,29 +9,24 @@ where
 import Control.Monad.Reader (asks)
 import qualified Data.Map.Strict as Map
 import qualified GHC
-import Lore.Internal.Definition.Types (ReferenceModuleAnalysis, ReferenceModuleSearch)
+import Lore.Internal.Definition.Types (ReferenceModuleAnalysis, ReferenceOccurrenceIndex)
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Monad (MonadLore)
 import UnliftIO (modifyMVar)
 
-lookupReferenceModuleSearchCache ::
+getReferenceOccurrenceIndex ::
   (MonadLore m) =>
-  GHC.Module ->
-  m (Maybe (Maybe ReferenceModuleSearch))
-lookupReferenceModuleSearchCache homeModule = do
-  cacheVar <- asks referenceModuleSearchCache
+  m ReferenceOccurrenceIndex ->
+  m ReferenceOccurrenceIndex
+getReferenceOccurrenceIndex prepareIndex = do
+  cacheVar <- asks referenceOccurrenceIndexCache
   modifyMVar cacheVar \cache ->
-    pure (cache, Map.lookup homeModule cache)
-
-cacheReferenceModuleSearch ::
-  (MonadLore m) =>
-  GHC.Module ->
-  Maybe ReferenceModuleSearch ->
-  m ()
-cacheReferenceModuleSearch homeModule moduleSearch = do
-  cacheVar <- asks referenceModuleSearchCache
-  modifyMVar cacheVar \cache ->
-    pure (Map.insert homeModule moduleSearch cache, ())
+    case cache of
+      Just referenceOccurrenceIndex ->
+        pure (cache, referenceOccurrenceIndex)
+      Nothing -> do
+        referenceOccurrenceIndex <- prepareIndex
+        pure (Just referenceOccurrenceIndex, referenceOccurrenceIndex)
 
 lookupReferenceModuleAnalysisCache ::
   (MonadLore m) =>
@@ -55,9 +49,9 @@ cacheReferenceModuleAnalysis homeModule moduleAnalysis = do
 
 invalidateReferenceCaches :: (MonadLore m) => m ()
 invalidateReferenceCaches = do
-  searchCacheVar <- asks referenceModuleSearchCache
+  occurrenceIndexCacheVar <- asks referenceOccurrenceIndexCache
   analysisCacheVar <- asks referenceModuleAnalysisCache
-  modifyMVar searchCacheVar \_ ->
-    pure (Map.empty, ())
+  modifyMVar occurrenceIndexCacheVar \_ ->
+    pure (Nothing, ())
   modifyMVar analysisCacheVar \_ ->
     pure (Map.empty, ())

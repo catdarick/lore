@@ -21,13 +21,12 @@ import Lore
     SymbolInfo (..),
     getLastLoadTargetsResult,
     lookupRootSymbolInfo,
-    renderDefinitionModulesText,
     resolveDefinitionClosure,
     resolveDefinitionSlice,
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), Maximum, MinItems, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
+import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines, renderPaginatedDefinitionModules)
 
 data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
   { symbols ::
@@ -35,6 +34,11 @@ data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
         `WithMeta` '[ Description "Exact symbol names to resolve and render definitions for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
                       ExampleList '["HasIndex", "mkIndexed", "Some.Module.someFunction"],
                       MinItems 1
+                    ],
+    skip ::
+      Maybe (Field fieldType Int)
+        `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
+                      Example 30
                     ],
     recursionDepth ::
       Field fieldType (Maybe Int)
@@ -60,7 +64,7 @@ getDefinitionTool =
       }
 
 getDefinitionHandler :: (MonadLore m) => GetDefinitionArgs 'ValueType -> m Text
-getDefinitionHandler GetDefinitionArgs {symbols, recursionDepth} = do
+getDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} = do
   maybeLoadResult <- getLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
@@ -71,9 +75,11 @@ getDefinitionHandler GetDefinitionArgs {symbols, recursionDepth} = do
         Left (missingSymbols, ambiguousQueries) ->
           pure (renderAmbiguityResult loadResult missingSymbols ambiguousQueries)
         Right resolvedSymbols -> do
-          renderedDefinitions <- renderSymbolDefinitions resolvedRecursionDepth resolvedSymbols.resolvedSymbolInfos
+          renderedDefinitions <- renderSymbolDefinitions resolvedSkip resolvedRecursionDepth resolvedSymbols.resolvedSymbolInfos
           pure (renderDefinitionResult loadResult symbols resolvedSymbols.missingQueries renderedDefinitions)
   where
+    resolvedSkip =
+      max 0 (fromMaybe 0 skip)
     resolvedRecursionDepth =
       max 0 (fromMaybe defaultRecursionDepth recursionDepth)
 
@@ -127,12 +133,10 @@ resolveRequestedSymbol symbol = do
               ambiguousQueryMatches = ambiguousMatches
             }
 
-renderSymbolDefinitions :: (MonadLore m) => Int -> [SymbolInfo] -> m (Maybe Text)
-renderSymbolDefinitions recursionDepth symbolInfos = do
+renderSymbolDefinitions :: (MonadLore m) => Int -> Int -> [SymbolInfo] -> m (Maybe PaginatedDefinitionModules)
+renderSymbolDefinitions skip recursionDepth symbolInfos = do
   definitionSlices <- concat <$> mapM (resolveSymbolDefinitions recursionDepth) symbolInfos
-  if null definitionSlices
-    then pure Nothing
-    else Just <$> liftIO (renderDefinitionModulesText definitionSlices)
+  liftIO (renderPaginatedDefinitionModules skip maxRenderedDefinitionResults definitionSlices)
 
 resolveSymbolDefinitions :: (MonadLore m) => Int -> SymbolInfo -> m [DefinitionSlice]
 resolveSymbolDefinitions recursionDepth symbolInfo
@@ -141,7 +145,7 @@ resolveSymbolDefinitions recursionDepth symbolInfo
   | otherwise =
       resolveDefinitionClosure recursionDepth symbolInfo.symbolName
 
-renderDefinitionResult :: LoadTargetsResult -> [Text] -> [Text] -> Maybe Text -> Text
+renderDefinitionResult :: LoadTargetsResult -> [Text] -> [Text] -> Maybe PaginatedDefinitionModules -> Text
 renderDefinitionResult loadResult symbols missingSymbols renderedDefinitions =
   appendPartialLoadWarning loadResult "Definition results may be incomplete." renderedBody
   where
@@ -151,8 +155,13 @@ renderDefinitionResult loadResult symbols missingSymbols renderedDefinitions =
           <> case renderedDefinitions of
             Nothing ->
               ["No definitions found for " <> quoteTexts symbols <> "."]
-            Just definitionText ->
-              [definitionText]
+            Just paginatedDefinitions ->
+              definitionResultsSection paginatedDefinitions
+
+definitionResultsSection :: PaginatedDefinitionModules -> [Text]
+definitionResultsSection paginatedDefinitions =
+  paginationSummaryLines "definition results" "skip" paginatedDefinitions
+    <> maybe [] pure paginatedDefinitions.renderedPage
 
 renderAmbiguityResult :: LoadTargetsResult -> [Text] -> [AmbiguousQuery] -> Text
 renderAmbiguityResult loadResult missingSymbols ambiguousQueries =
@@ -249,3 +258,6 @@ quoteTexts values =
 quoteText :: Text -> Text
 quoteText value =
   "\"" <> value <> "\""
+
+maxRenderedDefinitionResults :: Int
+maxRenderedDefinitionResults = 30

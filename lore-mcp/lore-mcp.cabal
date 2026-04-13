@@ -97,7 +97,10 @@ executable lore-mcp
       aeson
     , base >=4.7 && <5
     , bytestring
+    , containers
+    , directory
     , exceptions
+    , filepath
     , ghc
     , lens
     , lore

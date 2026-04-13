@@ -24,7 +24,7 @@ import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartial
 newtype ExecuteCodeArgs (fieldType :: FieldType) = ExecuteCodeArgs
   { code ::
       Field fieldType Text
-        `WithMeta` '[ Description "Haskell code to execute in the current interpreter context. Supports expressions, variable bindings, function definitions, and IO actions. For multi-line statements, use `do` or `let ... in` syntax. Do not use `where` blocks as they may cause parse errors.",
+        `WithMeta` '[ Description "Haskell code to execute in the current interpreter context. Supports expressions, variable bindings, function definitions, and IO actions. For multi-line statements, use `do` or `let ... in` syntax. Do not use `where` blocks as they may cause parse errors. The type of the expression must be either IO or a pure value.",
                       Example
                         "do\
                         \  let x = 1 + 2\
