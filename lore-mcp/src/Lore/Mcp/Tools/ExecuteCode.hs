@@ -44,7 +44,7 @@ executeCodeTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "executeCode",
-        description = Just "Execute Haskell code in the current project interpreter context, not a forgiving scratchpad. Normal import, ambiguity, shadowing, type-defaulting, and `Show` constraints apply. Avoid `where` in snippets because it may produce parse errors; use `let` bindings inside `do` blocks instead. Polymorphic expressions may require explicit type annotations. Interpreter bindings are reset whenever `reloadHomeModules` runs.",
+        description = Just "Execute Haskell code in the current project interpreter context, not a forgiving scratchpad. Normal import, ambiguity, shadowing, type-defaulting, and `Show` constraints apply. Import declarations are not supported inside `executeCode` snippets; use the existing interpreter context and fully qualified names when needed. Avoid `where` in snippets because it may produce parse errors; use `let` bindings inside `do` blocks instead. Polymorphic expressions may require explicit type annotations. Interpreter bindings are reset whenever `reloadHomeModules` runs.",
         handler = executeCodeHandler
       }
 
@@ -102,6 +102,9 @@ renderExecutionHints diagnostics =
           [ "Avoid `where` blocks in `executeCode` snippets. Move local helpers into `let` bindings inside `do`, or inline them."
           | any isParseErrorMessage diagnosticMessages || any (" where" `isInfixOf`) diagnosticMessages
           ],
+          [ "Import declarations are not supported in `executeCode`. Use names already available in the interpreter context, or switch to fully qualified names for modules already in scope."
+          | any isImportParseErrorMessage diagnosticMessages
+          ],
           [ "Add an explicit type annotation when the expression is polymorphic or the monad/result type is ambiguous."
           | any isTypeAmbiguityMessage diagnosticMessages
           ],
@@ -123,6 +126,10 @@ isParseErrorMessage :: String -> Bool
 isParseErrorMessage message =
   "parse error" `isInfixOf` message
     || "parse error on input" `isInfixOf` message
+
+isImportParseErrorMessage :: String -> Bool
+isImportParseErrorMessage message =
+  "parse error on input `import'" `isInfixOf` message
 
 isTypeAmbiguityMessage :: String -> Bool
 isTypeAmbiguityMessage message =

@@ -26,6 +26,8 @@ executable lore-mcp
   other-modules:
       Lore.JsonRpc.Server
       Lore.Mcp.Internal.Annotated
+      Lore.Mcp.Internal.Output.Pagination
+      Lore.Mcp.Internal.Output.Render
       Lore.Mcp.Internal.Tool
       Lore.Mcp.Protocol.Request
       Lore.Mcp.Protocol.Server
@@ -38,7 +40,15 @@ executable lore-mcp
       Lore.Mcp.Tools.LookupSymbolInfo
       Lore.Mcp.Tools.ReloadHomeModules
       Lore.Mcp.Tools.Shared
+      Lore.Mcp.Tools.Shared.CompactClassInstance
+      Lore.Mcp.Tools.Shared.DefinitionLocation
+      Lore.Mcp.Tools.Shared.DetailedSymbolInfo
       Lore.Mcp.Tools.Shared.Diagnostics
+      Lore.Mcp.Tools.Shared.Outputable
+      Lore.Mcp.Tools.Shared.PartialLoadWarning
+      Paths_lore_mcp
+  autogen-modules:
+      Paths_lore_mcp
   hs-source-dirs:
       app
       src

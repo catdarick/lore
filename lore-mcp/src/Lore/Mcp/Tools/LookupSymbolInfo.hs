@@ -4,35 +4,38 @@ module Lore.Mcp.Tools.LookupSymbolInfo
 where
 
 import qualified Data.Aeson as J
-import Data.List (intercalate)
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GHC
 import GHC.Generics (Generic)
-import qualified GHC.Iface.Syntax as Iface
-import qualified GHC.Plugins as Plugins
-import qualified GHC.Types.TyThing as TyThing
-import qualified GHC.Types.TyThing.Ppr as TyThing
-import qualified GHC.Utils.Outputable as Outputable
-import Lore
-  ( LoadTargetsResult (..),
-    MonadLore,
-    SymbolInfo (..),
-    getLastLoadTargetsResult,
-    lookupSymbolInfo,
-  )
+import Lore (MonadLore, SymbolInfo, getLastLoadTargetsResult, lookupRootSymbolInfo)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Render
+  ( ListMarker (..),
+    RenderList (..),
+    Renderable (..),
+    Truncation (..),
+    totalItems,
+    (|>),
+  )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
+import Lore.Mcp.Tools.Shared.DetailedSymbolInfo (DetailedSymbolInfo (..))
+import Lore.Mcp.Tools.Shared.PartialLoadWarning (mkPartialWarning)
 
-newtype LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
+data LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
   { symbol ::
       Field fieldType Text
         `WithMeta` '[ Description "Exact symbol name to look up in the loaded project symbol table. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
                       Example "lookupOrZero",
                       Example "Some.Module.someFunction"
+                    ],
+    skip ::
+      Maybe (Field fieldType Int)
+        `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
+                      Example 5
                     ]
   }
   deriving stock (Generic)
@@ -51,175 +54,47 @@ lookupSymbolInfoTool =
       }
 
 lookupSymbolInfoHandler :: (MonadLore m) => LookupSymbolInfoArgs 'ValueType -> m Text
-lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol} = do
+lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol, skip} = do
   maybeLoadResult <- getLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
-      symbolInfos <- lookupSymbolInfo symbol
-      pure (renderLookupResult loadResult symbol symbolInfos)
-
-renderLookupResult :: LoadTargetsResult -> Text -> [SymbolInfo] -> Text
-renderLookupResult loadResult symbol symbolInfos =
-  appendPartialLoadWarning loadResult "Lookup results may be incomplete." renderedBody
+      symbolInfos <- lookupRootSymbolInfo symbol
+      let toRender =
+            mkRenderedBody symbolInfos
+              |> mkPartialWarning loadResult
+      pure $ renderText toRender
   where
-    renderedBody =
-      case symbolInfos of
-        [] ->
-          renderNoSymbolsFound loadResult symbol
-        _ ->
-          T.intercalate "\n\n" (map renderSymbolInfo symbolInfos)
+    resolvedSkip =
+      max 0 (fromMaybe 0 skip)
 
-renderNoSymbolsFound :: LoadTargetsResult -> Text -> Text
-renderNoSymbolsFound loadResult symbol
-  | loadResult.loadTargetsModulesFailed > 0 =
-      "No loaded/exported symbols found for "
-        <> quoteText symbol
-        <> " in the current session state. Because the project is only partially loaded, this does not mean the symbol is absent from source."
-  | otherwise =
-      "No symbols found for " <> quoteText symbol <> "."
+    mkRenderedBody symbolInfos =
+      case NE.nonEmpty symbolInfos of
+        Nothing ->
+          "No symbols found for " <> quoteText symbol <> "."
+        Just nonEmptySymbolInfos ->
+          renderText (renderSymbolCandidatesList resolvedSkip nonEmptySymbolInfos)
 
-renderSymbolInfo :: SymbolInfo -> Text
-renderSymbolInfo symbolInfo =
-  T.intercalate "\n" $
-    [ renderSymbolHeader symbolInfo,
-      "  Exported from: " <> renderModules symbolInfo.exportedFrom
-    ]
-      <> maybe [] (\location -> ["  Defined at: " <> location]) (renderDefinitionLocation symbolInfo.symbolName)
-      <> renderClassInstances symbolInfo.associatedClassInstances
-      <> renderFamilyInstances symbolInfo.associatedFamilyInstances
-
-renderSymbolHeader :: SymbolInfo -> Text
-renderSymbolHeader symbolInfo =
-  case symbolInfo.symbolThing of
-    TyThing.AnId {} ->
-      renderQualifiedName symbolInfo.symbolName
-        <> maybe "" (" :: " <>) (renderType <$> symbolInfo.symbolType)
-    tyThing ->
-      renderTyThing tyThing
-
-renderTyThing :: GHC.TyThing -> Text
-renderTyThing =
-  renderOutputableWith (TyThing.pprTyThingInContext showSub)
+renderSymbolCandidatesList :: Int -> NonEmpty SymbolInfo -> RenderList
+renderSymbolCandidatesList skip symbolInfos =
+  RenderList
+    { renderHeader =
+        \ctx -> Just $ "Found " <> T.pack (show ctx.totalItems) <> " symbol candidates:",
+      contentIndentWidth = 0,
+      markerStyle = NumberMarker,
+      itemsList = fmap DetailedSymbolInfo symbolInfos,
+      skip = skip,
+      truncation =
+        Just
+          Truncation
+            { maxItems = maxRenderedSymbolCandidates,
+              itemName = "symbol candidates",
+              skipArgName = Just "skip"
+            }
+    }
   where
-    showSub =
-      Iface.ShowSub
-        { Iface.ss_how_much = Iface.ShowHeader (Iface.AltPpr Nothing),
-          Iface.ss_forall = Iface.ShowForAllWhen
-        }
-
-renderQualifiedName :: GHC.Name -> Text
-renderQualifiedName =
-  renderOutputable
-
-renderModuleName :: GHC.Module -> Text
-renderModuleName =
-  T.pack . GHC.moduleNameString . GHC.moduleName
-
-renderModules :: [GHC.Module] -> Text
-renderModules modules =
-  case modules of
-    [] -> "<none>"
-    _ -> T.pack (intercalate ", " (map (T.unpack . renderModuleName) modules))
-
-renderType :: GHC.Type -> Text
-renderType =
-  renderOutputable
-
-renderClassInstances :: [GHC.ClsInst] -> [Text]
-renderClassInstances instances_ =
-  renderInstancesSection "  Class instances:" renderClassInstance instances_
-
-renderClassInstance :: GHC.ClsInst -> Text
-renderClassInstance =
-  compactClassInstance . renderOutputable
-
-renderFamilyInstances :: [GHC.FamInst] -> [Text]
-renderFamilyInstances instances_ =
-  renderInstancesSection "  Family instances:" renderFamilyInstance instances_
-
-renderFamilyInstance :: GHC.FamInst -> Text
-renderFamilyInstance =
-  compactRenderedInstance . renderOutputable
-
-renderInstancesSection :: Text -> (a -> Text) -> [a] -> [Text]
-renderInstancesSection heading renderInstance instances_ =
-  case instances_ of
-    [] -> []
-    _ ->
-      let visibleInstances = take maxRenderedInstances instances_
-          hiddenCount = length instances_ - length visibleInstances
-       in [heading]
-            <> map (("    - " <>) . renderInstance) visibleInstances
-            <> [ "    ... and " <> T.pack (show hiddenCount) <> " more instances"
-               | hiddenCount > 0
-               ]
-
-compactClassInstance :: Text -> Text
-compactClassInstance =
-  stripInstancePrefix
-    . compactRenderedInstance
-
-compactRenderedInstance :: Text -> Text
-compactRenderedInstance =
-  T.unwords
-    . takeWhile (not . isDefinitionCommentLine)
-    . filter (not . T.null)
-    . map stripTrailingComment
-    . map T.strip
-    . T.lines
-
-stripInstancePrefix :: Text -> Text
-stripInstancePrefix text =
-  fromMaybe text (T.stripPrefix "instance " text)
-
-stripTrailingComment :: Text -> Text
-stripTrailingComment text =
-  T.strip $
-    case T.breakOn " -- " text of
-      (prefix, suffix)
-        | T.null suffix -> text
-        | otherwise -> prefix
-
-isDefinitionCommentLine :: Text -> Bool
-isDefinitionCommentLine =
-  T.isPrefixOf "-- Defined"
-
-maxRenderedInstances :: Int
-maxRenderedInstances = 15
-
-renderOutputable :: (Outputable.Outputable a) => a -> Text
-renderOutputable =
-  T.pack . Outputable.showSDocUnsafe . Outputable.ppr
-
-renderOutputableWith :: (a -> Outputable.SDoc) -> a -> Text
-renderOutputableWith render =
-  T.pack . Outputable.showSDocUnsafe . render
-
-renderDefinitionLocation :: GHC.Name -> Maybe Text
-renderDefinitionLocation name = do
-  realSpan <- Plugins.srcSpanToRealSrcSpan (Plugins.nameSrcSpan name)
-  pure $
-    T.pack (Plugins.unpackFS (Plugins.srcSpanFile realSpan))
-      <> ":"
-      <> T.pack (show (Plugins.srcSpanStartLine realSpan))
-      <> ":"
-      <> T.pack (show (Plugins.srcSpanStartCol realSpan))
-      <> "-"
-      <> renderEndPosition realSpan
-
-renderEndPosition :: GHC.RealSrcSpan -> Text
-renderEndPosition realSpan
-  | Plugins.srcSpanStartLine realSpan == Plugins.srcSpanEndLine realSpan =
-      T.pack (show endColInclusive)
-  | otherwise =
-      T.pack (show (Plugins.srcSpanEndLine realSpan))
-        <> ":"
-        <> T.pack (show endColInclusive)
-  where
-    endColInclusive =
-      max (Plugins.srcSpanStartCol realSpan) (Plugins.srcSpanEndCol realSpan - 1)
+    maxRenderedSymbolCandidates = 5
 
 quoteText :: Text -> Text
 quoteText value =

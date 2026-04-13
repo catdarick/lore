@@ -13,6 +13,7 @@ module Lore.Lookup
     LookupInstancesResult (..),
     findSymbols,
     listExportedSymbolsByModule,
+    filterExportedSymbolNodesByTypeHint,
     lookupSymbolInfo,
     lookupRootSymbolInfo,
     lookupIntersectingInstances,
@@ -26,15 +27,14 @@ import Control.Monad (forM)
 import Data.Char (isAlphaNum, isUpper)
 import Data.Containers.ListUtils (nubOrdOn)
 import Data.List (foldl', intercalate, sortOn)
-import qualified Data.Map as Map
 import Data.Maybe (catMaybes, mapMaybe)
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Core.FamInstEnv as GHC
 import qualified GHC.Data.FastString as FastString
 import qualified GHC.Plugins as GHC
+import qualified GHC.Types.Avail as Avail
 import qualified GHC.Types.TyThing as GHC
 import Lore.Definition (DefinitionSlice, resolveDefinitionSlice)
 import qualified Lore.Internal.Ghc.TyThing as TyThing
@@ -47,11 +47,10 @@ import UnliftIO (SomeException, handle)
 
 findSymbols :: (MonadLore m) => Text -> m [Symbol]
 findSymbols needle = do
-  symbolsMap <- SymbolsMap.getSymbolsMap
-  pure (findMatchingSymbols needle symbolsMap)
+  findMatchingSymbols needle <$> SymbolsMap.getSymbolsMap
 
-listExportedSymbolsByModule :: (MonadLore m) => Text -> Maybe Text -> Maybe Text -> m [ExportedSymbolNode]
-listExportedSymbolsByModule moduleName maybePackageName maybeTypeHint = do
+listExportedSymbolsByModule :: (MonadLore m) => Text -> Maybe Text -> m [ExportedSymbolNode]
+listExportedSymbolsByModule moduleName maybePackageName = do
   hscEnv <- GHC.getSession
   maybeModule <- resolveModule hscEnv moduleName maybePackageName
   case maybeModule of
@@ -62,7 +61,13 @@ listExportedSymbolsByModule moduleName maybePackageName maybeTypeHint = do
       pure $
         sortOn
           (renderOutputable . nodeName)
-          (maybe exportedSymbols (`filterExportedSymbolNodesByTypeHint` exportedSymbols) (normalizeQueryOccName <$> maybeTypeHint))
+          exportedSymbols
+
+filterExportedSymbolNodesByTypeHint :: Text -> [ExportedSymbolNode] -> [ExportedSymbolNode]
+filterExportedSymbolNodesByTypeHint typeHint =
+  mapMaybe (filterExportedSymbolNodeByTypeHint normalizedTypeName)
+  where
+    normalizedTypeName = normalizeQueryOccName typeHint
 
 resolveModule :: (MonadLore m) => GHC.HscEnv -> Text -> Maybe Text -> m (Maybe GHC.Module)
 resolveModule _hscEnv moduleName maybePackageName =
@@ -86,40 +91,8 @@ renderModuleRequest moduleName maybePackageName =
 
 loadExportedSymbolsForModule :: (MonadLore m) => GHC.HscEnv -> GHC.Module -> m [ExportedSymbolNode]
 loadExportedSymbolsForModule hscEnv module_ = do
-  exportedNames <- loadExportedNamesForModule hscEnv module_
-  rootToExportedNames <- buildRootToExportedNames exportedNames
-  sortOn (renderOutputable . nodeName) . catMaybes <$> mapM buildRootNode (Map.toList rootToExportedNames)
-
-buildRootToExportedNames :: (MonadLore m) => [GHC.Name] -> m (Map.Map GHC.Name (Set.Set GHC.Name))
-buildRootToExportedNames exportedNames = do
-  rootPairs <- mapM (\exportedName -> (\rootName -> (rootName, exportedName)) <$> resolveRootName exportedName) exportedNames
-  pure $
-    foldl'
-      ( \grouped (rootName, exportedName) ->
-          Map.insertWith Set.union rootName (Set.fromList [rootName, exportedName]) grouped
-      )
-      Map.empty
-      rootPairs
-
-buildRootNode :: (MonadLore m) => (GHC.Name, Set.Set GHC.Name) -> m (Maybe ExportedSymbolNode)
-buildRootNode (rootName, relatedNames) = do
-  maybeRootThing <- GHC.lookupName rootName
-  case maybeRootThing of
-    Nothing ->
-      pure Nothing
-    Just rootThing -> do
-      let childNames =
-            sortOn renderOutputable $
-              Set.toList $
-                Set.delete rootName relatedNames
-      childNodes <- catMaybes <$> mapM buildLeafNode childNames
-      pure $
-        Just
-          ExportedSymbolNode
-            { nodeName = rootName,
-              nodeThing = rootThing,
-              nodeChildren = childNodes
-            }
+  exportedAvailInfos <- loadExportedAvailInfosForModule hscEnv module_
+  sortOn (renderOutputable . nodeName) . catMaybes <$> mapM buildRootNodeFromAvail exportedAvailInfos
 
 buildLeafNode :: (MonadLore m) => GHC.Name -> m (Maybe ExportedSymbolNode)
 buildLeafNode childName = do
@@ -135,9 +108,25 @@ buildLeafNode childName = do
       )
       maybeChildThing
 
-filterExportedSymbolNodesByTypeHint :: Text -> [ExportedSymbolNode] -> [ExportedSymbolNode]
-filterExportedSymbolNodesByTypeHint typeHint =
-  mapMaybe (filterExportedSymbolNodeByTypeHint typeHint)
+buildRootNodeFromAvail :: (MonadLore m) => Avail.AvailInfo -> m (Maybe ExportedSymbolNode)
+buildRootNodeFromAvail availInfo = do
+  let rootName = Avail.availName availInfo
+      childNames =
+        sortOn renderOutputable $
+          map Avail.greNamePrintableName (Avail.availSubordinateGreNames availInfo)
+  maybeRootThing <- GHC.lookupName rootName
+  case maybeRootThing of
+    Nothing ->
+      pure Nothing
+    Just rootThing -> do
+      childNodes <- catMaybes <$> mapM buildLeafNode childNames
+      pure $
+        Just
+          ExportedSymbolNode
+            { nodeName = rootName,
+              nodeThing = rootThing,
+              nodeChildren = childNodes
+            }
 
 filterExportedSymbolNodeByTypeHint :: Text -> ExportedSymbolNode -> Maybe ExportedSymbolNode
 filterExportedSymbolNodeByTypeHint typeHint node =
@@ -148,15 +137,24 @@ filterExportedSymbolNodeByTypeHint typeHint node =
     nodeMatches = TyThing.isMentionedByOccString (T.unpack typeHint) node.nodeThing
     matchingChildren = mapMaybe (filterExportedSymbolNodeByTypeHint typeHint) node.nodeChildren
 
-loadExportedNamesForModule :: (MonadLore m) => GHC.HscEnv -> GHC.Module -> m [GHC.Name]
-loadExportedNamesForModule _hscEnv module_ = do
+loadExportedAvailInfosForModule :: (MonadLore m) => GHC.HscEnv -> GHC.Module -> m [Avail.AvailInfo]
+loadExportedAvailInfosForModule _hscEnv module_ = do
   maybeModuleInfo <- GHC.getModuleInfo module_
   case maybeModuleInfo of
     Just moduleInfo ->
-      pure (deduplicateNames (GHC.modInfoExports moduleInfo))
+      case GHC.modInfoIface moduleInfo of
+        Just modIface ->
+          pure (deduplicateAvailInfos (GHC.mi_exports modIface))
+        Nothing -> do
+          Log.warn $ "Failed to get interface exports for module " <> show (GHC.moduleNameString (GHC.moduleName module_)) <> ": modInfoIface returned Nothing. Falling back to flat export names."
+          pure (map (Avail.Avail . Avail.NormalGreName) (deduplicateNames (GHC.modInfoExports moduleInfo)))
     Nothing -> do
       Log.warn $ "Failed to get exports for module " <> show (GHC.moduleNameString (GHC.moduleName module_)) <> ": getModuleInfo returned Nothing."
       pure []
+
+deduplicateAvailInfos :: [Avail.AvailInfo] -> [Avail.AvailInfo]
+deduplicateAvailInfos =
+  nubOrdOn renderOutputable
 
 data SymbolInfo = SymbolInfo
   { symbolName :: GHC.Name,

@@ -178,7 +178,7 @@ mentionsInType predicate = go
           ]
       TyConApp tyCon argumentTypes ->
         anyM
-          [ mentionsInTyCon predicate tyCon,
+          [ pure (predicate (tyConName tyCon)),
             anyM (map go argumentTypes)
           ]
       FunTy _ multiplicity argumentType resultType ->

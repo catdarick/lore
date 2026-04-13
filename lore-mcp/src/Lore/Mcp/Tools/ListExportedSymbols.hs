@@ -5,15 +5,19 @@ where
 
 import qualified Data.Aeson as J
 import Data.List (intercalate)
+import qualified Data.List.NonEmpty as NE
+import Data.Maybe (fromMaybe)
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as Plugins
-import Lore (ExportedSymbolNode (..), LoadTargetsResult (..), MonadLore, SymbolCategory (..), classifySymbolCategory, getLastLoadTargetsResult, listExportedSymbolsByModule)
+import Lore (ExportedSymbolNode (..), MonadLore, SymbolCategory (..), classifySymbolCategory, getLastLoadTargetsResult, listExportedSymbolsByModule)
+import Lore.Lookup (filterExportedSymbolNodesByTypeHint)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Render (ListMarker (..), RenderList (..), Renderable (..), Truncation (..), (|>))
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
+import Lore.Mcp.Tools.Shared.PartialLoadWarning (mkPartialWarning)
 
 data ListExportedSymbolsArgs (fieldType :: FieldType) = ListExportedSymbolsArgs
   { moduleName ::
@@ -29,10 +33,15 @@ data ListExportedSymbolsArgs (fieldType :: FieldType) = ListExportedSymbolsArgs
                     ],
     typeHint ::
       Field fieldType (Maybe Text)
-        `WithMeta` '[ Description "Optional type occ-name filter. When provided, only exports that mention this type are kept. Useful for narrowing large module export lists. Can be a type, class, or type family name.",
+        `WithMeta` '[ Description "Optional type occ-name filter. When provided, only exports whose own type/signature structure directly mentions this type are kept. Useful for narrowing large module export lists. Can be a type, class, or type family name.",
                       Example "Int",
                       Example "Text",
                       Example "Show"
+                    ],
+    skip ::
+      Maybe (Field fieldType Int)
+        `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
+                      Example 5
                     ]
   }
   deriving stock (Generic)
@@ -46,63 +55,77 @@ listExportedSymbolsTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "listExportedSymbols",
-        description = Just "List exported symbols for a module visible in the currently loaded session state. Includes direct exports and re-exports. Optionally use typeHint to hide unrelated symbols.",
+        description = Just "List exported symbols for a module visible in the currently loaded session state. Includes direct exports and re-exports. Optionally use typeHint to keep only exports whose own type/signature structure directly mentions the requested occ-name.",
         handler = listExportedSymbolsHandler
       }
 
 listExportedSymbolsHandler :: (MonadLore m) => ListExportedSymbolsArgs 'ValueType -> m Text
-listExportedSymbolsHandler ListExportedSymbolsArgs {moduleName, packageName, typeHint} = do
+listExportedSymbolsHandler ListExportedSymbolsArgs {moduleName, packageName, typeHint, skip} = do
   maybeLoadResult <- getLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
-      allSymbols <- listExportedSymbolsByModule moduleName packageName Nothing
-      symbols <- listExportedSymbolsByModule moduleName packageName typeHint
-      pure (renderExportedSymbolsResult loadResult moduleName packageName typeHint (length allSymbols) symbols)
-
-renderExportedSymbolsResult :: LoadTargetsResult -> Text -> Maybe Text -> Maybe Text -> Int -> [ExportedSymbolNode] -> Text
-renderExportedSymbolsResult loadResult moduleName packageName typeHint totalSymbols symbols =
-  appendPartialLoadWarning loadResult "Symbol list may be incomplete." renderedBody
+      allSymbols <- listExportedSymbolsByModule moduleName packageName
+      let totalSymbols = length allSymbols
+          symbolsToRender =
+            case typeHint of
+              Nothing -> allSymbols
+              Just hint -> filterExportedSymbolNodesByTypeHint hint allSymbols
+      let toRender =
+            renderExportedSymbolsResult resolvedSkip moduleName packageName typeHint totalSymbols symbolsToRender
+              |> mkPartialWarning loadResult
+      pure (renderText toRender)
   where
-    renderedModuleRequest = renderModuleRequest moduleName packageName
-    renderedFilterSuffix = renderFilterSuffix typeHint totalSymbols (length symbols)
-    renderedCountSuffix = renderCountSuffix typeHint (length symbols)
-    renderedBody =
-      case symbols of
-        [] ->
-          "No exported symbols found for module " <> renderedModuleRequest <> renderedFilterSuffix <> "."
-        _ ->
-          T.unlines $
-            [ "Exported symbols in module "
-                <> renderedModuleRequest
-                <> renderedFilterSuffix
-                <> renderedCountSuffix
-                <> ":"
-            ]
-              <> map (("- " <>) . renderSymbolNode) symbols
+    resolvedSkip =
+      max 0 (fromMaybe 0 skip)
 
-renderFilterSuffix :: Maybe Text -> Int -> Int -> Text
-renderFilterSuffix maybeTypeHint totalSymbols filteredSymbols =
-  case maybeTypeHint of
+renderExportedSymbolsResult :: Int -> Text -> Maybe Text -> Maybe Text -> Int -> [ExportedSymbolNode] -> Text
+renderExportedSymbolsResult skip moduleName packageName typeHint totalSymbols filteredSymbols =
+  case NE.nonEmpty filteredSymbols of
     Nothing ->
-      ""
-    Just hint ->
-      " filtered by type hint "
-        <> quoteText hint
-        <> " ("
+      allExportsPart <> hintPart <> "."
+    Just nonEmptySymbols ->
+      renderText (exportedSymbolsList nonEmptySymbols)
+  where
+    modulePart =
+      case packageName of
+        Nothing ->
+          quoteText moduleName
+        Just packageName' ->
+          quoteText moduleName <> " (package " <> quoteText packageName' <> ")"
+    allExportsPart =
+      "Found "
         <> T.pack (show totalSymbols)
-        <> " total, "
-        <> T.pack (show filteredSymbols)
-        <> " kept)"
+        <> " symbols exported from "
+        <> modulePart
+    hintPart = case typeHint of
+      Just hint -> ", " <> T.pack (show (length filteredSymbols)) <> " of which mention type " <> quoteText hint
+      Nothing -> ""
 
-renderCountSuffix :: Maybe Text -> Int -> Text
-renderCountSuffix maybeTypeHint filteredSymbols =
-  case maybeTypeHint of
-    Nothing ->
-      " (" <> T.pack (show filteredSymbols) <> ")"
-    Just _ ->
-      ""
+    exportedSymbolsList neFilteredSymbols =
+      RenderList
+        { renderHeader =
+            \_ctx ->
+              Just $ allExportsPart <> hintPart <> ":",
+          contentIndentWidth = 0,
+          markerStyle = BulletMarker,
+          itemsList = fmap RenderedExportedSymbolNode neFilteredSymbols,
+          skip = skip,
+          truncation =
+            Just
+              Truncation
+                { maxItems = maxRenderedExportedSymbols,
+                  itemName = "exported symbols",
+                  skipArgName = Just "skip"
+                }
+        }
+
+newtype RenderedExportedSymbolNode = RenderedExportedSymbolNode ExportedSymbolNode
+
+instance Renderable RenderedExportedSymbolNode where
+  renderText (RenderedExportedSymbolNode node) =
+    renderSymbolNode node
 
 renderSymbolNode :: ExportedSymbolNode -> Text
 renderSymbolNode node =
@@ -135,10 +158,5 @@ quoteText :: Text -> Text
 quoteText value =
   "\"" <> value <> "\""
 
-renderModuleRequest :: Text -> Maybe Text -> Text
-renderModuleRequest moduleName maybePackageName =
-  case maybePackageName of
-    Nothing ->
-      quoteText moduleName
-    Just packageName ->
-      quoteText moduleName <> " (package " <> quoteText packageName <> ")"
+maxRenderedExportedSymbols :: Int
+maxRenderedExportedSymbols = 150

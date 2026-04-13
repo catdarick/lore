@@ -4,17 +4,15 @@ module Lore.Mcp.Tools.LookupInstances
 where
 
 import qualified Data.Aeson as J
-import Data.List (intercalate, nub)
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
+import Data.Maybe (fromMaybe)
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GHC
 import GHC.Generics (Generic)
-import qualified GHC.Utils.Outputable as Outputable
 import Lore
-  ( LoadTargetsResult (..),
-    LookupInstancesQuery (..),
-    LookupInstancesResult (..),
+  ( LookupInstancesResult (..),
     MatchingInstance (..),
     MonadLore,
     getLastLoadTargetsResult,
@@ -22,21 +20,36 @@ import Lore
   )
 import Lore.Mcp.Internal.Annotated
   ( Description,
+    Example,
     ExampleList,
     Field,
     FieldType (..),
     MinItems,
     WithMeta,
   )
+import Lore.Mcp.Internal.Render
+  ( ListMarker (..),
+    RenderList (..),
+    Renderable (..),
+    Truncation (..),
+    totalItems,
+    (|>),
+  )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
+import Lore.Mcp.Tools.Shared.Outputable (renderOutputable)
+import Lore.Mcp.Tools.Shared.PartialLoadWarning (mkPartialWarning)
 
-newtype LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs
+data LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs
   { names ::
       Field fieldType [Text]
         `WithMeta` '[ Description "Provide two or more symbol names. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
                       ExampleList '["Show", "Int", "Some.Module.someFunction"],
                       MinItems 2
+                    ],
+    skip ::
+      Maybe (Field fieldType Int)
+        `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
+                      Example 5
                     ]
   }
   deriving stock (Generic)
@@ -55,68 +68,56 @@ lookupInstancesTool =
       }
 
 lookupInstancesHandler :: (MonadLore m) => LookupInstancesArgs 'ValueType -> m Text
-lookupInstancesHandler LookupInstancesArgs {names} = do
+lookupInstancesHandler LookupInstancesArgs {names, skip} = do
   maybeLoadResult <- getLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
       lookupResult <- lookupIntersectingInstances names
-      pure (renderLookupInstancesResult loadResult lookupResult)
-
-renderLookupInstancesResult :: LoadTargetsResult -> LookupInstancesResult -> Text
-renderLookupInstancesResult loadResult lookupResult =
-  appendPartialLoadWarning loadResult "Lookup results may be incomplete." renderedBody
+      let toRender =
+            renderLookupInstancesResult resolvedSkip lookupResult
+              |> mkPartialWarning loadResult
+      pure (renderText toRender)
   where
-    renderedBody =
-      T.intercalate "\n\n" $
-        [renderQuerySection lookupResult.lookupInstancesQueries]
-          <> [renderInstancesSection lookupResult.lookupInstancesResults]
+    resolvedSkip =
+      max 0 (fromMaybe 0 skip)
 
-renderQuerySection :: [LookupInstancesQuery] -> Text
-renderQuerySection queries =
-  T.intercalate "\n" $
-    "Queries:"
-      : map renderQuery queries
+renderLookupInstancesResult :: Int -> LookupInstancesResult -> Text
+renderLookupInstancesResult skip lookupResult =
+  case NE.nonEmpty lookupResult.lookupInstancesResults of
+    Nothing ->
+      "Found 0 matching instances."
+    Just matchingInstances ->
+      renderText (renderMatchingInstancesList skip matchingInstances)
 
-renderQuery :: LookupInstancesQuery -> Text
-renderQuery query =
-  "- "
-    <> quoteText query.lookupInstancesQueryText
-    <> ": "
-    <> case renderMatchedNames query.lookupInstancesQueryMatches of
-      [] -> "<no symbol matches>"
-      renderedNames -> T.pack (intercalate ", " renderedNames)
+renderMatchingInstancesList :: Int -> NonEmpty MatchingInstance -> RenderList
+renderMatchingInstancesList skip matchingInstances =
+  RenderList
+    { renderHeader =
+        \ctx -> Just $ "Found " <> T.pack (show ctx.totalItems) <> " matching instances:",
+      contentIndentWidth = 0,
+      markerStyle = BulletMarker,
+      itemsList = fmap RenderedMatchingInstance matchingInstances,
+      skip = skip,
+      truncation =
+        Just
+          Truncation
+            { maxItems = maxRenderedMatchingInstances,
+              itemName = "matching instances",
+              skipArgName = Just "skip"
+            }
+    }
 
-renderMatchedNames :: [GHC.Name] -> [String]
-renderMatchedNames =
-  nub . map renderOutputable
+newtype RenderedMatchingInstance = RenderedMatchingInstance MatchingInstance
 
-renderInstancesSection :: [MatchingInstance] -> Text
-renderInstancesSection instances_ =
-  case instances_ of
-    [] ->
-      "Matching instances (instance head mentions all queried symbols):\n- <none>"
-    _ ->
-      T.intercalate "\n" $
-        "Matching instances (instance head mentions all queried symbols):"
-          : map (("- " <>) . renderMatchingInstance) instances_
+instance Renderable RenderedMatchingInstance where
+  renderText (RenderedMatchingInstance matchingInstance) =
+    case matchingInstance of
+      MatchingClassInstance _ classInstance ->
+        renderOutputable classInstance
+      MatchingFamilyInstance _ familyInstance ->
+        renderOutputable familyInstance
 
-renderMatchingInstance :: MatchingInstance -> Text
-renderMatchingInstance = \case
-  MatchingClassInstance _ classInstance ->
-    renderOutputableText classInstance
-  MatchingFamilyInstance _ familyInstance ->
-    renderOutputableText familyInstance
-
-renderOutputableText :: (Outputable.Outputable a) => a -> Text
-renderOutputableText =
-  T.pack . renderOutputable
-
-renderOutputable :: (Outputable.Outputable a) => a -> String
-renderOutputable =
-  Outputable.showSDocUnsafe . Outputable.ppr
-
-quoteText :: Text -> Text
-quoteText value =
-  "\"" <> value <> "\""
+maxRenderedMatchingInstances :: Int
+maxRenderedMatchingInstances = 25
