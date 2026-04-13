@@ -761,6 +761,27 @@ spec =
         T.isInfixOf "FixtureCtorB" demoSource `shouldBe` False
         T.isInfixOf "FixtureCtorA" demoSource `shouldBe` True
 
+    it "removes a redundant record selector imported as a flat item" do
+      withFixtureCopy \fixtureRoot -> do
+        let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+        enableWarningErrors fixtureRoot
+        ensureRecordFieldFixtureModule fixtureRoot
+        addImportAndKeepDefinition
+          demoFile
+          "import AutoRefactFixture.RecordFields (recordField, RecordBox(RecordBox))\n"
+          [ "keepRecordBoxCtor :: Int -> RecordBox",
+            "keepRecordBoxCtor value = RecordBox value"
+          ]
+
+        loaded <- fixtureLoreAt fixtureRoot do
+          loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+          not . null <$> findSymbols "lookupOrZero"
+
+        demoSource <- TIO.readFile demoFile
+        loaded `shouldBe` True
+        T.isInfixOf "recordField" demoSource `shouldBe` False
+        T.isInfixOf "import AutoRefactFixture.RecordFields (RecordBox(RecordBox))\n" demoSource `shouldBe` True
+
     it "removes a redundant all-constructors import item" do
       withFixtureCopy \fixtureRoot -> do
         let demoFile = fixtureRoot </> "src" </> "Demo.hs"

@@ -12,22 +12,31 @@ import Data.List (find)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
-import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span)
-import Lore.Internal.AutoRefactor.ImportDecl (ParsedImport (..), parsedImportContainsSpan)
+import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..))
+import Lore.Internal.AutoRefactor.ImportDecl (ImportItem (..), ImportList (..), ParsedImport (..), parsedImportContainsSpan)
 import Lore.Internal.AutoRefactor.ImportOps (ImportOperation (..))
 
-data RedundantImportRequest
-  = RemoveBindingsRequest Span (NonEmpty T.Text)
-  | RemoveWholeImportRequest Span
+data RedundantImportRequest = RedundantImportRequest
+  { redundantImportDiagnosticSpan :: Span,
+    redundantImportBindings :: Maybe (NonEmpty T.Text)
+  }
   deriving (Eq, Show)
 
 redundantImportRequestFromDiagnostic :: Diagnostic -> Maybe RedundantImportRequest
 redundantImportRequestFromDiagnostic Diagnostic {diagnosticSpan = RealDiagnosticSpan diagnosticSpan, diagnosticMessage} =
   case parseRedundantImportDiagnostic diagnosticMessage of
     Just RemoveWholeImportDiagnostic ->
-      Just (RemoveWholeImportRequest diagnosticSpan)
+      Just
+        RedundantImportRequest
+          { redundantImportDiagnosticSpan = diagnosticSpan,
+            redundantImportBindings = Nothing
+          }
     Just (RemoveBindings bindings) ->
-      Just (RemoveBindingsRequest diagnosticSpan bindings)
+      Just
+        RedundantImportRequest
+          { redundantImportDiagnosticSpan = diagnosticSpan,
+            redundantImportBindings = Just bindings
+          }
     Nothing ->
       Nothing
 redundantImportRequestFromDiagnostic Diagnostic {diagnosticSpan = UnhelpfulDiagnosticSpan {}} =
@@ -37,21 +46,66 @@ suggestRedundantImportOperations :: [ParsedImport] -> NonEmpty RedundantImportRe
 suggestRedundantImportOperations parsedImports =
   concatMap suggestForRequest . NE.toList
   where
-    suggestForRequest = \case
-      RemoveWholeImportRequest diagnosticSpan ->
-        case find (`parsedImportContainsSpan` diagnosticSpan) parsedImports of
-          Just parsedImport ->
+    suggestForRequest RedundantImportRequest {redundantImportDiagnosticSpan, redundantImportBindings} =
+      case find (`parsedImportContainsSpan` redundantImportDiagnosticSpan) parsedImports of
+        Nothing ->
+          []
+        Just parsedImport ->
+          case findImportItemBySpan redundantImportDiagnosticSpan parsedImport of
+            Just importItem ->
+              [RemoveImportItem parsedImport.parsedImportId importItem.importItemText]
+            Nothing ->
+              fallbackOperations parsedImport redundantImportDiagnosticSpan redundantImportBindings
+
+    fallbackOperations parsedImport diagnosticSpan = \case
+      Nothing ->
+        [RemoveWholeImport parsedImport.parsedImportId]
+      Just bindings
+        | spansMatch parsedImport.parsedImportSpan diagnosticSpan ->
             [RemoveWholeImport parsedImport.parsedImportId]
-          Nothing ->
-            []
-      RemoveBindingsRequest diagnosticSpan bindings ->
-        case find (`parsedImportContainsSpan` diagnosticSpan) parsedImports of
-          Just parsedImport ->
+        | otherwise ->
             [ RemoveImportItem parsedImport.parsedImportId bindingText
             | bindingText <- NE.toList bindings
             ]
-          Nothing ->
-            []
+
+findImportItemBySpan :: Span -> ParsedImport -> Maybe ImportItem
+findImportItemBySpan diagnosticSpan parsedImport =
+  find (itemSpanMatches diagnosticSpan) (importItems parsedImport.parsedImportList)
+
+importItems :: ImportList -> [ImportItem]
+importItems = \case
+  OpenImport -> []
+  ExplicitImport items -> items
+  HidingImport items -> items
+
+itemSpanMatches :: Span -> ImportItem -> Bool
+itemSpanMatches diagnosticSpan importItem =
+  case importItem.importItemSpan of
+    Nothing -> False
+    Just importItemSpan ->
+      spansOverlap importItemSpan diagnosticSpan
+
+spansMatch :: Span -> Span -> Bool
+spansMatch left right =
+  left.spanFile == right.spanFile
+    && left.spanStartLine == right.spanStartLine
+    && left.spanStartCol == right.spanStartCol
+    && left.spanEndLine == right.spanEndLine
+    && left.spanEndCol == right.spanEndCol
+
+spansOverlap :: Span -> Span -> Bool
+spansOverlap left right =
+  left.spanFile == right.spanFile
+    && spanStartKey left <= spanEndKey right
+    && spanStartKey right <= spanEndKey left
+
+spanStartKey :: Span -> (Int, Int)
+spanStartKey Span {spanStartLine, spanStartCol} =
+  (spanStartLine, spanStartCol)
+
+spanEndKey :: Span -> (Int, Int)
+spanEndKey Span {spanEndLine, spanEndCol} =
+  (spanEndLine, spanEndCol)
 
 data ParsedRedundantImportDiagnostic
   = RemoveBindings (NonEmpty T.Text)

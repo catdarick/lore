@@ -27,6 +27,8 @@ import Lore
     lookupIntersectingRootInstances,
     lookupRootSymbolInfo,
   )
+import Lore.Lookup (filterExportedSymbolNodesByTypeHint)
+import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import Test.Hspec
 import TestSupport (fixtureLore, fixtureLoreAt, withFixtureCopy)
@@ -184,7 +186,7 @@ spec =
         result <-
           fixtureLore do
             _ <- loadTargets defaultLoadTargetsOptions
-            listExportedSymbolsByModule "Demo.Support" Nothing Nothing
+            listExportedSymbolsByModule "Demo.Support" Nothing
 
         let occNames = exportedNodeOccNames result
         occNames `shouldSatisfy` elem "supportSeed"
@@ -197,9 +199,26 @@ spec =
         result <-
           fixtureLore do
             _ <- loadTargets defaultLoadTargetsOptions
-            listExportedSymbolsByModule "No.Such.Module" Nothing Nothing
+            listExportedSymbolsByModule "No.Such.Module" Nothing
 
         null result `shouldBe` True
+
+      it "filters by direct surface type mentions instead of transitive metadata" do
+        withFixtureCopy \fixtureRoot -> do
+          let moduleDir = fixtureRoot </> "src" </> "TestHint"
+              moduleFile = moduleDir </> "Filter.hs"
+          createDirectoryIfMissing True moduleDir
+          TIO.writeFile moduleFile directTypeHintFixtureModuleSource
+
+          result <-
+            fixtureLoreAt fixtureRoot do
+              _ <- loadTargets defaultLoadTargetsOptions
+              exports <- listExportedSymbolsByModule "TestHint.Filter" Nothing
+              pure (filterExportedSymbolNodesByTypeHint "String" exports)
+
+          let occNames = exportedNodeOccNames result
+          occNames `shouldSatisfy` elem "directStringConsumer"
+          occNames `shouldSatisfy` not . elem "WrapSomeException"
 
     describe "lookupIntersectingInstances" do
       it "intersects class instances across multiple symbol queries" do
@@ -246,6 +265,23 @@ exportedNodeOccNames :: [ExportedSymbolNode] -> [String]
 exportedNodeOccNames nodes =
   map (Plugins.getOccString . (.nodeName)) nodes
     <> concatMap (map (Plugins.getOccString . (.nodeName)) . (.nodeChildren)) nodes
+
+directTypeHintFixtureModuleSource :: T.Text
+directTypeHintFixtureModuleSource =
+  T.unlines
+    [ "module TestHint.Filter",
+      "  ( directStringConsumer,",
+      "    WrapSomeException(..)",
+      "  )",
+      "where",
+      "",
+      "import Control.Exception (SomeException)",
+      "",
+      "directStringConsumer :: String -> Int",
+      "directStringConsumer = length",
+      "",
+      "data WrapSomeException = WrapSomeException SomeException"
+    ]
 
 withFixtureInstances :: (FilePath -> IO a) -> IO a
 withFixtureInstances action =
