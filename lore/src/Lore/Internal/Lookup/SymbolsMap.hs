@@ -7,6 +7,7 @@ module Lore.Internal.Lookup.SymbolsMap
   )
 where
 
+import Control.DeepSeq (deepseq)
 import Control.Monad (forM, when)
 import Control.Monad.Reader (MonadIO (..), asks)
 import Data.List (find, foldl', nub)
@@ -24,7 +25,7 @@ import Lore.Internal.Lookup.Types (ExternalPackagesSymbolsCache (..), ModSummari
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
-import UnliftIO (SomeException, handle, modifyMVar, readMVar)
+import UnliftIO (SomeException, forConcurrently, handle, modifyMVar, readMVar)
 
 getSymbolsMap :: (MonadLore m) => m SymbolsMap
 getSymbolsMap = do
@@ -102,7 +103,7 @@ prepareExternalSymbolsMap dependencies = do
   externalModules <- enumerateVisiblePackageModules
   Log.debug $ "Enumerated " <> show (length externalModules) <> " visible package modules."
   hscEnv <- GHC.getSession
-  externalModulesSymbols <- liftIO $ forM externalModules $ getExternalModuleSymbols hscEnv
+  externalModulesSymbols <- liftIO $ forConcurrently externalModules (getExternalModuleSymbolsForced hscEnv)
   Log.debug $ "Fetched symbols for " <> show (length externalModulesSymbols) <> " external modules."
   logModuleSymbolIssues externalModulesSymbols
   let symbolsMap = buildSymbolsIndex externalModulesSymbols
@@ -146,6 +147,36 @@ getExternalModuleSymbols hsc_env mdl = do
               }
           | exportedName <- deduplicateNames (concatMap GHC.availNames (GHC.mi_exports iface))
           ]
+
+getExternalModuleSymbolsForced :: GHC.HscEnv -> GHC.Module -> IO ModuleSymbolsResult
+getExternalModuleSymbolsForced hscEnv mdl = do
+  moduleSymbolsResult <- getExternalModuleSymbols hscEnv mdl
+  forceModuleSymbolsResult moduleSymbolsResult `seq` pure moduleSymbolsResult
+
+forceModuleSymbolsResult :: ModuleSymbolsResult -> ()
+forceModuleSymbolsResult = \case
+  ModuleSymbolsLoaded !mdl symbols ->
+    mdl `deepseq` forceSymbols symbols
+  ModuleSymbolsMissing !mdl ->
+    mdl `deepseq` ()
+  ModuleSymbolsFailed !mdl err ->
+    mdl `deepseq` show err `deepseq` ()
+
+forceSymbols :: [Symbol] -> ()
+forceSymbols [] = ()
+forceSymbols (symbol : restSymbols) =
+  forceSymbol symbol `seq` forceSymbols restSymbols
+
+forceSymbol :: Symbol -> ()
+forceSymbol Symbol {name, visibility} =
+  name `deepseq` forceVisibility visibility
+
+forceVisibility :: SymbolVisibility -> ()
+forceVisibility = \case
+  Symbol'ExportedFrom modules_ ->
+    modules_ `deepseq` ()
+  Symbol'Unexported ->
+    ()
 
 getHomeModuleSymbols :: (MonadLore m) => GHC.Module -> m ModuleSymbolsResult
 getHomeModuleSymbols mdl = do

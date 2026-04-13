@@ -19,7 +19,10 @@ module Lore.Definition
 where
 
 import Control.Applicative ((<|>))
+import Control.DeepSeq (deepseq)
+import qualified Control.Exception as Exception
 import Control.Monad (foldM)
+import Control.Monad.IO.Class (liftIO)
 import Data.Containers.ListUtils (nubOrdOn)
 import Data.Data (Data, Typeable, cast, gmapQ)
 import qualified Data.IntMap.Strict as IntMap
@@ -35,8 +38,8 @@ import qualified GHC
 import qualified GHC.Data.Bag as Bag
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
-import Lore.Internal.Definition.Cache (cacheReferenceModuleAnalysis, getReferenceOccurrenceIndex, lookupReferenceModuleAnalysisCache)
-import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionAnalysis (..), DefinitionSlice (..), ReferenceMatch (..), ReferenceModuleAnalysis (..), ReferenceOccurrenceIndex (..), RequiredImport (..), RequiredImportItem (..))
+import Lore.Internal.Definition.Cache (getReferenceOccurrenceIndex)
+import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionAnalysis (..), DefinitionSlice (..), ImportQualifiedStyle (..), ReferenceMatch (..), ReferenceModuleAnalysis (..), ReferenceOccurrenceIndex (..), RequiredImport (..), RequiredImportItem (..))
 import Lore.Internal.Lookup.ModSummaries (getModSummaries)
 import Lore.Internal.Lookup.NameToInstances (getNameToInstancesIndex)
 import Lore.Internal.Lookup.Types (ModSummaries (..), NameToInstancesIndex (..))
@@ -44,6 +47,7 @@ import qualified Lore.Logger as Log
 import Lore.Monad
 import System.Directory (getCurrentDirectory)
 import System.FilePath (isRelative, makeRelative, normalise)
+import UnliftIO (forConcurrently)
 
 data DefinitionMatch = DefinitionMatch
   { matchedDeclaration :: GHC.LHsDecl GHC.GhcPs,
@@ -91,6 +95,12 @@ data ClosureState = ClosureState
     closureSlices :: [DefinitionSlice]
   }
 
+data PreparedReferenceModule = PreparedReferenceModule
+  { preparedReferenceModuleName :: !GHC.Module,
+    preparedReferenceModuleContext :: !ModuleContext,
+    preparedReferenceDefinitionNames :: ![GHC.Name]
+  }
+
 resolveDefinitionSlice :: (MonadLore m) => GHC.Name -> m (Maybe DefinitionSlice)
 resolveDefinitionSlice inputName = do
   ModSummaries modSummaries <- getModSummaries
@@ -115,26 +125,30 @@ resolveReferenceMatchesForNames targetNames = do
   let candidateModules = lookupModulesForOccurrenceNames targetOccNames occurrenceIndex
   Log.debug $ "Resolved " <> show (Set.size targetOccNames) <> " target occurrence names to " <> show (length candidateModules) <> " candidate modules."
   let cache' = emptyResolverCache
-  (_, resolvedMatches) <-
+  (cache'', preparedModules) <-
     foldM
-      (collectReferencingModule targetSet modSummaries)
+      (prepareCandidateModule modSummaries)
       (cache', [])
       candidateModules
+  let _cache'' = cache''
+  resolvedMatches <-
+    concat <$> forConcurrently preparedModules (liftIO . Exception.evaluate . analyzePreparedModule targetSet)
+  forcedMatches <- liftIO $ Exception.evaluate (forceReferenceMatchesForRendering resolvedMatches)
   Log.debug $
     "Finished resolving reference matches. Found "
-      <> show (length resolvedMatches)
+      <> show (length forcedMatches)
       <> " matches in total"
-  pure resolvedMatches
+  pure forcedMatches
   where
-    collectReferencingModule targetSet modSummaries (cache, resolvedMatches) homeModule = do
-      (cache', maybeModuleAnalysis) <- resolveReferenceModuleAnalysis modSummaries cache homeModule
+    prepareCandidateModule modSummaries (cache, preparedModules) homeModule = do
+      (cache', maybePreparedModule) <- prepareReferenceModuleAnalysis modSummaries cache homeModule
       pure
         ( cache',
-          case maybeModuleAnalysis of
-            Just moduleAnalysis ->
-              resolvedMatches <> matchingReferenceMatches targetSet moduleAnalysis
+          case maybePreparedModule of
+            Just preparedModule ->
+              preparedModules <> [preparedModule]
             Nothing ->
-              resolvedMatches
+              preparedModules
         )
 
 resolveReferenceDefinitionsForNames :: (MonadLore m) => [GHC.Name] -> m [DefinitionSlice]
@@ -436,7 +450,7 @@ renderImport RequiredImport {..} =
     ["import"]
       <> ["{-# SOURCE #-}" | importSource]
       <> maybe [] pure importPackageQualifier
-      <> ["qualified" | importQualifiedStyle == GHC.QualifiedPre]
+      <> ["qualified" | importQualifiedStyle == QualifiedPre]
       <> [modulePart]
       <> maybe [] (\alias -> ["as", GHC.moduleNameString alias]) importAlias
       <> case renderedItems of
@@ -446,7 +460,7 @@ renderImport RequiredImport {..} =
     modulePart =
       GHC.moduleNameString importModule
         <> case importQualifiedStyle of
-          GHC.QualifiedPost -> " qualified"
+          QualifiedPost -> " qualified"
           _ -> ""
 
     renderedItems
@@ -521,47 +535,47 @@ buildReferenceOccurrenceIndex modSummaries = do
           occurrenceIndex
           (Set.toList (collectModuleOccurrenceNames (GHC.pm_parsed_source parsedModule)))
 
-resolveReferenceModuleAnalysis ::
+prepareReferenceModuleAnalysis ::
   (MonadLore m) =>
   Map.Map GHC.Module GHC.ModSummary ->
   ResolverCache ->
   GHC.Module ->
-  m (ResolverCache, Maybe ReferenceModuleAnalysis)
-resolveReferenceModuleAnalysis modSummaries cache homeModule =
-  lookupReferenceModuleAnalysisCache homeModule >>= \case
-    Just cachedAnalysis ->
-      pure (cacheDefinitionAnalyses cache cachedAnalysis, cachedAnalysis)
-    Nothing -> do
-      (cache', maybeContext) <- resolveModuleContext modSummaries cache homeModule
-      case maybeContext of
-        Nothing -> do
-          cacheReferenceModuleAnalysis homeModule Nothing
-          pure (cache', Nothing)
-        Just context -> do
-          definitionNames <- enumerateModuleReferenceDefinitionNames homeModule
+  m (ResolverCache, Maybe PreparedReferenceModule)
+prepareReferenceModuleAnalysis modSummaries cache homeModule = do
+  (cache', maybeContext) <- resolveModuleContext modSummaries cache homeModule
+  case maybeContext of
+    Nothing ->
+      pure (cache', Nothing)
+    Just context -> do
+      definitionNames <- enumerateModuleReferenceDefinitionNames homeModule
+      pure
+        ( cache',
+          Just
+            PreparedReferenceModule
+              { preparedReferenceModuleName = homeModule,
+                preparedReferenceModuleContext = context,
+                preparedReferenceDefinitionNames = definitionNames
+              }
+        )
 
-          let analysesByName =
-                Map.fromList
-                  [ (definitionName, analyzeDefinition homeModule definitionName context)
-                  | definitionName <- definitionNames
-                  ]
-              moduleAnalysis =
-                Just $
-                  ReferenceModuleAnalysis
-                    { referenceModuleDefinitions = analysesByName
-                    }
-              cache'' = cacheDefinitionAnalyses cache' moduleAnalysis
-          cacheReferenceModuleAnalysis homeModule moduleAnalysis
-          pure (cache'', moduleAnalysis)
-  where
-    cacheDefinitionAnalyses cache' = \case
-      Nothing ->
-        cache'
-      Just moduleAnalysis ->
-        cache'
-          { cachedAnalyses =
-              Map.union moduleAnalysis.referenceModuleDefinitions cache'.cachedAnalyses
-          }
+analyzePreparedModuleAll :: PreparedReferenceModule -> ReferenceModuleAnalysis
+analyzePreparedModuleAll preparedModule =
+  ReferenceModuleAnalysis
+    { referenceModuleDefinitions =
+        Map.fromList
+          [ let !analysis =
+                  analyzeDefinition
+                    preparedModule.preparedReferenceModuleName
+                    definitionName
+                    preparedModule.preparedReferenceModuleContext
+             in (definitionName, analysis)
+          | definitionName <- preparedModule.preparedReferenceDefinitionNames
+          ]
+    }
+
+analyzePreparedModule :: Set.Set GHC.Name -> PreparedReferenceModule -> [ReferenceMatch]
+analyzePreparedModule targetSet preparedModule =
+  matchingReferenceMatches targetSet (analyzePreparedModuleAll preparedModule)
 
 resolveModuleContext ::
   (MonadLore m) =>
@@ -600,43 +614,46 @@ analyzeDefinition ::
   GHC.Name ->
   ModuleContext ->
   Maybe DefinitionAnalysis
-analyzeDefinition definingModule target ModuleContext {parsedModule, typecheckedModule, desugaredModule} = do
-  DefinitionMatch {matchedDeclaration, matchedSignature} <-
-    findDefinitionMatch target (GHC.pm_parsed_source parsedModule)
-  let (tcg, _details) = GHC.tm_internals_ typecheckedModule
-      sourceImports =
-        [ SourceImport importId importDecl
-        | (importId, importDecl) <- zip [0 ..] (GHC.Tc.tcg_rn_imports tcg),
-          not (GHC.unLoc importDecl).ideclExt.ideclImplicit
-        ]
-      spans =
-        DeclarationSpans
-          { declarationSpan = GHC.getLocA matchedDeclaration,
-            signatureSpan = GHC.getLocA <$> matchedSignature
-          }
-      occurrences =
-        collectReferencedOccurrences
-          definingModule
-          spans
-          sourceImports
-          tcg
-          (GHC.pm_parsed_source parsedModule)
-          typecheckedModule
-      slice =
-        DefinitionSlice
-          { definitionModule = definingModule,
-            declarationSpans = [spans],
-            requiredImports = buildImports sourceImports occurrences
-          }
-      usedInstances =
-        collectUsedInstanceNames target spans desugaredModule
-  pure
-    DefinitionAnalysis
-      { analysisSlice = slice,
-        analysisReferences = collectReferencedNames target spans occurrences,
-        analysisUsedInstances = usedInstances,
-        analysisReferenceSpans = collectReferenceSpans occurrences
-      }
+analyzeDefinition definingModule target ModuleContext {parsedModule, typecheckedModule, desugaredModule} =
+  case findDefinitionMatch target (GHC.pm_parsed_source parsedModule) of
+    Nothing ->
+      Nothing
+    Just DefinitionMatch {matchedDeclaration, matchedSignature} ->
+      let (tcg, _details) = GHC.tm_internals_ typecheckedModule
+          sourceImports =
+            [ SourceImport importId importDecl
+            | (importId, importDecl) <- zip [0 ..] (GHC.Tc.tcg_rn_imports tcg),
+              not (GHC.unLoc importDecl).ideclExt.ideclImplicit
+            ]
+          spans =
+            DeclarationSpans
+              { declarationSpan = GHC.getLocA matchedDeclaration,
+                signatureSpan = GHC.getLocA <$> matchedSignature
+              }
+          occurrences =
+            collectReferencedOccurrences
+              definingModule
+              spans
+              sourceImports
+              tcg
+              (GHC.pm_parsed_source parsedModule)
+              typecheckedModule
+          slice =
+            DefinitionSlice
+              { definitionModule = definingModule,
+                declarationSpans = [spans],
+                requiredImports = buildImports sourceImports occurrences
+              }
+          analysisReferences = collectReferencedNames target spans occurrences
+          analysisReferenceSpans = collectReferenceSpans occurrences
+          usedInstances = collectUsedInstanceNames target spans desugaredModule
+       in Just
+            DefinitionAnalysis
+              { analysisSlice = slice,
+                analysisReferences,
+                analysisUsedInstances = usedInstances,
+                analysisReferenceSpans
+              }
 
 collectUsedInstanceNames ::
   GHC.Name ->
@@ -826,7 +843,10 @@ buildImports sourceImports occurrences =
             importModule = GHC.unLoc decl.ideclName,
             importPackageQualifier = pkgQualString decl.ideclPkgQual,
             importSource = decl.ideclSource == GHC.IsBoot,
-            importQualifiedStyle = decl.ideclQualified,
+            importQualifiedStyle = case decl.ideclQualified of
+              GHC.QualifiedPre -> QualifiedPre
+              GHC.QualifiedPost -> QualifiedPost
+              GHC.NotQualified -> NotQualified,
             importAlias = GHC.unLoc <$> decl.ideclAs,
             importOriginallyExplicit = decl.ideclImportList /= Nothing,
             importItems = normalizeImportItems (concatMap occurrenceItems refs)
@@ -1050,12 +1070,23 @@ dedupeNames :: [GHC.Name] -> [GHC.Name]
 dedupeNames =
   Map.elems . Map.fromList . map (\n -> (GHC.occNameString (GHC.nameOccName n), n))
 
+forceReferenceMatchesForRendering :: [ReferenceMatch] -> [ReferenceMatch]
+forceReferenceMatchesForRendering matches =
+  forceMatches matches `seq` matches
+  where
+    forceMatches [] = ()
+    forceMatches (referenceMatch : restMatches) =
+      referenceMatch.referenceSlice.definitionModule `deepseq`
+        referenceMatch.referenceSlice.declarationSpans `deepseq`
+          referenceMatch.matchedReferenceSpans `deepseq`
+            forceMatches restMatches
+
 dedupeSpans :: [GHC.SrcSpan] -> [GHC.SrcSpan]
 dedupeSpans =
   nubOrdOn show
 
-isQualifiedImport :: GHC.ImportDeclQualifiedStyle -> Bool
-isQualifiedImport = (/= GHC.NotQualified)
+isQualifiedImport :: ImportQualifiedStyle -> Bool
+isQualifiedImport = (/= NotQualified)
 
 sortDeclarationSpans :: [DeclarationSpans] -> [DeclarationSpans]
 sortDeclarationSpans =
