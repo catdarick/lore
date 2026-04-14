@@ -62,7 +62,7 @@ findReferencesHandler FindReferencesArgs {symbol, skip} = do
         [] ->
           pure $ renderMissingResult loadResult symbol
         [resolvedRoot] -> do
-          references <- resolveReferenceMatchesForNames resolvedRoot.rootSymbolChain
+          references <- resolveReferenceMatchesForNames (filterRootChainByQuery symbol resolvedRoot.rootSymbolChain)
           renderedReferences <- renderReferenceDefinitions resolvedSkip references
           liftIO $ renderReferencesResult loadResult symbol renderedReferences
         ambiguousRoots ->
@@ -70,6 +70,19 @@ findReferencesHandler FindReferencesArgs {symbol, skip} = do
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
+
+filterRootChainByQuery :: Text -> [GHC.Name] -> [GHC.Name]
+filterRootChainByQuery queryText rootChain =
+  case matchingNames of
+    [] -> rootChain
+    _ -> matchingNames
+  where
+    targetOccName = queryOccName queryText
+    matchingNames =
+      filter ((== targetOccName) . renderOccName) rootChain
+
+    renderOccName =
+      T.pack . Plugins.getOccString
 
 data PaginatedReferenceMatches = PaginatedReferenceMatches
   { paginationInfo :: PaginatedDefinitionModules,
@@ -239,18 +252,18 @@ referenceContextRange declarationSpan declarationLineCount matchedSpan = do
   matchedRealSpan <- realSrcSpanFromSrcSpan matchedSpan
   if GHC.srcSpanFile declarationRealSpan /= GHC.srcSpanFile matchedRealSpan
     then Nothing
-    else do
+    else
       let declarationStart = GHC.srcSpanStartLine declarationRealSpan
           declarationEnd = GHC.srcSpanEndLine declarationRealSpan
           matchedStart = GHC.srcSpanStartLine matchedRealSpan
           matchedEnd = GHC.srcSpanEndLine matchedRealSpan
-      if matchedEnd < declarationStart || matchedStart > declarationEnd
-        then Nothing
-        else
-          Just
-            ( max 1 (matchedStart - declarationStart + 1 - 4),
-              min declarationLineCount (matchedEnd - declarationStart + 1 + 4)
-            )
+       in if matchedEnd < declarationStart || matchedStart > declarationEnd
+            then Nothing
+            else
+              Just
+                ( max 1 (matchedStart - declarationStart + 1 - 4),
+                  min declarationLineCount (matchedEnd - declarationStart + 1 + 4)
+                )
 
 firstDefinitionRange :: Int -> (Int, Int)
 firstDefinitionRange lineCount =

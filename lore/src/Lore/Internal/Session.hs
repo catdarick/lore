@@ -11,14 +11,12 @@ import qualified Control.Concurrent as GHC
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified GHC as GHC
 import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
-import qualified GHC.Plugins as GHC
-import Lore.Internal.Definition.Types (ReferenceModuleAnalysis, ReferenceOccurrenceIndex)
+import Lore.Internal.Definition.Types (MinimalCoreModuleFacts, ParsedModuleCache, ReferenceModuleAnalysis, ReferenceOccurrenceIndex, TypedModuleCache)
 import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
-import Lore.Internal.Ghc.DynFlags
-  ( ParallelWorkersCount (..),
-  )
+import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
 import Lore.Internal.Lookup.Types (ExternalPackagesSymbolsCache, ModSummaries, NameToInstancesIndex, SymbolsIndex)
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
 import Lore.Internal.Targets.Result (LoadTargetsResult)
@@ -38,6 +36,9 @@ data SessionContext = SessionContext
     nameToInstancesIndexCache :: MVar (Maybe NameToInstancesIndex),
     referenceOccurrenceIndexCache :: MVar (Maybe ReferenceOccurrenceIndex),
     referenceModuleAnalysisCache :: MVar (Map.Map GHC.Module (Maybe ReferenceModuleAnalysis)),
+    referenceTypedModuleCache :: MVar (Map.Map GHC.Module TypedModuleCache),
+    referenceMinimalCoreModuleFactsCache :: MVar (Map.Map GHC.Module MinimalCoreModuleFacts),
+    referenceParsedModuleCache :: MVar (Map.Map GHC.Module ParsedModuleCache),
     interpreterContextCache :: MVar (Maybe [GHC.ModuleName]),
     lastLoadTargetsResult :: MVar (Maybe LoadTargetsResult)
   }
@@ -72,6 +73,9 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
   nameToInstancesIndexCache <- GHC.newMVar Nothing
   referenceOccurrenceIndexCache <- GHC.newMVar Nothing
   referenceModuleAnalysisCache <- GHC.newMVar Map.empty
+  referenceTypedModuleCache <- GHC.newMVar Map.empty
+  referenceMinimalCoreModuleFactsCache <- GHC.newMVar Map.empty
+  referenceParsedModuleCache <- GHC.newMVar Map.empty
   interpreterContextCache <- GHC.newMVar Nothing
   lastLoadTargetsResult <- GHC.newMVar Nothing
   case eiPackageDbPaths of
@@ -93,6 +97,9 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
               nameToInstancesIndexCache,
               referenceOccurrenceIndexCache,
               referenceModuleAnalysisCache,
+              referenceTypedModuleCache,
+              referenceMinimalCoreModuleFactsCache,
+              referenceParsedModuleCache,
               interpreterContextCache,
               lastLoadTargetsResult
             }

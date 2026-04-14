@@ -129,6 +129,17 @@ spec =
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . symbolName) result
           `shouldSatisfy` any (isInfixOf ".+.")
 
+      it "survives two consecutive reloads before lookupRootSymbolInfo" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadTargets defaultLoadTargetsOptions
+            lookupRootSymbolInfo "Demo.Support.supportSeed"
+
+        length result `shouldBe` 1
+        fmap (GHC.moduleNameString . GHC.moduleName . definedIn) result
+          `shouldBe` ["Demo.Support"]
+
     describe "findSymbols" do
       it "supports module-qualified hints before filtering candidates" do
         result <-
@@ -180,6 +191,18 @@ spec =
         length result `shouldBe` 1
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . name) result
           `shouldSatisfy` any (isInfixOf ".+.")
+
+      it "survives two consecutive reloads before findSymbols" do
+        result <-
+          fixtureLore do
+            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadTargets defaultLoadTargetsOptions
+            findSymbols "supportValues"
+
+        length result `shouldBe` 1
+        all (== Symbol'Unexported) (fmap visibility result) `shouldBe` True
+        fmap (\symbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name)) result
+          `shouldBe` ["Demo.Support"]
 
     describe "listExportedSymbolsByModule" do
       it "lists exported symbols for the requested module and excludes unexported ones" do

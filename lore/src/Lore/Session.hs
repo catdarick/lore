@@ -14,6 +14,7 @@ import Control.Monad.Reader (ReaderT (runReaderT))
 import qualified GHC
 import qualified GHC.Paths as GHCPaths
 import qualified GHC.Utils.Exception as GHCException
+import Lore.Internal.Definition.Callbacks (installDefinitionCallbacks)
 import Lore.Internal.Ghc.DynFlags
   ( ParallelWorkersCount (..),
     modifySessionDynFlags,
@@ -63,3 +64,5 @@ runLore sessionConfig lore = do
         setGhcWorkDirs (ghcWorkDir sessionConfig)
           . setGhciLikeDynFlags (parallelWorkersLimit sessionConfig)
           . setPackageDbs (packageDbPaths sessionContext)
+      session <- GHC.getSession
+      GHC.setSession (installDefinitionCallbacks sessionContext session)

@@ -4,6 +4,16 @@
 module Lore.Internal.Definition.Types
   ( DefinitionSlice (..),
     DeclarationSpans (..),
+    MinimalTypedImport (..),
+    MinimalTypedOccurrence (..),
+    MinimalTypedModuleFacts (..),
+    ProcessedTypedDefinitionFacts (..),
+    TypedModuleCache (..),
+    MinimalCoreModuleFacts (..),
+    ParsedModuleCache (..),
+    ParsedModuleSummary (..),
+    ParsedDefinitionMatch (..),
+    ParsedOccurrenceSyntax (..),
     ImportQualifiedStyle (..),
     RequiredImport (..),
     RequiredImportItem (..),
@@ -37,6 +47,31 @@ data DeclarationSpans = DeclarationSpans
   deriving stock (Eq, Show, Generic)
   deriving anyclass (NFData)
 
+data ParsedOccurrenceSyntax = ParsedOccurrenceSyntax
+  { parsedSyntaxQualifier :: !(Maybe GHC.ModuleName)
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data ParsedDefinitionMatch = ParsedDefinitionMatch
+  { parsedDefinitionSpans :: !DeclarationSpans,
+    parsedOccurrenceSyntaxes :: ![(GHC.SrcSpan, ParsedOccurrenceSyntax)]
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data ParsedModuleSummary = ParsedModuleSummary
+  { parsedModuleOccurrenceNames :: !(Set.Set Text),
+    parsedModuleDefinitions :: ![ParsedDefinitionMatch]
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data ParsedModuleCache
+  = ParsedModuleRaw !GHC.ParsedSource
+  | ParsedModuleProcessed !ParsedModuleSummary
+  deriving stock (Generic)
+
 data ImportQualifiedStyle
   = QualifiedPre
   | QualifiedPost
@@ -61,6 +96,55 @@ data RequiredImportItem
   = ImportName GHC.Name
   | ImportParent GHC.Name [GHC.Name]
   deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data MinimalTypedImport = MinimalTypedImport
+  { typedImportId :: !Int,
+    typedImportModule :: !GHC.ModuleName,
+    typedImportPackageQualifier :: !(Maybe String),
+    typedImportSource :: !Bool,
+    typedImportQualifiedStyle :: !ImportQualifiedStyle,
+    typedImportAlias :: !(Maybe GHC.ModuleName),
+    typedImportOriginallyExplicit :: !Bool
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data MinimalTypedOccurrence = MinimalTypedOccurrence
+  { typedOccurrenceName :: !GHC.Name,
+    typedOccurrenceSpan :: !GHC.SrcSpan,
+    typedOccurrenceParent :: !(Maybe GHC.Name),
+    typedOccurrenceCandidates :: ![Int]
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data MinimalTypedModuleFacts = MinimalTypedModuleFacts
+  { typedDefinitionNames :: ![GHC.Name],
+    typedSourceImports :: ![MinimalTypedImport],
+    typedOccurrences :: ![MinimalTypedOccurrence]
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data ProcessedTypedDefinitionFacts = ProcessedTypedDefinitionFacts
+  { processedRequiredImports :: ![RequiredImport],
+    processedReferences :: ![GHC.Name],
+    processedReferenceSpans :: !(Map.Map GHC.Name [GHC.SrcSpan])
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data TypedModuleCache
+  = TypedModuleMinimalFacts !MinimalTypedModuleFacts
+  | TypedModuleProcessedData !(Map.Map GHC.Name ProcessedTypedDefinitionFacts)
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data MinimalCoreModuleFacts = MinimalCoreModuleFacts
+  { coreUsedInstancesByBinder :: !(Map.Map GHC.Name [GHC.Name])
+  }
+  deriving stock (Generic)
   deriving anyclass (NFData)
 
 data ReferenceMatch = ReferenceMatch

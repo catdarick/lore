@@ -1,13 +1,15 @@
 module Lore.Internal.Definition.Cache
   ( getReferenceOccurrenceIndex,
-    lookupReferenceModuleAnalysisCache,
     cacheReferenceModuleAnalysis,
+    filterReferenceCaches,
+    lookupReferenceModuleAnalysisCache,
     invalidateReferenceCaches,
   )
 where
 
 import Control.Monad.Reader (asks)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified GHC
 import Lore.Internal.Definition.Types (ReferenceModuleAnalysis, ReferenceOccurrenceIndex)
 import Lore.Internal.Session (SessionContext (..))
@@ -47,11 +49,41 @@ cacheReferenceModuleAnalysis homeModule moduleAnalysis = do
   modifyMVar cacheVar \cache ->
     pure (Map.insert homeModule moduleAnalysis cache, ())
 
-invalidateReferenceCaches :: (MonadLore m) => m ()
-invalidateReferenceCaches = do
-  occurrenceIndexCacheVar <- asks referenceOccurrenceIndexCache
+filterReferenceCaches ::
+  (MonadLore m) =>
+  Set.Set GHC.Module ->
+  m ()
+filterReferenceCaches loadedModules = do
+  occurrenceCacheVar <- asks referenceOccurrenceIndexCache
   analysisCacheVar <- asks referenceModuleAnalysisCache
-  modifyMVar occurrenceIndexCacheVar \_ ->
+  typedModuleCacheVar <- asks referenceTypedModuleCache
+  minimalCoreFactsCacheVar <- asks referenceMinimalCoreModuleFactsCache
+  parsedModuleCacheVar <- asks referenceParsedModuleCache
+  modifyMVar occurrenceCacheVar \_ ->
     pure (Nothing, ())
   modifyMVar analysisCacheVar \_ ->
+    pure (Map.empty, ())
+  modifyMVar typedModuleCacheVar \cache ->
+    pure (Map.restrictKeys cache loadedModules, ())
+  modifyMVar minimalCoreFactsCacheVar \cache ->
+    pure (Map.restrictKeys cache loadedModules, ())
+  modifyMVar parsedModuleCacheVar \cache ->
+    pure (Map.restrictKeys cache loadedModules, ())
+
+invalidateReferenceCaches :: (MonadLore m) => m ()
+invalidateReferenceCaches = do
+  occurrenceCacheVar <- asks referenceOccurrenceIndexCache
+  analysisCacheVar <- asks referenceModuleAnalysisCache
+  typedModuleCacheVar <- asks referenceTypedModuleCache
+  minimalCoreFactsCacheVar <- asks referenceMinimalCoreModuleFactsCache
+  parsedModuleCacheVar <- asks referenceParsedModuleCache
+  modifyMVar occurrenceCacheVar \_ ->
+    pure (Nothing, ())
+  modifyMVar analysisCacheVar \_ ->
+    pure (Map.empty, ())
+  modifyMVar typedModuleCacheVar \_ ->
+    pure (Map.empty, ())
+  modifyMVar minimalCoreFactsCacheVar \_ ->
+    pure (Map.empty, ())
+  modifyMVar parsedModuleCacheVar \_ ->
     pure (Map.empty, ())

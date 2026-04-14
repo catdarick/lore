@@ -160,6 +160,24 @@ spec = do
         `shouldBe` [ "import qualified Data.Map.Strict as Map"
                    ]
 
+    it "survives two consecutive reloads before resolving a definition slice" do
+      slice <-
+        fixtureLore do
+          loadTargets defaultLoadTargetsOptions
+          loadTargets defaultLoadTargetsOptions
+          exportedSymbols <- findSymbols "lookupOrZero"
+          targetName <- maybe (error "symbol not found: lookupOrZero") pure (findFixtureSymbol "lookupOrZero" exportedSymbols)
+          maybe (error "definition not found: lookupOrZero") pure =<< resolveDefinitionSlice targetName
+
+      shouldHaveSingleDefinitionText
+        slice
+        "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
+        (Just "lookupOrZero :: [(String, Int)] -> String -> Int")
+      fmap renderImport slice.requiredImports
+        `shouldBe` [ "import qualified Data.Map.Strict as Map",
+                     "import Data.Maybe (fromMaybe)"
+                   ]
+
     it "resolves a shared top-level pattern binding for the first bound name" do
       slice <- fixtureDefinition "pairLeft"
 
@@ -329,6 +347,31 @@ spec = do
                                             []
                                           )
                                         ]
+
+    it "survives two consecutive reloads before resolving a definition closure" do
+      closure <-
+        fixtureLore do
+          loadTargets defaultLoadTargetsOptions
+          loadTargets defaultLoadTargetsOptions
+          exportedSymbols <- findSymbols "crossModuleRecord"
+          targetName <- maybe (error "symbol not found: crossModuleRecord") pure (findFixtureSymbol "crossModuleRecord" exportedSymbols)
+          resolveDefinitionClosure 2 targetName
+
+      closure
+        `shouldHaveModuleDefinitions` [ ( "Demo",
+                                          [ "crossModuleRecord :: Int -> Support.SupportRecord\ncrossModuleRecord value =\n  Support.mkSupportRecord (Support.supportStep value)"
+                                          ],
+                                          ["import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)"]
+                                        ),
+                                        ( "Demo.Support",
+                                          [ "data SupportRecord = SupportRecord\n  { supportValues :: Map.Map String Int\n  }",
+                                            "mkSupportRecord :: Int -> SupportRecord\nmkSupportRecord value =\n  SupportRecord\n    { supportValues = Map.singleton \"value\" value\n    }",
+                                            "supportStep :: Int -> Int\nsupportStep value = value + supportSeed",
+                                            "supportSeed :: Int\nsupportSeed = 5"
+                                          ],
+                                          ["import qualified Data.Map.Strict as Map"]
+                                        )
+                                      ]
 
   describe "resolveReferenceDefinitions" do
     it "finds top-level definitions and instance definitions that reference the target" do
@@ -693,7 +736,5 @@ preciseReferenceMatchesFixtureModuleSource =
 
 matchedSpanStartLine :: GHC.SrcSpan -> Maybe Int
 matchedSpanStartLine = \case
-  GHC.RealSrcSpan realSrcSpan _ ->
-    Just (GHC.srcSpanStartLine realSrcSpan)
-  GHC.UnhelpfulSpan {} ->
-    Nothing
+  GHC.RealSrcSpan realSpan _ -> Just (GHC.srcSpanStartLine realSpan)
+  GHC.UnhelpfulSpan {} -> Nothing

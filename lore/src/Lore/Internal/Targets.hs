@@ -32,7 +32,7 @@ import GHC.Utils.Monad (mapMaybeM)
 import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor, rollbackAutoRefactorEdits)
 import Lore.Internal.AutoRefactor.Issue (classifyAutoRefactorIssues)
-import Lore.Internal.Definition.Cache (invalidateReferenceCaches)
+import Lore.Internal.Definition.Cache (filterReferenceCaches)
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
 import Lore.Internal.Interpreter (invalidateInterpreterContext, refreshInterpreterContext)
 import Lore.Internal.Lookup.ModSummaries (getModSummaries, invalidateModSummaries)
@@ -124,7 +124,6 @@ loadTargets options = do
   invalidateHomeSymbolsMapCache
   invalidateModSummaries
   invalidateNameToInstancesIndex
-  invalidateReferenceCaches
   modifySessionDynFlagsM
     ( setGhcOptionsAndExtensions targetsPlan.commonLanguage (Set.toList $ commonGhcOptions targetsPlan) (Set.toList $ commonExtensions targetsPlan)
         . setGhcSourceDirs (Set.toList sourceDirs)
@@ -220,7 +219,6 @@ loadTargets' options targetsPlan =
                       Log.info "Auto-refact applied import fixes. Retrying target load."
                       invalidateHomeSymbolsMapCache
                       invalidateModSummaries
-                      invalidateReferenceCaches
                       invalidateNameToInstancesIndex
                       go
                         (attemptNo + 1)
@@ -261,7 +259,6 @@ rollbackUnresolvedAutoRefact targetsPlan rollbackState failedAttempt
       rollbackAutoRefactorEdits rollbackState
       invalidateHomeSymbolsMapCache
       invalidateModSummaries
-      invalidateReferenceCaches
       invalidateNameToInstancesIndex
       loadTargetsOnce targetsPlan
 
@@ -278,6 +275,8 @@ loadTargetsOnce targetsPlan = do
   Log.debug "Loading targets with GHC..."
   (diagnostics, r) <- withDiagnosticsCapturing do
     GHC.load' (Just ifaceCache) GHC.LoadAllTargets Nothing patchedModGraph
+  loadedModules <- collectLoadedModules patchedModGraph
+  filterReferenceCaches loadedModules
   Log.debug $ "GHC load completed with the following diagnostics:\n" <> intercalate "\n" (map show diagnostics)
   pure
     LoadAttempt
@@ -286,6 +285,18 @@ loadTargetsOnce targetsPlan = do
         loadAttemptAutoRefactFiles = Set.empty,
         loadAttemptAutoRefactSummaryByFile = []
       }
+
+collectLoadedModules :: (MonadLore m) => GHC.ModuleGraph -> m (Set.Set GHC.Module)
+collectLoadedModules moduleGraph = do
+  loaded <- mapMaybeM keepLoadedModule [GHC.ms_mod ms | ms <- GHC.mgModSummaries moduleGraph]
+  pure (Set.fromList loaded)
+  where
+    keepLoadedModule mod' = do
+      maybeModuleInfo <- GHC.getModuleInfo mod'
+      pure $
+        case maybeModuleInfo of
+          Just _ -> Just mod'
+          Nothing -> Nothing
 
 countLoadedModules :: (MonadLore m) => Set.Set GHC.ModuleName -> m Int
 countLoadedModules targetModules = do

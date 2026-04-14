@@ -332,10 +332,18 @@ resolveRootSymbolWithChain :: (MonadLore m) => SymbolsMap -> Symbol -> m Resolve
 resolveRootSymbolWithChain symbolsMap symbol = do
   rootChain <- resolveRootNameChain symbol.name
   let rootName = lastOr symbol.name rootChain
-      rootSymbol =
-        case SymbolsMap.lookupSymbolByNameInMap rootName symbolsMap of
-          Just foundRootSymbol -> foundRootSymbol
-          Nothing -> symbol {name = rootName}
+  maybeRootInfo <- getSymbolInfo (symbol {name = rootName})
+  let rootSymbol =
+        case maybeRootInfo of
+          Just rootInfo ->
+            Symbol
+              { name = rootInfo.symbolName,
+                visibility = Symbol'ExportedFrom rootInfo.exportedFrom
+              }
+          Nothing ->
+            case SymbolsMap.lookupSymbolByNameInMap rootName symbolsMap of
+              Just foundRootSymbol -> foundRootSymbol
+              Nothing -> symbol {name = rootName}
   pure
     ResolvedRootSymbol
       { resolvedRootSymbol = rootSymbol,
@@ -413,10 +421,13 @@ resolveLookupInstancesQuery resolveRoot queryText = do
     )
 
 findResolvedSymbolNames :: (MonadLore m) => Bool -> Text -> m [GHC.Name]
-findResolvedSymbolNames resolveRoot needle = do
-  symbolsMap <- SymbolsMap.getSymbolsMap
-  let symbols = findMatchingSymbols needle symbolsMap
-  deduplicateNames <$> mapM (resolveSymbolName resolveRoot) symbols
+findResolvedSymbolNames resolveRoot needle
+  | resolveRoot =
+      deduplicateNames . concatMap (.rootSymbolChain) <$> getRootSymbolInfo' True needle
+  | otherwise = do
+      symbolsMap <- SymbolsMap.getSymbolsMap
+      let symbols = findMatchingSymbols needle symbolsMap
+      deduplicateNames <$> mapM (resolveSymbolName False) symbols
 
 findMatchingSymbols :: Text -> SymbolsMap -> [Symbol]
 findMatchingSymbols queryText symbolsMap =
