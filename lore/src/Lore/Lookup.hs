@@ -359,13 +359,21 @@ mergeResolvedRoots =
       [resolvedRoot]
     mergeResolvedRoot resolvedRoot (existingRoot : rest)
       | resolvedRootKey existingRoot == resolvedRootKey resolvedRoot =
-          existingRoot
-            { resolvedRootChain =
-                deduplicateNames (existingRoot.resolvedRootChain <> resolvedRoot.resolvedRootChain)
-            }
+          preferResolvedRoot
+            existingRoot
+            resolvedRoot
+              { resolvedRootChain =
+                  deduplicateNames (existingRoot.resolvedRootChain <> resolvedRoot.resolvedRootChain)
+              }
             : rest
       | otherwise =
           existingRoot : mergeResolvedRoot resolvedRoot rest
+
+    preferResolvedRoot left right =
+      case compare (resolvedRootPriority left) (resolvedRootPriority right) of
+        LT -> right
+        EQ -> left
+        GT -> left
 
 resolvedRootKey :: ResolvedRootSymbol -> (Maybe GHC.Module, String)
 resolvedRootKey resolvedRoot =
@@ -376,6 +384,16 @@ resolvedRootKey resolvedRoot =
 renderResolvedRootKey :: (Maybe GHC.Module, String) -> String
 renderResolvedRootKey (maybeModule, occName) =
   maybe "<no-module>" (GHC.moduleNameString . GHC.moduleName) maybeModule <> "." <> occName
+
+resolvedRootPriority :: ResolvedRootSymbol -> Int
+resolvedRootPriority resolvedRoot =
+  let name = resolvedRoot.resolvedRootSymbol.name
+   in if GHC.isTyConName name
+        then 2
+        else
+          if GHC.isDataConName name
+            then 1
+            else 0
 
 data LookupInstancesQuery = LookupInstancesQuery
   { lookupInstancesQueryText :: Text,

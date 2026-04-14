@@ -76,7 +76,7 @@ data ImportQualifiedStyle
   = QualifiedPre
   | QualifiedPost
   | NotQualified
-  deriving stock (Eq, Data, Generic)
+  deriving stock (Eq, Show, Data, Generic)
   deriving anyclass (NFData)
 
 data RequiredImport = RequiredImport

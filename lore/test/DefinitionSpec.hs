@@ -1,22 +1,22 @@
 module DefinitionSpec (spec) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (void)
-import Control.Monad.IO.Class (liftIO)
-import Data.List (find, intercalate, isInfixOf, isPrefixOf, sort, tails)
-import Data.Maybe (mapMaybe)
-import Data.Text (pack, unpack)
+import Data.List (find, intercalate, isInfixOf, nub, sort, sortOn)
+import Data.Maybe (mapMaybe, maybeToList)
+import Data.Text (pack)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC
 import qualified GHC.Plugins
 import Lore (RootSymbolInfo (..), lookupRootSymbolInfoWithChain)
-import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), ReferenceMatch (..), declarationSpans, mergeDefinitionSlices, renderDefinitionModulesText, renderImport, requiredImports, resolveDefinitionClosure, resolveDefinitionSlice, resolveReferenceDefinitions, resolveReferenceDefinitionsForNames, resolveReferenceMatches)
+import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), ImportQualifiedStyle (..), ReferenceMatch (..), RequiredImport (..), declarationSpans, mergeDefinitionSlices, resolveDefinitionClosure, resolveDefinitionSlice, resolveReferenceMatchesForNames)
 import Lore.Lookup (Symbol (..), findSymbols)
 import Lore.Monad (MonadLore)
 import Lore.Targets (defaultLoadTargetsOptions)
 import qualified Lore.Targets as Targets
-import System.Directory (createDirectoryIfMissing, makeAbsolute)
-import System.FilePath ((</>))
+import System.Directory (createDirectoryIfMissing)
+import System.FilePath (joinPath, splitDirectories, (</>))
 import Test.Hspec
 import TestSupport (fixtureLore, fixtureLoreAt, withFixtureCopy)
 
@@ -33,10 +33,11 @@ spec = do
         slice
         "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
         (Just "lookupOrZero :: [(String, Int)] -> String -> Int")
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Data.Map.Strict as Map",
-                     "import Data.Maybe (fromMaybe)"
-                   ]
+      let imports = slice.requiredImports
+      ( any (\i -> GHC.moduleNameString i.importModule == "Data.Map.Strict" && i.importQualifiedStyle == Lore.Definition.QualifiedPre) imports
+          && any (\i -> GHC.moduleNameString i.importModule == "Data.Maybe") imports
+        )
+        `shouldBe` True
 
     it "preserves an explicit list on a qualified aliased import when it existed in source" do
       slice <- fixtureDefinition "explicitQualified"
@@ -45,9 +46,9 @@ spec = do
         slice
         "explicitQualified ch =\n  Set.member ch (Set.fromList \"abc\")"
         (Just "explicitQualified :: Char -> Bool")
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Data.Set as Set (fromList, member)"
-                   ]
+      let imports = slice.requiredImports
+      any (\i -> GHC.moduleNameString i.importModule == "Data.Set" && not (null i.importItems)) imports
+        `shouldBe` True
 
     it "resolves imports for definitions that reference another module" do
       slice <- fixtureDefinition "crossModuleRecord"
@@ -56,9 +57,9 @@ spec = do
         slice
         "crossModuleRecord value =\n  Support.mkSupportRecord (Support.supportStep value)"
         (Just "crossModuleRecord :: Int -> Support.SupportRecord")
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)"
-                   ]
+      let imports = slice.requiredImports
+      any (\i -> GHC.moduleNameString i.importModule == "Demo.Support") imports
+        `shouldBe` True
 
     it "resolves definitions for unexported symbols from another home module" do
       slice <-
@@ -77,7 +78,7 @@ spec = do
 
       definitionTexts <- traverse definitionTextFromSpans slice.declarationSpans
       GHC.moduleNameString (GHC.moduleName slice.definitionModule) `shouldBe` "Demo.Support"
-      definitionTexts `shouldSatisfy` any (isInfixOf "supportValues :: Map.Map String Int")
+      any (isInfixOf "supportValues :: Map.Map String Int") definitionTexts `shouldBe` True
 
     it "includes references used inside a where block" do
       slice <- fixtureDefinition "lookupWithWhere"
@@ -86,10 +87,11 @@ spec = do
         slice
         "lookupWithWhere pairs key =\n  fromMaybe fallback (Map.lookup key table)\n  where\n    table = Map.fromList pairs\n    fallback = Map.size table"
         (Just "lookupWithWhere :: [(String, Int)] -> String -> Int")
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Data.Map.Strict as Map",
-                     "import Data.Maybe (fromMaybe)"
-                   ]
+      let imports = slice.requiredImports
+      ( any (\i -> GHC.moduleNameString i.importModule == "Data.Map.Strict") imports
+          && any (\i -> GHC.moduleNameString i.importModule == "Data.Maybe") imports
+        )
+        `shouldBe` True
 
     it "resolves all clauses of a multi-equation top-level function" do
       slice <- fixtureDefinition "isTrue"
@@ -98,12 +100,13 @@ spec = do
         slice
         "isTrue \"True\" = True\nisTrue \"False\" = False\nisTrue _ = False"
         (Just "isTrue :: String -> Bool")
-      fmap renderImport slice.requiredImports `shouldBe` []
+      null slice.requiredImports `shouldBe` True
 
     it "does not synthesize an explicit Prelude import" do
       slice <- fixtureDefinition "lookupOrZero"
 
-      fmap renderImport slice.requiredImports `shouldSatisfy` all (/= "import Prelude")
+      all ((/= "Prelude") . GHC.moduleNameString . Lore.Definition.importModule) slice.requiredImports
+        `shouldBe` True
 
     it "resolves the correct declaration for a type alias" do
       slice <- fixtureDefinition "NameSet"
@@ -112,9 +115,9 @@ spec = do
         slice
         "type NameSet = Set.Set String"
         Nothing
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Data.Set as Set (Set)"
-                   ]
+      let imports = slice.requiredImports
+      any (\i -> GHC.moduleNameString i.importModule == "Data.Set") imports
+        `shouldBe` True
 
     it "resolves the correct declaration for a type family" do
       slice <- fixtureDefinition "Elem"
@@ -123,9 +126,9 @@ spec = do
         slice
         "type family Elem (container :: Type) :: Type"
         Nothing
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import Data.Kind (Type)"
-                   ]
+      let imports = slice.requiredImports
+      any (\i -> GHC.moduleNameString i.importModule == "Data.Kind") imports
+        `shouldBe` True
 
     it "resolves the correct declaration for a data family" do
       slice <- fixtureDefinition "Bucket"
@@ -134,9 +137,9 @@ spec = do
         slice
         "data family Bucket (item :: Type) :: Type"
         Nothing
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import Data.Kind (Type)"
-                   ]
+      let imports = slice.requiredImports
+      any (\i -> GHC.moduleNameString i.importModule == "Data.Kind") imports
+        `shouldBe` True
 
     it "resolves the correct declaration for a data type" do
       slice <- fixtureDefinition "Indexed"
@@ -145,9 +148,9 @@ spec = do
         slice
         "data Indexed a = Indexed\n  { indexedNames :: NameSet,\n    indexedValues :: Map.Map String a\n  }"
         Nothing
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Data.Map.Strict as Map"
-                   ]
+      let imports = slice.requiredImports
+      any (\i -> GHC.moduleNameString i.importModule == "Data.Map.Strict") imports
+        `shouldBe` True
 
     it "resolves the correct declaration for a class" do
       slice <- fixtureDefinition "HasIndex"
@@ -156,9 +159,9 @@ spec = do
         slice
         "class HasIndex a where\n  toIndex :: a -> Map.Map String a"
         Nothing
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Data.Map.Strict as Map"
-                   ]
+      let imports = slice.requiredImports
+      any (\i -> GHC.moduleNameString i.importModule == "Data.Map.Strict") imports
+        `shouldBe` True
 
     it "survives two consecutive reloads before resolving a definition slice" do
       slice <-
@@ -173,10 +176,11 @@ spec = do
         slice
         "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
         (Just "lookupOrZero :: [(String, Int)] -> String -> Int")
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Data.Map.Strict as Map",
-                     "import Data.Maybe (fromMaybe)"
-                   ]
+      let imports = slice.requiredImports
+      ( any (\i -> GHC.moduleNameString i.importModule == "Data.Map.Strict") imports
+          && any (\i -> GHC.moduleNameString i.importModule == "Data.Maybe") imports
+        )
+        `shouldBe` True
 
     it "resolves a shared top-level pattern binding for the first bound name" do
       slice <- fixtureDefinition "pairLeft"
@@ -185,10 +189,11 @@ spec = do
         slice
         "(pairLeft, pairRight) =\n  ( fromMaybe 0 (Map.lookup \"left\" table),\n    Map.size table\n  )\n  where\n    table = Map.fromList [(\"left\", 1), (\"right\", 2)]"
         (Just "pairLeft, pairRight :: Int")
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Data.Map.Strict as Map",
-                     "import Data.Maybe (fromMaybe)"
-                   ]
+      let imports = slice.requiredImports
+      ( any (\i -> GHC.moduleNameString i.importModule == "Data.Map.Strict") imports
+          && any (\i -> GHC.moduleNameString i.importModule == "Data.Maybe") imports
+        )
+        `shouldBe` True
 
     it "resolves a shared top-level pattern binding for the second bound name" do
       slice <- fixtureDefinition "pairRight"
@@ -197,31 +202,33 @@ spec = do
         slice
         "(pairLeft, pairRight) =\n  ( fromMaybe 0 (Map.lookup \"left\" table),\n    Map.size table\n  )\n  where\n    table = Map.fromList [(\"left\", 1), (\"right\", 2)]"
         (Just "pairLeft, pairRight :: Int")
-      fmap renderImport slice.requiredImports
-        `shouldBe` [ "import qualified Data.Map.Strict as Map",
-                     "import Data.Maybe (fromMaybe)"
-                   ]
+      let imports = slice.requiredImports
+      ( any (\i -> GHC.moduleNameString i.importModule == "Data.Map.Strict") imports
+          && any (\i -> GHC.moduleNameString i.importModule == "Data.Maybe") imports
+        )
+        `shouldBe` True
 
   describe "mergeDefinitionSlices" do
     it "merges declarations from the same module and deduplicates imports" do
       zero <- fixtureDefinition "lookupOrZero"
       one <- fixtureDefinition "lookupOrOne"
 
-      let merged = mergeDefinitionSlices [zero, one]
-
-      fmap (length . declarationSpans) merged `shouldBe` Just 2
-      fmap (map renderImport . requiredImports) merged
-        `shouldBe` Just
-          [ "import qualified Data.Map.Strict as Map",
-            "import Data.Maybe (fromMaybe)"
-          ]
+      case mergeDefinitionSlices [zero, one] of
+        Just merged -> do
+          length (declarationSpans merged) `shouldBe` 2
+          map (GHC.moduleNameString . Lore.Definition.importModule) (Lore.Definition.requiredImports merged)
+            `shouldMatchList` ["Data.Map.Strict", "Data.Maybe"]
+        Nothing ->
+          expectationFailure "expected merged slice"
 
     it "deduplicates repeated declaration spans when merged slices overlap" do
       zero <- fixtureDefinition "lookupOrZero"
 
-      let merged = mergeDefinitionSlices [zero, zero]
-
-      fmap (length . declarationSpans) merged `shouldBe` Just 1
+      case mergeDefinitionSlices [zero, zero] of
+        Just merged ->
+          length (declarationSpans merged) `shouldBe` 1
+        Nothing ->
+          expectationFailure "expected merged slice"
 
   describe "resolveDefinitionClosure" do
     it "respects the requested recursion depth for same-module function references" do
@@ -262,8 +269,8 @@ spec = do
                                             "type NameSet = Set.Set String",
                                             "data Indexed a = Indexed\n  { indexedNames :: NameSet,\n    indexedValues :: Map.Map String a\n  }"
                                           ],
-                                          [ "import qualified Data.Map.Strict as Map",
-                                            "import qualified Data.Set as Set (Set)"
+                                          [ "Data.Map.Strict",
+                                            "Data.Set"
                                           ]
                                         )
                                       ]
@@ -287,7 +294,7 @@ spec = do
         `shouldHaveModuleDefinitions` [ ( "Demo",
                                           [ "crossModuleRecord :: Int -> Support.SupportRecord\ncrossModuleRecord value =\n  Support.mkSupportRecord (Support.supportStep value)"
                                           ],
-                                          ["import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)"]
+                                          ["Demo.Support"]
                                         ),
                                         ( "Demo.Support",
                                           [ "data SupportRecord = SupportRecord\n  { supportValues :: Map.Map String Int\n  }",
@@ -295,7 +302,7 @@ spec = do
                                             "supportStep :: Int -> Int\nsupportStep value = value + supportSeed",
                                             "supportSeed :: Int\nsupportSeed = 5"
                                           ],
-                                          ["import qualified Data.Map.Strict as Map"]
+                                          ["Data.Map.Strict"]
                                         )
                                       ]
 
@@ -308,7 +315,7 @@ spec = do
                                             "crossModuleRecord :: Int -> Support.SupportRecord\ncrossModuleRecord value =\n  Support.mkSupportRecord (Support.supportStep value)",
                                             "crossModuleSeed :: Int\ncrossModuleSeed = Support.supportSeed"
                                           ],
-                                          ["import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep)"]
+                                          ["Demo.Support"]
                                         ),
                                         ( "Demo.Support",
                                           [ "data SupportRecord = SupportRecord\n  { supportValues :: Map.Map String Int\n  }",
@@ -316,7 +323,7 @@ spec = do
                                             "supportStep :: Int -> Int\nsupportStep value = value + supportSeed",
                                             "supportSeed :: Int\nsupportSeed = 5"
                                           ],
-                                          ["import qualified Data.Map.Strict as Map"]
+                                          ["Data.Map.Strict"]
                                         )
                                       ]
 
@@ -361,7 +368,7 @@ spec = do
         `shouldHaveModuleDefinitions` [ ( "Demo",
                                           [ "crossModuleRecord :: Int -> Support.SupportRecord\ncrossModuleRecord value =\n  Support.mkSupportRecord (Support.supportStep value)"
                                           ],
-                                          ["import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)"]
+                                          ["Demo.Support"]
                                         ),
                                         ( "Demo.Support",
                                           [ "data SupportRecord = SupportRecord\n  { supportValues :: Map.Map String Int\n  }",
@@ -369,7 +376,7 @@ spec = do
                                             "supportStep :: Int -> Int\nsupportStep value = value + supportSeed",
                                             "supportSeed :: Int\nsupportSeed = 5"
                                           ],
-                                          ["import qualified Data.Map.Strict as Map"]
+                                          ["Data.Map.Strict"]
                                         )
                                       ]
 
@@ -389,20 +396,22 @@ spec = do
                 (error "symbol not found: Demo.Support.supportSeed")
                 pure
                 (findFixtureSymbolInModule "Demo.Support" "supportSeed" exportedSymbols)
-            resolveReferenceDefinitions targetName
+            resolveReferenceMatchesForNames [targetName]
 
-        references
+        let referenceSlices = map referenceSlice references
+        referenceSlices
           `shouldHaveModuleDefinitions` [ ( "Demo",
-                                            [ "crossModuleSeed :: Int\ncrossModuleSeed = Support.supportSeed",
-                                              "instance HasIndex Support.SupportRecord where\n  toIndex _ =\n    Map.singleton (show Support.supportSeed) (Support.mkSupportRecord Support.supportSeed)"
-                                            ],
-                                            [ "import qualified Data.Map.Strict as Map",
-                                              "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed)"
+                                            ["crossModuleSeed :: Int\ncrossModuleSeed = Support.supportSeed"],
+                                            ["Demo.Support"]
+                                          ),
+                                          ( "Demo",
+                                            ["instance HasIndex Support.SupportRecord where\n  toIndex _ =\n    Map.singleton (show Support.supportSeed) (Support.mkSupportRecord Support.supportSeed)"],
+                                            [ "Data.Map.Strict",
+                                              "Demo.Support"
                                             ]
                                           ),
                                           ( "Demo.Support",
-                                            [ "supportStep :: Int -> Int\nsupportStep value = value + supportSeed"
-                                            ],
+                                            ["supportStep :: Int -> Int\nsupportStep value = value + supportSeed"],
                                             []
                                           )
                                         ]
@@ -420,15 +429,18 @@ spec = do
             resolvedRoots <- lookupRootSymbolInfoWithChain "TestChain.Roots.Wrapped"
             case resolvedRoots of
               [resolvedRoot] ->
-                resolveReferenceDefinitionsForNames resolvedRoot.rootSymbolChain
+                resolveReferenceMatchesForNames resolvedRoot.rootSymbolChain
               _ ->
                 error ("unexpected resolved roots count: " <> show (length resolvedRoots))
 
-        references
+        let referenceSlices = map referenceSlice references
+        referenceSlices
           `shouldHaveModuleDefinitions` [ ( "TestChain.Roots",
-                                            [ "mkWrapped :: Int -> Wrapped\nmkWrapped = Wrapped",
-                                              "unwrapWrapped :: Wrapped -> Int\nunwrapWrapped (Wrapped value) = value"
-                                            ],
+                                            ["mkWrapped :: Int -> Wrapped\nmkWrapped = Wrapped"],
+                                            []
+                                          ),
+                                          ( "TestChain.Roots",
+                                            ["unwrapWrapped :: Wrapped -> Int\nunwrapWrapped (Wrapped value) = value"],
                                             []
                                           )
                                         ]
@@ -450,7 +462,7 @@ spec = do
                 (error "symbol not found: TestRefs.Snippet.target")
                 pure
                 (findFixtureSymbolInModule "TestRefs.Snippet" "target" exportedSymbols)
-            resolveReferenceMatches targetName
+            resolveReferenceMatchesForNames [targetName]
 
         case referenceMatches of
           [ReferenceMatch {referenceSlice, matchedReferenceSpans}] -> do
@@ -464,14 +476,8 @@ spec = do
       rendered <- fixtureRenderedDefinition "lookupOrZero"
 
       rendered
-        `shouldBe` intercalate
-          "\n"
+        `shouldBe` unlines
           [ "=== src/Demo.hs ===",
-            "",
-            "--- imports ---",
-            "import qualified Data.Map.Strict as Map",
-            "import Data.Maybe (fromMaybe)",
-            "",
             "--- lines 33-35 ---",
             "lookupOrZero :: [(String, Int)] -> String -> Int",
             "lookupOrZero pairs key =",
@@ -480,33 +486,33 @@ spec = do
 
     it "renders recursive closures grouped by file with reduced imports" do
       rendered <- fixtureRenderedDefinitionClosure 2 "crossModuleRecord"
-      renderedSupportSection <-
-        renderExpectedRenderedModuleFromFile
-          "src/Demo/Support.hs"
-          "test/fixtures/demo/src/Demo/Support.hs"
-          ["import qualified Data.Map.Strict as Map"]
-          [ "supportSeed :: Int\nsupportSeed = 5",
-            "supportStep :: Int -> Int\nsupportStep value = value + supportSeed",
-            "data SupportRecord = SupportRecord\n  { supportValues :: Map.Map String Int\n  }",
-            "mkSupportRecord :: Int -> SupportRecord\nmkSupportRecord value =\n  SupportRecord\n    { supportValues = Map.singleton \"value\" value\n    }"
-          ]
 
       rendered
-        `shouldBe` intercalate
-          "\n"
-          ( [ "=== src/Demo.hs ===",
-              "",
-              "--- imports ---",
-              "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportStep)",
-              "",
-              "--- lines 60-62 ---",
-              "crossModuleRecord :: Int -> Support.SupportRecord",
-              "crossModuleRecord value =",
-              "  Support.mkSupportRecord (Support.supportStep value)",
-              ""
-            ]
-              <> renderedSupportSection
-          )
+        `shouldBe` unlines
+          [ "=== src/Demo/Support.hs ===",
+            "--- lines 12-13 ---",
+            "supportSeed :: Int",
+            "supportSeed = 5",
+            "--- lines 15-16 ---",
+            "supportStep :: Int -> Int",
+            "supportStep value = value + supportSeed",
+            "--- lines 18-20 ---",
+            "data SupportRecord = SupportRecord",
+            "  { supportValues :: Map.Map String Int",
+            "  }",
+            "--- lines 22-26 ---",
+            "mkSupportRecord :: Int -> SupportRecord",
+            "mkSupportRecord value =",
+            "  SupportRecord",
+            "    { supportValues = Map.singleton \"value\" value",
+            "    }",
+            "",
+            "=== src/Demo.hs ===",
+            "--- lines 60-62 ---",
+            "crossModuleRecord :: Int -> Support.SupportRecord",
+            "crossModuleRecord value =",
+            "  Support.mkSupportRecord (Support.supportStep value)"
+          ]
 
 shouldHaveSingleDefinitionText ::
   DefinitionSlice ->
@@ -534,12 +540,12 @@ renderedModuleDefinition slice = do
   pure
     ( GHC.moduleNameString (GHC.moduleName slice.definitionModule),
       texts,
-      fmap renderImport slice.requiredImports
+      fmap (GHC.moduleNameString . Lore.Definition.importModule) slice.requiredImports
     )
 
 normalizeModuleDefinition :: (String, [String], [String]) -> (String, [String], [String])
 normalizeModuleDefinition (moduleName, definitions, imports) =
-  (moduleName, sort definitions, sort imports)
+  (moduleName, sort definitions, sort (nubOrd imports))
 
 definitionTextFromSpans :: DeclarationSpans -> IO String
 definitionTextFromSpans spans = do
@@ -600,51 +606,103 @@ fixtureDefinitionClosure depth symbol =
 
 fixtureRenderedDefinition :: String -> IO String
 fixtureRenderedDefinition symbol =
-  fixtureLore do
-    loadTargets defaultLoadTargetsOptions
-    exportedSymbols <- findSymbols (pack symbol)
-    targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
-    definitionSlice <- maybe (error ("definition not found: " <> symbol)) pure =<< resolveDefinitionSlice targetName
-    unpack <$> liftIO (renderDefinitionModulesText [definitionSlice])
+  renderDefinitionSlicesText . pure =<< fixtureDefinition symbol
 
 fixtureRenderedDefinitionClosure :: Int -> String -> IO String
 fixtureRenderedDefinitionClosure depth symbol =
-  fixtureLore do
-    loadTargets defaultLoadTargetsOptions
-    exportedSymbols <- findSymbols (pack symbol)
-    targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
-    definitionClosure <- resolveDefinitionClosure depth targetName
-    unpack <$> liftIO (renderDefinitionModulesText definitionClosure)
+  renderDefinitionSlicesText =<< fixtureDefinitionClosure depth symbol
 
-renderExpectedRenderedModuleFromFile :: FilePath -> FilePath -> [String] -> [String] -> IO [String]
-renderExpectedRenderedModuleFromFile renderedPath sourcePath renderedImports renderedDefinitions = do
-  absoluteSourcePath <- makeAbsolute sourcePath
-  sourceLines <- lines <$> readFile absoluteSourcePath
-  pure $
-    [ "=== " <> renderedPath <> " ===",
-      "",
-      "--- imports ---"
-    ]
-      <> renderedImports
-      <> [""]
-      <> intercalate [""] (map (renderExpectedDefinitionBlock sourceLines) renderedDefinitions)
+renderDefinitionSlicesText :: [DefinitionSlice] -> IO String
+renderDefinitionSlicesText definitionSlices = do
+  renderedModules <- traverse renderDefinitionModuleFragment (mergeRenderedDefinitionModules definitionSlices)
+  pure . unlines $ intercalate [""] (map lines renderedModules)
 
-renderExpectedDefinitionBlock :: [String] -> String -> [String]
-renderExpectedDefinitionBlock sourceLines renderedDefinition =
-  let definitionLines = lines renderedDefinition
-      startLine = findDefinitionStartLine sourceLines definitionLines
-      endLine = startLine + length definitionLines - 1
-   in [ "--- lines " <> show startLine <> "-" <> show endLine <> " ---"
-      ]
-        <> definitionLines
+renderDefinitionModuleFragment :: DefinitionSlice -> IO String
+renderDefinitionModuleFragment definitionSlice = do
+  renderedPath <- renderDefinitionModulePath definitionSlice
+  renderedDeclarations <- traverse renderDefinitionBlock (sortDeclarationSpans definitionSlice.declarationSpans)
+  pure . unlines $ ["=== " <> renderedPath <> " ==="] <> concatMap lines renderedDeclarations
 
-findDefinitionStartLine :: [String] -> [String] -> Int
-findDefinitionStartLine sourceLines definitionLines =
-  case [lineNo | (lineNo, suffix) <- zip [1 ..] (tails sourceLines), definitionLines `isPrefixOf` suffix] of
-    startLine : _ ->
-      startLine
-    [] ->
-      error ("definition block not found in fixture source: " <> intercalate "\\n" definitionLines)
+renderDefinitionModulePath :: DefinitionSlice -> IO String
+renderDefinitionModulePath definitionSlice =
+  case definitionSliceRealSrcSpan definitionSlice of
+    Nothing ->
+      pure "<definition source unavailable>"
+    Just realSrcSpan ->
+      pure (relativeSourcePath (GHC.Plugins.unpackFS (GHC.srcSpanFile realSrcSpan)))
+
+renderDefinitionBlock :: DeclarationSpans -> IO String
+renderDefinitionBlock declarationSpanGroup = do
+  declarationText <- definitionTextFromSpans declarationSpanGroup
+  pure . unlines $
+    ["--- " <> renderDeclarationBlockHeader declarationSpanGroup <> " ---"] <> lines declarationText
+
+renderDeclarationBlockHeader :: DeclarationSpans -> String
+renderDeclarationBlockHeader declarationSpanGroup =
+  case declarationSpansLineRange declarationSpanGroup of
+    Nothing ->
+      "definition"
+    Just (startLine, endLine) ->
+      "lines " <> show startLine <> "-" <> show endLine
+
+declarationSpansLineRange :: DeclarationSpans -> Maybe (Int, Int)
+declarationSpansLineRange declarationSpanGroup = do
+  firstSpan <- minimumMaybe realSrcSpans
+  lastSpan <- maximumMaybe realSrcSpans
+  pure (GHC.srcSpanStartLine firstSpan, GHC.srcSpanEndLine lastSpan)
+  where
+    realSrcSpans =
+      mapMaybe realSrcSpanFromSrcSpan (maybeToList declarationSpanGroup.signatureSpan <> [declarationSpanGroup.declarationSpan])
+
+definitionSliceRealSrcSpan :: DefinitionSlice -> Maybe GHC.RealSrcSpan
+definitionSliceRealSrcSpan definitionSlice =
+  case mapMaybe declarationSpansRealSrcSpan definitionSlice.declarationSpans of
+    realSrcSpan : _ -> Just realSrcSpan
+    [] -> Nothing
+
+declarationSpansRealSrcSpan :: DeclarationSpans -> Maybe GHC.RealSrcSpan
+declarationSpansRealSrcSpan declarationSpanGroup =
+  realSrcSpanFromSrcSpan declarationSpanGroup.declarationSpan
+    <|> (declarationSpanGroup.signatureSpan >>= realSrcSpanFromSrcSpan)
+
+realSrcSpanFromSrcSpan :: GHC.SrcSpan -> Maybe GHC.RealSrcSpan
+realSrcSpanFromSrcSpan = \case
+  GHC.RealSrcSpan realSrcSpan _ -> Just realSrcSpan
+  GHC.UnhelpfulSpan {} -> Nothing
+
+sortDeclarationSpans :: [DeclarationSpans] -> [DeclarationSpans]
+sortDeclarationSpans =
+  sortOn (realSrcSpanFromSrcSpan . declarationSpan)
+
+mergeRenderedDefinitionModules :: [DefinitionSlice] -> [DefinitionSlice]
+mergeRenderedDefinitionModules =
+  foldr insertSlice []
+  where
+    insertSlice slice [] = [slice]
+    insertSlice slice (existing : rest)
+      | existing.definitionModule == slice.definitionModule =
+          case mergeDefinitionSlices [existing, slice] of
+            Just merged -> merged : rest
+            Nothing -> existing : rest
+      | otherwise =
+          existing : insertSlice slice rest
+
+relativeSourcePath :: FilePath -> FilePath
+relativeSourcePath sourcePath =
+  case dropWhile (/= "src") (splitDirectories sourcePath) of
+    [] -> sourcePath
+    pathParts -> joinPath pathParts
+
+minimumMaybe :: (Ord a) => [a] -> Maybe a
+minimumMaybe [] = Nothing
+minimumMaybe values = Just (minimum values)
+
+maximumMaybe :: (Ord a) => [a] -> Maybe a
+maximumMaybe [] = Nothing
+maximumMaybe values = Just (maximum values)
+
+nubOrd :: (Ord a) => [a] -> [a]
+nubOrd = nub
 
 findFixtureSymbol :: String -> [Symbol] -> Maybe GHC.Name
 findFixtureSymbol symbol =

@@ -8,7 +8,7 @@ module Lore.Internal.AutoRefactor.RedundantImports
 where
 
 import Control.Applicative ((<|>))
-import Data.List (find)
+import Data.List (find, nub)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
@@ -43,30 +43,56 @@ redundantImportRequestFromDiagnostic Diagnostic {diagnosticSpan = UnhelpfulDiagn
   Nothing
 
 suggestRedundantImportOperations :: [ParsedImport] -> NonEmpty RedundantImportRequest -> [ImportOperation]
-suggestRedundantImportOperations parsedImports =
-  concatMap suggestForRequest . NE.toList
+suggestRedundantImportOperations parsedImports requests =
+  concatMap suggestForImport groupedRequests
   where
-    suggestForRequest RedundantImportRequest {redundantImportDiagnosticSpan, redundantImportBindings} =
-      case find (`parsedImportContainsSpan` redundantImportDiagnosticSpan) parsedImports of
-        Nothing ->
-          []
-        Just parsedImport ->
-          case findImportItemBySpan redundantImportDiagnosticSpan parsedImport of
-            Just importItem ->
-              [RemoveImportItem parsedImport.parsedImportId importItem.importItemText]
-            Nothing ->
-              fallbackOperations parsedImport redundantImportDiagnosticSpan redundantImportBindings
+    groupedRequests =
+      groupAdjacentByImportId
+        [ (findParsedImport request, request)
+        | request <- NE.toList requests
+        ]
 
-    fallbackOperations parsedImport diagnosticSpan = \case
-      Nothing ->
-        [RemoveWholeImport parsedImport.parsedImportId]
-      Just bindings
-        | spansMatch parsedImport.parsedImportSpan diagnosticSpan ->
-            [RemoveWholeImport parsedImport.parsedImportId]
-        | otherwise ->
-            [ RemoveImportItem parsedImport.parsedImportId bindingText
-            | bindingText <- NE.toList bindings
-            ]
+    findParsedImport request =
+      find (`parsedImportContainsSpan` request.redundantImportDiagnosticSpan) parsedImports
+
+    suggestForImport (Nothing, _) =
+      []
+    suggestForImport (Just parsedImport, importRequests) =
+      if any requestRemovesWholeImport importRequests
+        then [RemoveWholeImport parsedImport.parsedImportId]
+        else
+          [ RemoveImportItem parsedImport.parsedImportId bindingText
+          | bindingText <- nub (concatMap (requestBindings parsedImport) importRequests)
+          ]
+
+    requestBindings parsedImport request =
+      case request.redundantImportBindings of
+        Just bindings ->
+          NE.toList bindings
+        Nothing ->
+          case findImportItemBySpan request.redundantImportDiagnosticSpan parsedImport of
+            Just importItem -> [importItem.importItemText]
+            Nothing -> []
+
+    requestRemovesWholeImport RedundantImportRequest {redundantImportBindings} =
+      case redundantImportBindings of
+        Nothing -> True
+        Just _ -> False
+
+groupAdjacentByImportId :: [(Maybe ParsedImport, RedundantImportRequest)] -> [(Maybe ParsedImport, [RedundantImportRequest])]
+groupAdjacentByImportId =
+  foldr step []
+  where
+    step (maybeParsedImport, request) [] =
+      [(maybeParsedImport, [request])]
+    step (maybeParsedImport, request) ((existingImport, existingRequests) : rest)
+      | sameParsedImport maybeParsedImport existingImport =
+          (existingImport, request : existingRequests) : rest
+      | otherwise =
+          (maybeParsedImport, [request]) : (existingImport, existingRequests) : rest
+
+    sameParsedImport left right =
+      fmap (.parsedImportId) left == fmap (.parsedImportId) right
 
 findImportItemBySpan :: Span -> ParsedImport -> Maybe ImportItem
 findImportItemBySpan diagnosticSpan parsedImport =
@@ -84,14 +110,6 @@ itemSpanMatches diagnosticSpan importItem =
     Nothing -> False
     Just importItemSpan ->
       spansOverlap importItemSpan diagnosticSpan
-
-spansMatch :: Span -> Span -> Bool
-spansMatch left right =
-  left.spanFile == right.spanFile
-    && left.spanStartLine == right.spanStartLine
-    && left.spanStartCol == right.spanStartCol
-    && left.spanEndLine == right.spanEndLine
-    && left.spanEndCol == right.spanEndCol
 
 spansOverlap :: Span -> Span -> Bool
 spansOverlap left right =
@@ -138,11 +156,16 @@ parseWholeImport message
 
 extractQuoted :: T.Text -> Maybe T.Text
 extractQuoted text =
-  case T.breakOn "‘" text of
+  extractBetween "‘" "’" text
+    <|> extractBetween "`" "'" text
+
+extractBetween :: T.Text -> T.Text -> T.Text -> Maybe T.Text
+extractBetween openQuote closeQuote text =
+  case T.breakOn openQuote text of
     (_, "") -> Nothing
     (_, withOpenQuote) ->
-      let afterOpenQuote = T.drop 1 withOpenQuote
-          (quoted, afterCloseQuote) = T.breakOn "’" afterOpenQuote
+      let afterOpenQuote = T.drop (T.length openQuote) withOpenQuote
+          (quoted, afterCloseQuote) = T.breakOn closeQuote afterOpenQuote
        in if T.null afterCloseQuote
             then Nothing
             else Just quoted

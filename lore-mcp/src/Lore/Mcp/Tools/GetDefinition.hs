@@ -15,7 +15,7 @@ import qualified Data.Text as T
 import qualified GHC
 import GHC.Generics (Generic)
 import Lore
-  ( DefinitionSlice,
+  ( DefinitionSlice (..),
     LoadTargetsResult (..),
     MonadLore,
     SymbolInfo (..),
@@ -26,7 +26,8 @@ import Lore
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), Maximum, MinItems, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines, renderPaginatedDefinitionModules)
+import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines)
+import qualified Lore.Mcp.Tools.Shared as Shared
 
 data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
   { symbols ::
@@ -136,7 +137,7 @@ resolveRequestedSymbol symbol = do
 renderSymbolDefinitions :: (MonadLore m) => Int -> Int -> [SymbolInfo] -> m (Maybe PaginatedDefinitionModules)
 renderSymbolDefinitions skip recursionDepth symbolInfos = do
   definitionSlices <- concat <$> mapM (resolveSymbolDefinitions recursionDepth) symbolInfos
-  liftIO (renderPaginatedDefinitionModules skip maxRenderedDefinitionResults definitionSlices)
+  liftIO (Shared.renderPaginatedDefinitionModules skip maxRenderedDefinitionResults definitionSlices)
 
 resolveSymbolDefinitions :: (MonadLore m) => Int -> SymbolInfo -> m [DefinitionSlice]
 resolveSymbolDefinitions recursionDepth symbolInfo
@@ -161,7 +162,13 @@ renderDefinitionResult loadResult symbols missingSymbols renderedDefinitions =
 definitionResultsSection :: PaginatedDefinitionModules -> [Text]
 definitionResultsSection paginatedDefinitions =
   paginationSummaryLines "definition results" "skip" paginatedDefinitions
-    <> maybe [] pure paginatedDefinitions.renderedPage
+    <> maybe [] pure (renderPage paginatedDefinitions)
+
+renderPage :: PaginatedDefinitionModules -> Maybe Text
+renderPage paginatedDefinitions =
+  case paginatedDefinitions.renderedPage of
+    Just page -> Just page
+    Nothing -> Nothing
 
 renderAmbiguityResult :: LoadTargetsResult -> [Text] -> [AmbiguousQuery] -> Text
 renderAmbiguityResult loadResult missingSymbols ambiguousQueries =
