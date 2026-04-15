@@ -14,6 +14,7 @@ import Data.Containers.ListUtils (nubOrd)
 import Data.Data (Data, Typeable, cast, gmapQ)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List (sortOn)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
@@ -29,6 +30,8 @@ import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionAnalysis
 data ReferencedOccurrence = ReferencedOccurrence
   { occurrenceName :: GHC.Name,
     occurrenceSpan :: GHC.SrcSpan,
+    occurrenceUsageSpans :: [GHC.SrcSpan],
+    occurrenceSectionSpans :: [GHC.SrcSpan],
     occurrenceParent :: Maybe GHC.Name,
     occurrenceSyntax :: ParsedOccurrenceSyntax,
     occurrenceCandidates :: [Int]
@@ -265,7 +268,9 @@ buildProcessedTypedDefinitionFactsForName definingModule parsedSummary typedModu
             ProcessedTypedDefinitionFacts
               { processedRequiredImports = buildImports sourceImports occurrences,
                 processedReferences = collectReferencedNames target parsedDefinitionSpans occurrences,
-                processedReferenceSpans = collectReferenceSpans occurrences
+                processedReferenceSpans = collectReferenceSpans occurrences,
+                processedReferenceUsageSpans = collectReferenceUsageSpans occurrences,
+                processedReferenceSectionSpans = collectReferenceSectionSpans occurrences
               }
   where
     minimalImportToSourceImport minimalImport =
@@ -305,7 +310,9 @@ buildDefinitionAnalysis definingModule target parsedSummary typedFacts =
                 },
             analysisReferences = typedFacts.processedReferences,
             analysisUsedInstances = [],
-            analysisReferenceSpans = typedFacts.processedReferenceSpans
+            analysisReferenceSpans = typedFacts.processedReferenceSpans,
+            analysisReferenceUsageSpans = typedFacts.processedReferenceUsageSpans,
+            analysisReferenceSectionSpans = typedFacts.processedReferenceSectionSpans
           }
 
 collectExprUsedInstanceNames :: GHC.CoreExpr -> [GHC.Name]
@@ -407,12 +414,14 @@ collectReferencedOccurrences definingModule spans parsedOccurrenceSyntaxes sourc
     toReferencedOccurrence occurrence = do
       let occurrenceName = occurrence.typedOccurrenceName
           syntax =
-            fromMaybe (ParsedOccurrenceSyntax Nothing) $
+            fromMaybe (ParsedOccurrenceSyntax Nothing [] []) $
               lookup occurrence.typedOccurrenceSpan parsedOccurrenceSyntaxes
       guardReference definingModule spans occurrenceName $
         ReferencedOccurrence
           { occurrenceName,
             occurrenceSpan = occurrence.typedOccurrenceSpan,
+            occurrenceUsageSpans = syntax.parsedSyntaxUsageSpans,
+            occurrenceSectionSpans = syntax.parsedSyntaxSectionSpans,
             occurrenceParent = occurrence.typedOccurrenceParent,
             occurrenceSyntax = syntax,
             occurrenceCandidates =
@@ -433,11 +442,21 @@ collectOccurrenceSyntax ::
   GHC.ParsedSource ->
   [(GHC.SrcSpan, ParsedOccurrenceSyntax)]
 collectOccurrenceSyntax targetSpans parsedSource =
-  [ (span', syntaxFromRdrName (GHC.unLoc locatedName))
-  | locatedName <- collectTyped parsedSource,
+  [ (span', syntaxForOccurrence span' (GHC.unLoc locatedName))
+  | locatedName <- collectTyped parsedSource :: [GHC.LocatedN GHC.RdrName],
     let span' = locatedSpan locatedName,
     spanWithin targetSpans span'
   ]
+  where
+    usageSpanMap = collectOccurrenceUsageSpans targetSpans parsedSource
+
+    syntaxForOccurrence span' rdrName =
+      ParsedOccurrenceSyntax
+        { parsedSyntaxQualifier = fmap fst (GHC.isQual_maybe rdrName),
+          parsedSyntaxUsageSpans = Map.findWithDefault [] (show span') usageSpanMap,
+          parsedSyntaxSectionSpans = Map.findWithDefault [] (show span') sectionSpanMap
+        }
+    sectionSpanMap = collectOccurrenceSectionSpans targetSpans parsedSource
 
 collectTyped :: forall b a. (Typeable b, Data a) => a -> [b]
 collectTyped = go
@@ -450,9 +469,8 @@ locatedSpan :: GHC.LocatedN a -> GHC.SrcSpan
 locatedSpan =
   GHC.locA . GHC.getLoc
 
-syntaxFromRdrName :: GHC.RdrName -> ParsedOccurrenceSyntax
-syntaxFromRdrName =
-  ParsedOccurrenceSyntax . fmap fst . GHC.isQual_maybe
+locatedASpan :: GHC.LocatedA a -> GHC.SrcSpan
+locatedASpan = GHC.getLocA
 
 supportsOccurrenceSyntax :: ParsedOccurrenceSyntax -> RequiredImport -> Bool
 supportsOccurrenceSyntax ParsedOccurrenceSyntax {parsedSyntaxQualifier} requiredImport =
@@ -533,6 +551,28 @@ collectReferenceSpans =
   Map.fromListWith (<>)
     . map (\occurrence -> (occurrence.occurrenceName, [occurrence.occurrenceSpan]))
 
+collectReferenceUsageSpans :: [ReferencedOccurrence] -> Map.Map GHC.Name [GHC.SrcSpan]
+collectReferenceUsageSpans =
+  Map.map dedupeSrcSpans
+    . Map.fromListWith (<>)
+    . concatMap
+      ( \occurrence ->
+          [ (occurrence.occurrenceName, [usageSpan])
+          | usageSpan <- occurrence.occurrenceUsageSpans
+          ]
+      )
+
+collectReferenceSectionSpans :: [ReferencedOccurrence] -> Map.Map GHC.Name [GHC.SrcSpan]
+collectReferenceSectionSpans =
+  Map.map dedupeSrcSpans
+    . Map.fromListWith (<>)
+    . concatMap
+      ( \occurrence ->
+          [ (occurrence.occurrenceName, [sectionSpan])
+          | sectionSpan <- occurrence.occurrenceSectionSpans
+          ]
+      )
+
 isFollowableReference :: GHC.Name -> DeclarationSpans -> GHC.Name -> Bool
 isFollowableReference target spans name =
   name /= target
@@ -568,6 +608,8 @@ dedupeOccurrences =
     sameOccurrence left right =
       left.occurrenceName == right.occurrenceName
         && left.occurrenceSpan == right.occurrenceSpan
+        && left.occurrenceUsageSpans == right.occurrenceUsageSpans
+        && left.occurrenceSectionSpans == right.occurrenceSectionSpans
         && left.occurrenceParent == right.occurrenceParent
         && left.occurrenceSyntax == right.occurrenceSyntax
         && left.occurrenceCandidates == right.occurrenceCandidates
@@ -590,6 +632,129 @@ dedupeNames :: [GHC.Name] -> [GHC.Name]
 dedupeNames =
   Map.elems . Map.fromList . map (\name -> (GHC.occNameString (GHC.nameOccName name), name))
 
+dedupeSrcSpans :: [GHC.SrcSpan] -> [GHC.SrcSpan]
+dedupeSrcSpans =
+  Map.elems . Map.fromList . map (\span' -> (show span', span'))
+
 spanWithin :: [GHC.SrcSpan] -> GHC.SrcSpan -> Bool
 spanWithin targetSpans span' =
   any (span' `GHC.isSubspanOf`) targetSpans
+
+data UsageKind
+  = UsageKindRecord
+  | UsageKindApplication
+  deriving stock (Eq, Show)
+
+data UsageSpanCandidate = UsageSpanCandidate
+  { usageSpan :: GHC.SrcSpan,
+    usageKind :: UsageKind
+  }
+
+collectOccurrenceUsageSpans :: [GHC.SrcSpan] -> GHC.ParsedSource -> Map.Map String [GHC.SrcSpan]
+collectOccurrenceUsageSpans targetSpans parsedSource =
+  Map.map (map (.usageSpan) . dedupeUsageCandidates . sortOn compareKey) $
+    Map.fromListWith (<>) (concatMap expressionUsageEntries expressions)
+  where
+    expressions = collectTyped parsedSource :: [GHC.LocatedA (GHC.HsExpr GHC.GhcPs)]
+
+    expressionUsageEntries expression@(GHC.L _ expr)
+      | not (spanWithin targetSpans expressionSpan) = []
+      | otherwise =
+          case usageKindForExpression expr of
+            Nothing -> []
+            Just usageKind ->
+              [ (show occurrenceSpan, [UsageSpanCandidate {usageSpan = expressionSpan, usageKind}])
+              | occurrenceSpan <- expressionOccurrences expr,
+                spanWithin targetSpans occurrenceSpan,
+                usageSpanImprovesOccurrence occurrenceSpan expressionSpan
+              ]
+      where
+        expressionSpan = locatedASpan expression
+
+    compareKey candidate = usageCandidateRank candidate
+
+dedupeUsageCandidates :: [UsageSpanCandidate] -> [UsageSpanCandidate]
+dedupeUsageCandidates =
+  Map.elems . Map.fromList . map (\candidate -> (show candidate.usageSpan, candidate))
+
+usageCandidateRank :: UsageSpanCandidate -> (Int, Int, Int, Int)
+usageCandidateRank UsageSpanCandidate {usageSpan, usageKind} =
+  case GHC.srcSpanToRealSrcSpan usageSpan of
+    Nothing -> (0, 0, 0, 0)
+    Just realSpan ->
+      ( usageKindPriority usageKind,
+        if GHC.srcSpanEndLine realSpan > GHC.srcSpanStartLine realSpan then 1 else 0,
+        usageKindLinePreference usageKind (GHC.srcSpanEndLine realSpan - GHC.srcSpanStartLine realSpan),
+        usageKindColumnPreference usageKind (GHC.srcSpanEndCol realSpan - GHC.srcSpanStartCol realSpan)
+      )
+
+usageKindPriority :: UsageKind -> Int
+usageKindPriority = \case
+  UsageKindRecord -> 3
+  UsageKindApplication -> 2
+
+usageKindLinePreference :: UsageKind -> Int -> Int
+usageKindLinePreference usageKind lineSpan =
+  case usageKind of
+    UsageKindApplication -> lineSpan
+    _ -> negate lineSpan
+
+usageKindColumnPreference :: UsageKind -> Int -> Int
+usageKindColumnPreference usageKind columnSpan =
+  case usageKind of
+    UsageKindApplication -> columnSpan
+    _ -> negate columnSpan
+
+usageKindForExpression :: GHC.HsExpr GHC.GhcPs -> Maybe UsageKind
+usageKindForExpression = \case
+  GHC.RecordCon {} -> Just UsageKindRecord
+  GHC.RecordUpd {} -> Just UsageKindRecord
+  GHC.HsApp {} -> Just UsageKindApplication
+  GHC.HsAppType {} -> Just UsageKindApplication
+  GHC.OpApp {} -> Just UsageKindApplication
+  GHC.NegApp {} -> Just UsageKindApplication
+  GHC.HsPar _ _ expression _ -> usageKindForExpression (GHC.unLoc expression)
+  _ -> Nothing
+
+collectOccurrenceSectionSpans :: [GHC.SrcSpan] -> GHC.ParsedSource -> Map.Map String [GHC.SrcSpan]
+collectOccurrenceSectionSpans targetSpans parsedSource =
+  Map.map dedupeSrcSpans $ Map.fromListWith (<>) (concatMap sectionEntries sectionSpans)
+  where
+    sectionSpans = collectParsedSectionSpans parsedSource
+    occurrenceSpans =
+      [ locatedSpan locatedName
+      | locatedName <- collectTyped parsedSource :: [GHC.LocatedN GHC.RdrName]
+      ]
+
+    sectionEntries sectionSpan =
+      [ (show occurrenceSpan, [sectionSpan])
+      | occurrenceSpan <- occurrenceSpans,
+        occurrenceSpan `GHC.isSubspanOf` sectionSpan,
+        spanWithin targetSpans occurrenceSpan
+      ]
+
+collectParsedSectionSpans :: GHC.ParsedSource -> [GHC.SrcSpan]
+collectParsedSectionSpans parsedSource =
+  map locatedASpan (collectTyped parsedSource :: [GHC.LMatch GHC.GhcPs (GHC.LHsExpr GHC.GhcPs)])
+    <> map grhsSpan (collectTyped parsedSource :: [GHC.LGRHS GHC.GhcPs (GHC.LHsExpr GHC.GhcPs)])
+    <> map locatedASpan (collectTyped parsedSource :: [GHC.LStmt GHC.GhcPs (GHC.LHsExpr GHC.GhcPs)])
+    <> map locatedASpan (collectTyped parsedSource :: [GHC.LHsBind GHC.GhcPs])
+
+grhsSpan :: GHC.LGRHS GHC.GhcPs (GHC.LHsExpr GHC.GhcPs) -> GHC.SrcSpan
+grhsSpan = GHC.locA . GHC.getLoc
+
+usageSpanImprovesOccurrence :: GHC.SrcSpan -> GHC.SrcSpan -> Bool
+usageSpanImprovesOccurrence occurrenceSpan usageSpan =
+  case (GHC.srcSpanToRealSrcSpan occurrenceSpan, GHC.srcSpanToRealSrcSpan usageSpan) of
+    (Just occurrenceRealSpan, Just usageRealSpan) ->
+      GHC.srcSpanFile occurrenceRealSpan == GHC.srcSpanFile usageRealSpan
+        && ( GHC.srcSpanStartLine usageRealSpan < GHC.srcSpanStartLine occurrenceRealSpan
+               || GHC.srcSpanEndLine usageRealSpan > GHC.srcSpanEndLine occurrenceRealSpan
+               || GHC.srcSpanStartCol usageRealSpan < GHC.srcSpanStartCol occurrenceRealSpan
+               || GHC.srcSpanEndCol usageRealSpan > GHC.srcSpanEndCol occurrenceRealSpan
+           )
+    _ -> False
+
+expressionOccurrences :: GHC.HsExpr GHC.GhcPs -> [GHC.SrcSpan]
+expressionOccurrences =
+  map locatedSpan . (collectTyped :: GHC.HsExpr GHC.GhcPs -> [GHC.LocatedN GHC.RdrName])

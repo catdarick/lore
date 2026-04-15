@@ -213,7 +213,7 @@ renderReferenceMatchBlock :: ReferenceMatch -> IO Text
 renderReferenceMatchBlock referenceMatch =
   case referenceMatch.referenceSlice.declarationSpans of
     declarationSpans : _ -> do
-      snippetText <- renderReferenceSnippet declarationSpans referenceMatch.matchedReferenceSpans
+      snippetText <- renderReferenceSnippet declarationSpans referenceMatch.matchedReferenceSectionSpans referenceMatch.matchedReferenceUsageSpans referenceMatch.matchedReferenceSpans
       pure $
         T.intercalate
           "\n"
@@ -223,20 +223,80 @@ renderReferenceMatchBlock referenceMatch =
     [] ->
       pure "--- definition ---\n<definition source unavailable>"
 
-renderReferenceSnippet :: DeclarationSpans -> [GHC.SrcSpan] -> IO Text
-renderReferenceSnippet declarationSpans matchedSpans = do
+renderReferenceSnippet :: DeclarationSpans -> [GHC.SrcSpan] -> [GHC.SrcSpan] -> [GHC.SrcSpan] -> IO Text
+renderReferenceSnippet declarationSpans matchedSectionSpans matchedUsageSpans matchedSpans = do
   declarationLines <- readSpanLines declarationSpans.declarationSpan
   signatureText <- traverse readSpanText declarationSpans.signatureSpan
+  let referenceSpans =
+        case matchedUsageSpans of
+          [] -> matchedSpans
+          _ -> matchedUsageSpans
+  let sectionRanges =
+        mapMaybe (sectionStartContextRange declarationSpans.declarationSpan (length declarationLines)) matchedSectionSpans
+  let referenceRanges =
+        concatMap (referenceSnippetRanges declarationLines declarationSpans.declarationSpan (length declarationLines)) referenceSpans
   let selectedRanges =
         mergeLineRanges $
-          [ firstDefinitionRange (length declarationLines),
+          [ trimDistantDeclarationPrefix declarationLines (minimumMaybe (map fst referenceRanges)) (firstDefinitionRange (length declarationLines)),
             lastDefinitionRange (length declarationLines)
           ]
-            <> mapMaybe (referenceContextRange declarationSpans.declarationSpan (length declarationLines)) matchedSpans
+            <> sectionRanges
+            <> referenceRanges
       declarationSnippet =
         renderLineRanges declarationLines selectedRanges
   pure $
     maybe declarationSnippet (<> "\n" <> declarationSnippet) signatureText
+
+referenceLineRange :: GHC.SrcSpan -> GHC.SrcSpan -> Maybe (Int, Int)
+referenceLineRange declarationSpan referenceSpan = do
+  declarationRealSpan <- realSrcSpanFromSrcSpan declarationSpan
+  referenceRealSpan <- realSrcSpanFromSrcSpan referenceSpan
+  if GHC.srcSpanFile declarationRealSpan /= GHC.srcSpanFile referenceRealSpan
+    then Nothing
+    else
+      let declarationStart = GHC.srcSpanStartLine declarationRealSpan
+          declarationEnd = GHC.srcSpanEndLine declarationRealSpan
+          referenceStart = GHC.srcSpanStartLine referenceRealSpan
+          referenceEnd = GHC.srcSpanEndLine referenceRealSpan
+       in if referenceEnd < declarationStart || referenceStart > declarationEnd
+            then Nothing
+            else
+              Just
+                ( referenceStart - declarationStart + 1,
+                  referenceEnd - declarationStart + 1
+                )
+
+referenceSnippetRanges :: [Text] -> GHC.SrcSpan -> Int -> GHC.SrcSpan -> [(Int, Int)]
+referenceSnippetRanges _ declarationSpan declarationLineCount referenceSpan =
+  case referenceLineRange declarationSpan referenceSpan of
+    Nothing -> []
+    Just (referenceStartLine, referenceEndLine) ->
+      filter
+        validRange
+        ( [ (max 1 (referenceStartLine - 2), max 1 (referenceStartLine - 1)),
+            (referenceStartLine, min declarationLineCount (referenceStartLine + 1)),
+            (max 1 (referenceEndLine - 1), referenceEndLine),
+            let afterLine = min declarationLineCount (referenceEndLine + 1)
+             in (afterLine, afterLine)
+          ]
+        )
+  where
+    validRange (startLine, endLine) =
+      startLine <= endLine
+
+sectionStartContextRange :: GHC.SrcSpan -> Int -> GHC.SrcSpan -> Maybe (Int, Int)
+sectionStartContextRange declarationSpan declarationLineCount sectionSpan = do
+  (sectionStartLine, _) <- referenceLineRange declarationSpan sectionSpan
+  let clampedStartLine = min declarationLineCount sectionStartLine
+  pure (clampedStartLine, clampedStartLine)
+
+lineIndentation :: [Text] -> Int -> Maybe Int
+lineIndentation declarationLines lineNumber = do
+  lineText <- declarationLineText declarationLines lineNumber
+  let trimmedLine = T.strip lineText
+  if T.null trimmedLine
+    then Nothing
+    else Just (T.length (T.takeWhile (== ' ') lineText))
 
 renderReferenceBlockHeader :: DeclarationSpans -> Text
 renderReferenceBlockHeader declarationSpans =
@@ -246,32 +306,38 @@ renderReferenceBlockHeader declarationSpans =
     Just (startLine, endLine) ->
       "lines " <> T.pack (show startLine) <> "-" <> T.pack (show endLine)
 
-referenceContextRange :: GHC.SrcSpan -> Int -> GHC.SrcSpan -> Maybe (Int, Int)
-referenceContextRange declarationSpan declarationLineCount matchedSpan = do
-  declarationRealSpan <- realSrcSpanFromSrcSpan declarationSpan
-  matchedRealSpan <- realSrcSpanFromSrcSpan matchedSpan
-  if GHC.srcSpanFile declarationRealSpan /= GHC.srcSpanFile matchedRealSpan
-    then Nothing
-    else
-      let declarationStart = GHC.srcSpanStartLine declarationRealSpan
-          declarationEnd = GHC.srcSpanEndLine declarationRealSpan
-          matchedStart = GHC.srcSpanStartLine matchedRealSpan
-          matchedEnd = GHC.srcSpanEndLine matchedRealSpan
-       in if matchedEnd < declarationStart || matchedStart > declarationEnd
-            then Nothing
-            else
-              Just
-                ( max 1 (matchedStart - declarationStart + 1 - 4),
-                  min declarationLineCount (matchedEnd - declarationStart + 1 + 4)
-                )
-
 firstDefinitionRange :: Int -> (Int, Int)
 firstDefinitionRange lineCount =
   (1, min 3 lineCount)
 
+trimDistantDeclarationPrefix :: [Text] -> Maybe Int -> (Int, Int) -> (Int, Int)
+trimDistantDeclarationPrefix declarationLines maybeReferenceStartLine (startLine, endLine)
+  | maybe False (<= endLine + 1) maybeReferenceStartLine =
+      (startLine, endLine)
+  | otherwise =
+      (startLine, go endLine)
+  where
+    go currentEndLine
+      | currentEndLine <= startLine = currentEndLine
+      | otherwise =
+          case lineIndentation declarationLines currentEndLine of
+            Nothing -> currentEndLine
+            Just currentIndent ->
+              case minimumMaybe (mapMaybe (lineIndentation declarationLines) [startLine .. currentEndLine - 1]) of
+                Just minIndent | currentIndent > minIndent -> go (currentEndLine - 1)
+                _ -> currentEndLine
+
+declarationLineText :: [Text] -> Int -> Maybe Text
+declarationLineText declarationLines lineNumber =
+  case compare lineNumber 1 of
+    LT -> Nothing
+    _ -> case drop (lineNumber - 1) declarationLines of
+      lineText : _ -> Just lineText
+      [] -> Nothing
+
 lastDefinitionRange :: Int -> (Int, Int)
 lastDefinitionRange lineCount =
-  (max 1 (lineCount - 2), lineCount)
+  (max 1 (lineCount - 1), lineCount)
 
 mergeLineRanges :: [(Int, Int)] -> [(Int, Int)]
 mergeLineRanges ranges =
@@ -300,7 +366,7 @@ renderLineRanges declarationLines ranges =
             ""
           nextRange@(nextStartLine, _) : tailRanges ->
             "\n"
-              <> renderOmittedLines (nextStartLine - endLine - 1)
+              <> renderOmittedLines declarationLines nextStartLine (nextStartLine - endLine - 1)
               <> "\n"
               <> go nextRange tailRanges
 
@@ -309,10 +375,16 @@ renderLineRanges declarationLines ranges =
         take (endLine - startLine + 1) $
           drop (startLine - 1) declarationLines
 
-    renderOmittedLines omittedLineCount =
-      "  <omitted "
-        <> T.pack (show omittedLineCount)
-        <> if omittedLineCount == 1 then " line>" else " lines>"
+    renderOmittedLines declarationLines' nextStartLine omittedLineCount
+      | omittedLineCount <= 0 =
+          "..."
+      | otherwise =
+          omittedLineIndentation declarationLines' nextStartLine <> "..."
+
+    omittedLineIndentation declarationLines' nextStartLine =
+      case declarationLineText declarationLines' nextStartLine of
+        Nothing -> ""
+        Just lineText -> T.takeWhile (== ' ') lineText
 
 renderReferenceModulePath :: DefinitionSlice -> IO Text
 renderReferenceModulePath definitionSlice =

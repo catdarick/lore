@@ -48,7 +48,9 @@ data DeclarationSpans = DeclarationSpans
   deriving anyclass (NFData)
 
 data ParsedOccurrenceSyntax = ParsedOccurrenceSyntax
-  { parsedSyntaxQualifier :: !(Maybe GHC.ModuleName)
+  { parsedSyntaxQualifier :: !(Maybe GHC.ModuleName),
+    parsedSyntaxUsageSpans :: ![GHC.SrcSpan],
+    parsedSyntaxSectionSpans :: ![GHC.SrcSpan]
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
@@ -130,7 +132,9 @@ data MinimalTypedModuleFacts = MinimalTypedModuleFacts
 data ProcessedTypedDefinitionFacts = ProcessedTypedDefinitionFacts
   { processedRequiredImports :: ![RequiredImport],
     processedReferences :: ![GHC.Name],
-    processedReferenceSpans :: !(Map.Map GHC.Name [GHC.SrcSpan])
+    processedReferenceSpans :: !(Map.Map GHC.Name [GHC.SrcSpan]),
+    processedReferenceUsageSpans :: !(Map.Map GHC.Name [GHC.SrcSpan]),
+    processedReferenceSectionSpans :: !(Map.Map GHC.Name [GHC.SrcSpan])
   }
   deriving stock (Generic)
   deriving anyclass (NFData)
@@ -149,7 +153,9 @@ data MinimalCoreModuleFacts = MinimalCoreModuleFacts
 
 data ReferenceMatch = ReferenceMatch
   { referenceSlice :: !DefinitionSlice,
-    matchedReferenceSpans :: ![GHC.SrcSpan]
+    matchedReferenceSpans :: ![GHC.SrcSpan],
+    matchedReferenceUsageSpans :: ![GHC.SrcSpan],
+    matchedReferenceSectionSpans :: ![GHC.SrcSpan]
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
@@ -158,7 +164,9 @@ data DefinitionAnalysis = DefinitionAnalysis
   { analysisSlice :: !DefinitionSlice,
     analysisReferences :: ![GHC.Name],
     analysisUsedInstances :: ![GHC.Name],
-    analysisReferenceSpans :: !(Map.Map GHC.Name [GHC.SrcSpan])
+    analysisReferenceSpans :: !(Map.Map GHC.Name [GHC.SrcSpan]),
+    analysisReferenceUsageSpans :: !(Map.Map GHC.Name [GHC.SrcSpan]),
+    analysisReferenceSectionSpans :: !(Map.Map GHC.Name [GHC.SrcSpan])
   }
   deriving stock (Generic)
   deriving anyclass (NFData)

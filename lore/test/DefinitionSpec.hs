@@ -465,9 +465,112 @@ spec = do
             resolveReferenceMatchesForNames [targetName]
 
         case referenceMatches of
-          [ReferenceMatch {referenceSlice, matchedReferenceSpans}] -> do
+          [ReferenceMatch {referenceSlice, matchedReferenceSpans, matchedReferenceUsageSpans}] -> do
             GHC.moduleNameString (GHC.moduleName referenceSlice.definitionModule) `shouldBe` "TestRefs.Snippet"
             sort (mapMaybe matchedSpanStartLine matchedReferenceSpans) `shouldBe` [11, 12, 13]
+            mapMaybe matchedSpanLineRange matchedReferenceUsageSpans `shouldSatisfy` elem (11, 13)
+          other ->
+            expectationFailure ("expected a single reference match, got: " <> show (length other))
+
+    it "collects multiline usage spans for record constructor references" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestRefs"
+            moduleFile = moduleDir </> "RecordSnippet.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile multilineRecordReferenceFixtureModuleSource
+
+        referenceMatches <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            resolvedRoots <- lookupRootSymbolInfoWithChain "TestRefs.RecordSnippet.Result"
+            case resolvedRoots of
+              [resolvedRoot] ->
+                resolveReferenceMatchesForNames resolvedRoot.rootSymbolChain
+              _ ->
+                error ("unexpected resolved roots count: " <> show (length resolvedRoots))
+
+        case referenceMatches of
+          [ReferenceMatch {matchedReferenceSpans, matchedReferenceUsageSpans}] -> do
+            mapMaybe matchedSpanStartLine matchedReferenceSpans `shouldSatisfy` elem 10
+            mapMaybe matchedSpanLineRange matchedReferenceUsageSpans `shouldBe` [(10, 17)]
+          other ->
+            expectationFailure ("expected a single reference match, got: " <> show (length other))
+
+    it "collects multiline usage spans for multiline function applications" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestRefs"
+            moduleFile = moduleDir </> "CallSnippet.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile multilineFunctionReferenceFixtureModuleSource
+
+        referenceMatches <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestRefs.CallSnippet.target"
+            targetName <-
+              maybe
+                (error "symbol not found: TestRefs.CallSnippet.target")
+                pure
+                (findFixtureSymbolInModule "TestRefs.CallSnippet" "target" exportedSymbols)
+            resolveReferenceMatchesForNames [targetName]
+
+        case referenceMatches of
+          [ReferenceMatch {matchedReferenceSpans, matchedReferenceUsageSpans}] -> do
+            sort (mapMaybe matchedSpanStartLine matchedReferenceSpans) `shouldBe` [11]
+            mapMaybe matchedSpanLineRange matchedReferenceUsageSpans
+              `shouldSatisfy` any (\(startLine, endLine) -> startLine == 11 && endLine > startLine)
+          other ->
+            expectationFailure ("expected a single reference match, got: " <> show (length other))
+
+    it "keeps multiple parent usage spans for nested multiline references" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestRefs"
+            moduleFile = moduleDir </> "NestedSnippet.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile nestedMultilineReferenceFixtureModuleSource
+
+        referenceMatches <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestRefs.NestedSnippet.target"
+            targetName <-
+              maybe
+                (error "symbol not found: TestRefs.NestedSnippet.target")
+                pure
+                (findFixtureSymbolInModule "TestRefs.NestedSnippet" "target" exportedSymbols)
+            resolveReferenceMatchesForNames [targetName]
+
+        case referenceMatches of
+          [ReferenceMatch {matchedReferenceSpans, matchedReferenceUsageSpans}] -> do
+            sort (mapMaybe matchedSpanStartLine matchedReferenceSpans) `shouldBe` [13]
+            let usageRanges = sort (nub (mapMaybe matchedSpanLineRange matchedReferenceUsageSpans))
+            usageRanges `shouldSatisfy` elem (12, 15)
+            usageRanges `shouldSatisfy` elem (11, 15)
+          other ->
+            expectationFailure ("expected a single reference match, got: " <> show (length other))
+
+    it "collects AST section spans for case alternative references" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestRefs"
+            moduleFile = moduleDir </> "CaseSectionSnippet.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile caseSectionReferenceFixtureModuleSource
+
+        referenceMatches <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestRefs.CaseSectionSnippet.target"
+            targetName <-
+              maybe
+                (error "symbol not found: TestRefs.CaseSectionSnippet.target")
+                pure
+                (findFixtureSymbolInModule "TestRefs.CaseSectionSnippet" "target" exportedSymbols)
+            resolveReferenceMatchesForNames [targetName]
+
+        case referenceMatches of
+          [ReferenceMatch {matchedReferenceSpans, matchedReferenceSectionSpans}] -> do
+            sort (mapMaybe matchedSpanStartLine matchedReferenceSpans) `shouldBe` [14]
+            sort (nub (mapMaybe matchedSpanLineRange matchedReferenceSectionSpans)) `shouldSatisfy` elem (13, 15)
           other ->
             expectationFailure ("expected a single reference match, got: " <> show (length other))
 
@@ -796,3 +899,98 @@ matchedSpanStartLine :: GHC.SrcSpan -> Maybe Int
 matchedSpanStartLine = \case
   GHC.RealSrcSpan realSpan _ -> Just (GHC.srcSpanStartLine realSpan)
   GHC.UnhelpfulSpan {} -> Nothing
+
+matchedSpanLineRange :: GHC.SrcSpan -> Maybe (Int, Int)
+matchedSpanLineRange = \case
+  GHC.RealSrcSpan realSpan _ -> Just (GHC.srcSpanStartLine realSpan, GHC.srcSpanEndLine realSpan)
+  GHC.UnhelpfulSpan {} -> Nothing
+
+multilineRecordReferenceFixtureModuleSource :: T.Text
+multilineRecordReferenceFixtureModuleSource =
+  T.unlines
+    [ "module TestRefs.RecordSnippet",
+      "  ( Result(..),",
+      "    build",
+      "  ) where",
+      "",
+      "data Result = Result { fieldA :: Int, fieldB :: Int, fieldC :: Int, fieldD :: Int, fieldE :: Int, fieldF :: Int }",
+      "",
+      "build :: IO Result",
+      "build = do",
+      "  let res = Result",
+      "        { fieldA = 1",
+      "        , fieldB = 2",
+      "        , fieldC = 3",
+      "        , fieldD = 4",
+      "        , fieldE = 5",
+      "        , fieldF = 6",
+      "        }",
+      "  pure res"
+    ]
+
+multilineFunctionReferenceFixtureModuleSource :: T.Text
+multilineFunctionReferenceFixtureModuleSource =
+  T.unlines
+    [ "module TestRefs.CallSnippet",
+      "  ( target,",
+      "    build",
+      "  ) where",
+      "",
+      "target :: Int -> Int -> Int -> Int",
+      "target a b c = a + b + c",
+      "",
+      "build :: Int",
+      "build =",
+      "  target",
+      "    1",
+      "    2",
+      "    3"
+    ]
+
+nestedMultilineReferenceFixtureModuleSource :: T.Text
+nestedMultilineReferenceFixtureModuleSource =
+  T.unlines
+    [ "module TestRefs.NestedSnippet",
+      "  ( target,",
+      "    build",
+      "  ) where",
+      "",
+      "target :: Int",
+      "target = 1",
+      "",
+      "build :: Int",
+      "build =",
+      "  consume",
+      "    (Wrapper",
+      "      { wrapped = target",
+      "      , other = 2",
+      "      })",
+      "",
+      "consume :: Wrapper -> Int",
+      "consume wrapper = wrapped wrapper",
+      "",
+      "data Wrapper = Wrapper",
+      "  { wrapped :: Int",
+      "  , other :: Int",
+      "  }"
+    ]
+
+caseSectionReferenceFixtureModuleSource :: T.Text
+caseSectionReferenceFixtureModuleSource =
+  T.unlines
+    [ "module TestRefs.CaseSectionSnippet",
+      "  ( target,",
+      "    build",
+      "  ) where",
+      "",
+      "target :: Int -> Int",
+      "target value = value + 1",
+      "",
+      "build :: Maybe Int -> Int",
+      "build maybeValue =",
+      "  case maybeValue of",
+      "    Nothing -> 0",
+      "    Just value ->",
+      "      target value",
+      "        + 1"
+    ]

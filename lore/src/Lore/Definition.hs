@@ -111,7 +111,17 @@ mkReferenceMatch targetSet (Just definitionAnalysis) =
       Just
         ReferenceMatch
           { referenceSlice = definitionAnalysis.analysisSlice,
-            matchedReferenceSpans = dedupeSpans matchedSpans
+            matchedReferenceSpans = dedupeSpans matchedSpans,
+            matchedReferenceUsageSpans =
+              dedupeSpans $
+                concatMap
+                  (\targetName -> Map.findWithDefault [] targetName definitionAnalysis.analysisReferenceUsageSpans)
+                  (Set.toList targetSet),
+            matchedReferenceSectionSpans =
+              dedupeSpans $
+                concatMap
+                  (\targetName -> Map.findWithDefault [] targetName definitionAnalysis.analysisReferenceSectionSpans)
+                  (Set.toList targetSet)
           }
 
 targetOccurrenceNames :: [GHC.Name] -> Set.Set Text
@@ -421,7 +431,9 @@ forceReferenceMatchesForRendering matches =
       referenceMatch.referenceSlice.definitionModule `deepseq`
         referenceMatch.referenceSlice.declarationSpans `deepseq`
           referenceMatch.matchedReferenceSpans `deepseq`
-            forceMatches restMatches
+            referenceMatch.matchedReferenceUsageSpans `deepseq`
+              referenceMatch.matchedReferenceSectionSpans `deepseq`
+                forceMatches restMatches
 
 dedupeSpans :: [GHC.SrcSpan] -> [GHC.SrcSpan]
 dedupeSpans =
@@ -436,7 +448,9 @@ mergeReferenceMatchesBySlice =
 
     mergeTwo new old =
       old
-        { matchedReferenceSpans = dedupeSpans (old.matchedReferenceSpans <> new.matchedReferenceSpans)
+        { matchedReferenceSpans = dedupeSpans (old.matchedReferenceSpans <> new.matchedReferenceSpans),
+          matchedReferenceUsageSpans = dedupeSpans (old.matchedReferenceUsageSpans <> new.matchedReferenceUsageSpans),
+          matchedReferenceSectionSpans = dedupeSpans (old.matchedReferenceSectionSpans <> new.matchedReferenceSectionSpans)
         }
 
 referenceMatchKey :: ReferenceMatch -> (GHC.Module, [(String, Maybe String)])
