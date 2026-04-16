@@ -38,7 +38,7 @@ import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Lookup (Instances (..), listAssociatedInstances)
 import Lore.Monad
-import UnliftIO (forConcurrently, modifyMVar_, readMVar)
+import UnliftIO (modifyMVar_, pooledForConcurrently, readMVar)
 
 data ResolverCache = ResolverCache
   { cachedAnalyses :: Map.Map GHC.Name (Maybe DefinitionAnalysis)
@@ -87,7 +87,7 @@ resolveReferenceMatchesForNames targetNames = do
   logTimedSectionEnd "findReferences:prepareCandidateModules"
   logTimedSectionStart "findReferences:analyzePreparedModules"
   resolvedMatches <-
-    concat <$> forConcurrently preparedModules (liftIO . Exception.evaluate . matchingReferenceMatches targetSet)
+    concat <$> pooledForConcurrently preparedModules (liftIO . Exception.evaluate . matchingReferenceMatches targetSet)
   logTimedSectionEnd "findReferences:analyzePreparedModules"
   logTimedSectionStart "findReferences:forceMatches"
   forcedMatches <- liftIO $ Exception.evaluate (forceReferenceMatchesForRendering resolvedMatches)

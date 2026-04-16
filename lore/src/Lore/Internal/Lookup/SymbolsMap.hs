@@ -27,7 +27,7 @@ import Lore.Internal.Session (SessionContext (..))
 import Lore.Lib.Force (evaluateNFM)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
-import UnliftIO (SomeException, forConcurrently, handle, modifyMVar, readMVar)
+import UnliftIO (SomeException, handle, modifyMVar, pooledForConcurrently, readMVar)
 
 getSymbolsMap :: (MonadLore m) => m SymbolsMap
 getSymbolsMap = do
@@ -103,7 +103,7 @@ prepareExternalSymbolsMap dependencies = do
   externalModules <- enumerateVisiblePackageModules
   Log.debug $ "Enumerated " <> show (length externalModules) <> " visible package modules."
   hscEnv <- GHC.getSession
-  externalModulesSymbols <- liftIO $ forConcurrently externalModules (evaluateNFM . getExternalModuleSymbols hscEnv)
+  externalModulesSymbols <- liftIO $ pooledForConcurrently externalModules (evaluateNFM . getExternalModuleSymbols hscEnv)
   Log.debug $ "Fetched symbols for " <> show (length externalModulesSymbols) <> " external modules."
   let symbolsMap = buildSymbolsIndex externalModulesSymbols
   logPreparedSymbolsIndex "external modules" symbolsMap
