@@ -1,7 +1,27 @@
-module TestSupport (fixtureLore, fixtureLoreAt, fixtureLoreAtWithConfig, fixtureLoreAtWithLogger, withFixtureCopy) where
+module TestSupport
+  ( fixtureLore,
+    fixtureLoreAt,
+    fixtureLoreAtWithConfig,
+    fixtureLoreAtWithLogger,
+    withFixtureCopy,
+    findSymbols,
+    findRootSymbols,
+    lookupRootSymbolInfo,
+    lookupRootSymbolChains,
+    listExportedSymbolsByModule,
+    filterExportedSymbolNodesByTypeHint,
+  )
+where
 
 import Control.Exception (bracket)
+import qualified Data.List.NonEmpty as NE
+import Data.Maybe (catMaybes)
+import qualified Data.Set as Set
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import qualified GHC.Plugins as GHC
+import qualified Lore
 import Lore.Logger (LoggerHandle, noLogHandle)
 import Lore.Monad (LoreMonadT)
 import Lore.Session (SessionConfig, defaultSessionConfig, runLore)
@@ -96,3 +116,41 @@ withClearedGhcEnvironment action =
   where
     restore =
       maybe (pure ()) (setEnv "GHC_ENVIRONMENT")
+
+findSymbols :: (Lore.MonadLore m) => Text -> m [Lore.Symbol]
+findSymbols query =
+  Set.toList <$> Lore.findMatchingSymbols (Lore.parseAndNormalizeName query)
+
+findRootSymbols :: (Lore.MonadLore m) => Text -> m [Lore.Symbol]
+findRootSymbols query =
+  Set.toList <$> Lore.findMatchingSymbolsRoots (Lore.parseAndNormalizeName query)
+
+lookupRootSymbolInfo :: (Lore.MonadLore m) => Text -> m [Lore.SymbolInfo]
+lookupRootSymbolInfo query = do
+  rootSymbols <- findRootSymbols query
+  catMaybes <$> mapM (Lore.lookupSymbolInfo . (.name)) rootSymbols
+
+lookupRootSymbolChains :: (Lore.MonadLore m) => Text -> m [[GHC.Name]]
+lookupRootSymbolChains query = do
+  symbols <- findSymbols query
+  pathsToRoot <- mapM (Lore.resolvePathToRoot . (.name)) symbols
+  let mergedPaths = Lore.mergePathsToRootOn renderName pathsToRoot
+  pure (map (NE.toList . (.unPathToRoot)) mergedPaths)
+  where
+    renderName name =
+      case GHC.nameModule_maybe name of
+        Nothing ->
+          "<no-module>." <> GHC.getOccString name
+        Just module_ ->
+          GHC.moduleNameString (GHC.moduleName module_) <> "." <> GHC.getOccString name
+
+listExportedSymbolsByModule :: (Lore.MonadLore m) => Text -> Maybe Text -> m [Lore.ExportedSymbolNode]
+listExportedSymbolsByModule moduleName maybePackageName = do
+  let normalizedModuleName =
+        Lore.normalizeModuleName (GHC.mkModuleName (T.unpack moduleName))
+  maybeModule <- Lore.resolveModule normalizedModuleName maybePackageName
+  maybe (pure []) Lore.listSymbolsExportedByModule maybeModule
+
+filterExportedSymbolNodesByTypeHint :: Text -> [Lore.ExportedSymbolNode] -> [Lore.ExportedSymbolNode]
+filterExportedSymbolNodesByTypeHint typeHint =
+  Lore.filterExportedSymbolNodesByTypeHint (Lore.occName (Lore.parseAndNormalizeName typeHint))

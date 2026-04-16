@@ -7,7 +7,6 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Lore.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (..), Span (..))
 import Lore.Logger (LogMessage (..), LoggerHandle (..))
-import Lore.Lookup (findSymbols)
 import Lore.Monad (MonadLore)
 import Lore.Session (defaultSessionConfig)
 import qualified Lore.Session as Session
@@ -16,7 +15,7 @@ import qualified Lore.Targets as Targets
 import System.Directory (createDirectoryIfMissing, makeAbsolute)
 import System.FilePath ((</>))
 import Test.Hspec
-import TestSupport (fixtureLoreAt, fixtureLoreAtWithConfig, fixtureLoreAtWithLogger, withFixtureCopy)
+import TestSupport (findSymbols, fixtureLoreAt, fixtureLoreAtWithConfig, fixtureLoreAtWithLogger, withFixtureCopy)
 
 loadTargets :: (MonadLore m) => LoadTargetsOptions -> m ()
 loadTargets options = void (Targets.loadTargets options)

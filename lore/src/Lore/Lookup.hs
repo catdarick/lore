@@ -1,11 +1,17 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Lore.Lookup
-  ( Symbol (..),
+  ( NormalizedOccName,
+    NormalizedModuleName,
+    NormalizedName (occName, moduleName),
+    parseAndNormalizeName,
+    normalizeModuleName,
+    Symbol (..),
     SymbolVisibility (..),
     SymbolCategory (..),
     SymbolInfo (..),
     Instances (..),
+    PathToRoot (..),
     classifySymbolCategory,
     findMatchingSymbols,
     findMatchingSymbolsRoots,
@@ -25,7 +31,7 @@ import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
-import Lore.Internal.Lookup.Name (NormalizedName, normalizeName)
+import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap

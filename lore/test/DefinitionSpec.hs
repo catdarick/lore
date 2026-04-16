@@ -9,16 +9,15 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC
 import qualified GHC.Plugins
-import Lore (RootSymbolInfo (..), lookupRootSymbolInfoWithChain)
 import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), ImportQualifiedStyle (..), ReferenceMatch (..), RequiredImport (..), declarationSpans, mergeDefinitionSlices, resolveDefinitionClosure, resolveDefinitionSlice, resolveReferenceMatchesForNames)
-import Lore.Lookup (Symbol (..), findSymbols)
+import Lore.Lookup (Symbol (..))
 import Lore.Monad (MonadLore)
 import Lore.Targets (defaultLoadTargetsOptions)
 import qualified Lore.Targets as Targets
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (joinPath, splitDirectories, (</>))
 import Test.Hspec
-import TestSupport (fixtureLore, fixtureLoreAt, withFixtureCopy)
+import TestSupport (findSymbols, fixtureLore, fixtureLoreAt, lookupRootSymbolChains, withFixtureCopy)
 
 loadTargets :: (MonadLore m) => Targets.LoadTargetsOptions -> m ()
 loadTargets options = void (Targets.loadTargets options)
@@ -426,12 +425,12 @@ spec = do
         references <-
           fixtureLoreAt fixtureRoot do
             loadTargets defaultLoadTargetsOptions
-            resolvedRoots <- lookupRootSymbolInfoWithChain "TestChain.Roots.Wrapped"
-            case resolvedRoots of
-              [resolvedRoot] ->
-                resolveReferenceMatchesForNames resolvedRoot.rootSymbolChain
+            resolvedRootChains <- lookupRootSymbolChains "TestChain.Roots.Wrapped"
+            case resolvedRootChains of
+              [rootChain] ->
+                resolveReferenceMatchesForNames rootChain
               _ ->
-                error ("unexpected resolved roots count: " <> show (length resolvedRoots))
+                error ("unexpected resolved roots count: " <> show (length resolvedRootChains))
 
         let referenceSlices = map referenceSlice references
         referenceSlices
@@ -482,12 +481,12 @@ spec = do
         referenceMatches <-
           fixtureLoreAt fixtureRoot do
             loadTargets defaultLoadTargetsOptions
-            resolvedRoots <- lookupRootSymbolInfoWithChain "TestRefs.RecordSnippet.Result"
-            case resolvedRoots of
-              [resolvedRoot] ->
-                resolveReferenceMatchesForNames resolvedRoot.rootSymbolChain
+            resolvedRootChains <- lookupRootSymbolChains "TestRefs.RecordSnippet.Result"
+            case resolvedRootChains of
+              [rootChain] ->
+                resolveReferenceMatchesForNames rootChain
               _ ->
-                error ("unexpected resolved roots count: " <> show (length resolvedRoots))
+                error ("unexpected resolved roots count: " <> show (length resolvedRootChains))
 
         case referenceMatches of
           [ReferenceMatch {matchedReferenceSpans, matchedReferenceUsageSpans}] -> do

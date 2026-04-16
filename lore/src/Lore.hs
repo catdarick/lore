@@ -10,13 +10,29 @@ module Lore
     defaultLoadTargetsOptions,
     loadTargets,
     getLastLoadTargetsResult,
+    NormalizedOccName,
+    NormalizedModuleName,
+    NormalizedName (occName, moduleName),
+    parseAndNormalizeName,
+    normalizeModuleName,
     Symbol (..),
     SymbolVisibility (..),
+    ExportedSymbolNode (..),
     SymbolCategory (..),
     classifySymbolCategory,
     SymbolInfo (..),
     Instances (..),
+    PathToRoot (..),
+    findMatchingSymbols,
+    findMatchingSymbolsRoots,
+    resolveModule,
+    listSymbolsExportedByModule,
+    filterExportedSymbolNodesByTypeHint,
     lookupSymbolInfo,
+    listIntersectingInstances,
+    listAssociatedInstances,
+    resolvePathToRoot,
+    mergePathsToRootOn,
     resolveInstanceDefinitions,
     resolveDefinitionSlice,
     resolveReferenceMatchesForNames,
@@ -50,6 +66,7 @@ import Lore.Diagnostics
 import Lore.Interpreter
 import Lore.Logger
 import Lore.Lookup
+import Lore.Module
 import Lore.Monad (LoreMonadT, MonadLore)
 import Lore.Session
 import Lore.Targets

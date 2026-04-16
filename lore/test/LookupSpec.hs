@@ -3,7 +3,10 @@ module LookupSpec
   )
 where
 
-import Data.List (isInfixOf)
+import Control.Monad (forM)
+import Data.List (foldl', isInfixOf)
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC
@@ -11,27 +14,30 @@ import qualified GHC.Plugins as Plugins
 import qualified GHC.Utils.Outputable as Outputable
 import Lore
   ( ExportedSymbolNode (..),
-    LookupInstancesQuery (..),
-    LookupInstancesResult (..),
-    MatchingInstance (..),
+    Instances (..),
+    MonadLore,
     Symbol (..),
     SymbolCategory (..),
     SymbolInfo (..),
     SymbolVisibility (..),
     classifySymbolCategory,
     defaultLoadTargetsOptions,
-    findSymbols,
-    listExportedSymbolsByModule,
+    listAssociatedInstances,
     loadTargets,
-    lookupIntersectingInstances,
-    lookupIntersectingRootInstances,
-    lookupRootSymbolInfo,
   )
-import Lore.Lookup (filterExportedSymbolNodesByTypeHint)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import Test.Hspec
-import TestSupport (fixtureLore, fixtureLoreAt, withFixtureCopy)
+import TestSupport
+  ( filterExportedSymbolNodesByTypeHint,
+    findRootSymbols,
+    findSymbols,
+    fixtureLore,
+    fixtureLoreAt,
+    listExportedSymbolsByModule,
+    lookupRootSymbolInfo,
+    withFixtureCopy,
+  )
 
 spec :: Spec
 spec =
@@ -95,9 +101,8 @@ spec =
             _ <- loadTargets defaultLoadTargetsOptions
             lookupRootSymbolInfo "Prelude.map"
 
-        result `shouldSatisfy` (not . null)
-        result
-          `shouldSatisfy` all (\symbolInfo -> elem "Prelude" (map (GHC.moduleNameString . GHC.moduleName) symbolInfo.exportedFrom))
+        null result `shouldBe` False
+        all (symbolExportedFromModule "Prelude") result `shouldBe` True
 
       it "supports module-qualified dotted operators" do
         result <-
@@ -158,7 +163,7 @@ spec =
             findSymbols "supportValues"
 
         length result `shouldBe` 1
-        all (== Symbol'Unexported) (fmap visibility result) `shouldBe` True
+        all (== Symbol'Unexported) (fmap (.visibility) result) `shouldBe` True
         fmap (\symbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name)) result
           `shouldBe` ["Demo.Support"]
 
@@ -200,7 +205,7 @@ spec =
             findSymbols "supportValues"
 
         length result `shouldBe` 1
-        all (== Symbol'Unexported) (fmap visibility result) `shouldBe` True
+        all (== Symbol'Unexported) (fmap (.visibility) result) `shouldBe` True
         fmap (\symbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name)) result
           `shouldBe` ["Demo.Support"]
 
@@ -246,43 +251,43 @@ spec =
     describe "lookupIntersectingInstances" do
       it "intersects class instances across multiple symbol queries" do
         withFixtureInstances \fixtureRoot -> do
-          result <-
+          (queryMatchCounts, renderedInstances) <-
             fixtureLoreAt fixtureRoot do
               _ <- loadTargets defaultLoadTargetsOptions
-              lookupIntersectingInstances ["HasIndex", "Indexed"]
+              lookupIntersectingInstancesForQueries False ["HasIndex", "Indexed"]
 
-          lookupInstancesQueryMatchCounts result `shouldSatisfy` all (> 0)
-          renderMatchingInstances result `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
+          queryMatchCounts `shouldSatisfy` all (> 0)
+          renderedInstances `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
 
       it "supports root-resolved symbol queries before intersecting instances" do
         withFixtureInstances \fixtureRoot -> do
-          result <-
+          (queryMatchCounts, renderedInstances) <-
             fixtureLoreAt fixtureRoot do
               _ <- loadTargets defaultLoadTargetsOptions
-              lookupIntersectingRootInstances ["indexedValues", "HasIndex"]
+              lookupIntersectingInstancesForQueries True ["indexedValues", "HasIndex"]
 
-          lookupInstancesQueryMatchCounts result `shouldSatisfy` all (> 0)
-          renderMatchingInstances result `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
+          queryMatchCounts `shouldSatisfy` all (> 0)
+          renderedInstances `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
 
       it "supports module-qualified symbol queries" do
         withFixtureInstances \fixtureRoot -> do
-          result <-
+          (queryMatchCounts, renderedInstances) <-
             fixtureLoreAt fixtureRoot do
               _ <- loadTargets defaultLoadTargetsOptions
-              lookupIntersectingRootInstances ["Demo.Indexed", "HasIndex"]
+              lookupIntersectingInstancesForQueries True ["Demo.Indexed", "HasIndex"]
 
-          lookupInstancesQueryMatchCounts result `shouldSatisfy` all (> 0)
-          renderMatchingInstances result `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
+          queryMatchCounts `shouldSatisfy` all (> 0)
+          renderedInstances `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
 
       it "intersects family instances across multiple symbol queries" do
         withFixtureInstances \fixtureRoot -> do
-          result <-
+          (queryMatchCounts, renderedInstances) <-
             fixtureLoreAt fixtureRoot do
               _ <- loadTargets defaultLoadTargetsOptions
-              lookupIntersectingInstances ["Elem", "Indexed"]
+              lookupIntersectingInstancesForQueries False ["Elem", "Indexed"]
 
-          lookupInstancesQueryMatchCounts result `shouldSatisfy` all (> 0)
-          renderMatchingInstances result `shouldSatisfy` matchesRenderedInstance "Elem (Indexed a) = a"
+          queryMatchCounts `shouldSatisfy` all (> 0)
+          renderedInstances `shouldSatisfy` matchesRenderedInstance "Elem (Indexed a) = a"
 
 exportedNodeOccNames :: [ExportedSymbolNode] -> [String]
 exportedNodeOccNames nodes =
@@ -341,20 +346,54 @@ instanceDefinitions =
       "  toIndex _ = Map.empty"
     ]
 
-lookupInstancesQueryMatchCounts :: LookupInstancesResult -> [Int]
-lookupInstancesQueryMatchCounts =
-  map (length . lookupInstancesQueryMatches) . lookupInstancesQueries
+lookupIntersectingInstancesForQueries :: (MonadLore m) => Bool -> [T.Text] -> m ([Int], [String])
+lookupIntersectingInstancesForQueries resolveRoots queries = do
+  queryMatches <- forM queries resolveQueryMatches
+  queryInstances <- mapM listUnionInstancesForSymbols queryMatches
+  let queryMatchCounts = map length queryMatches
+      intersectedInstances = intersectAllInstances queryInstances
+  pure (queryMatchCounts, renderInstances intersectedInstances)
+  where
+    resolveQueryMatches query =
+      if resolveRoots
+        then findRootSymbols query
+        else findSymbols query
 
-renderMatchingInstances :: LookupInstancesResult -> [String]
-renderMatchingInstances =
-  map renderMatchingInstance . lookupInstancesResults
+listUnionInstancesForSymbols :: (MonadLore m) => [Symbol] -> m Instances
+listUnionInstancesForSymbols symbols = do
+  instancesPerSymbol <- mapM (listAssociatedInstances . (.name)) symbols
+  pure (foldl' unionInstances (Instances [] []) instancesPerSymbol)
 
-renderMatchingInstance :: MatchingInstance -> String
-renderMatchingInstance = \case
-  MatchingClassInstance _ matchingClassInstance ->
-    Outputable.showSDocUnsafe (Outputable.ppr matchingClassInstance)
-  MatchingFamilyInstance _ matchingFamilyInstance ->
-    Outputable.showSDocUnsafe (Outputable.ppr matchingFamilyInstance)
+unionInstances :: Instances -> Instances -> Instances
+unionInstances left right =
+  Instances
+    { classInstances = deduplicateClassInstances (left.classInstances <> right.classInstances),
+      familyInstances = deduplicateFamilyInstances (left.familyInstances <> right.familyInstances)
+    }
+  where
+    deduplicateClassInstances = Map.elems . Map.fromList . map (\instance_ -> (GHC.getName instance_, instance_))
+    deduplicateFamilyInstances = Map.elems . Map.fromList . map (\instance_ -> (GHC.getName instance_, instance_))
+
+intersectAllInstances :: [Instances] -> Instances
+intersectAllInstances = \case
+  [] -> Instances [] []
+  firstInstances : restInstances ->
+    foldl' intersectInstances firstInstances restInstances
+
+intersectInstances :: Instances -> Instances -> Instances
+intersectInstances left right =
+  Instances
+    { classInstances = filter (\instance_ -> GHC.getName instance_ `Set.member` rightClassNames) left.classInstances,
+      familyInstances = filter (\instance_ -> GHC.getName instance_ `Set.member` rightFamilyNames) left.familyInstances
+    }
+  where
+    rightClassNames = Set.fromList (map GHC.getName right.classInstances)
+    rightFamilyNames = Set.fromList (map GHC.getName right.familyInstances)
+
+renderInstances :: Instances -> [String]
+renderInstances instances_ =
+  map (Outputable.showSDocUnsafe . Outputable.ppr) instances_.classInstances
+    <> map (Outputable.showSDocUnsafe . Outputable.ppr) instances_.familyInstances
 
 matchesRenderedInstance :: String -> [String] -> Bool
 matchesRenderedInstance expected = \case
@@ -365,3 +404,11 @@ demoCategories :: [SymbolInfo] -> [SymbolCategory]
 demoCategories =
   map (classifySymbolCategory . symbolThing)
     . filter ((== "Demo") . GHC.moduleNameString . GHC.moduleName . definedIn)
+
+symbolExportedFromModule :: String -> SymbolInfo -> Bool
+symbolExportedFromModule moduleName symbolInfo =
+  case symbolInfo.visibility of
+    Symbol'Unexported ->
+      False
+    Symbol'ExportedFrom modules_ ->
+      moduleName `elem` map (GHC.moduleNameString . GHC.moduleName) (Set.toList modules_)
