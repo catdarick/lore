@@ -10,6 +10,7 @@ import qualified Data.Text as T
 import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConfig (..), noLogHandle, prettyLoggerHandle, runLore)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
 import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
+import Lore.Mcp.Tools.Feedback (feedbackTool)
 import Lore.Mcp.Tools.FindReferences (findReferencesTool)
 import Lore.Mcp.Tools.GetDefinition (getDefinitionTool)
 import Lore.Mcp.Tools.GetTypeOfExpression (getTypeOfExpressionTool)
@@ -23,7 +24,15 @@ import Text.Read (readMaybe)
 runLoreMcpServer :: IO ()
 runLoreMcpServer = do
   sessionConfig <- resolveSessionConfig
+  maybeFeedbackFilePath <- lookupEnv "LORE_MCP_FEEDBACK_FILE"
   runLore sessionConfig do
+    let feedbackTools =
+          case maybeFeedbackFilePath of
+            Just feedbackFilePath
+              | not (null feedbackFilePath) ->
+                  [feedbackTool feedbackFilePath]
+            _ ->
+              []
     runMcpServer
       McpServer
         { name = "lore",
@@ -38,6 +47,7 @@ runLoreMcpServer = do
               getDefinitionTool,
               findReferencesTool
             ]
+              <> feedbackTools
         }
   where
     defaultSessionConfig =
