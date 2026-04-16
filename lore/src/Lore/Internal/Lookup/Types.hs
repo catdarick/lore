@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveAnyClass #-}
+
 module Lore.Internal.Lookup.Types
   ( SymbolsMap (..),
     SymbolsIndex (..),
@@ -7,18 +9,20 @@ module Lore.Internal.Lookup.Types
     Symbol (..),
     SymbolVisibility (..),
     symbolExportedFrom,
+    isSymbolNameMatching,
   )
 where
 
-import Data.List (intercalate)
+import Control.DeepSeq (NFData)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Data.Text (Text)
 import qualified GHC
+import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
+import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, normalizeName)
 
 newtype SymbolsIndex = SymbolsIndex
-  { unSymbolsIndex :: Map.Map Text [Symbol]
+  { unSymbolsIndex :: Map.Map NormalizedOccName (Set.Set Symbol)
   }
 
 data SymbolsMap = SymbolsMap
@@ -43,27 +47,27 @@ data Symbol = Symbol
   { name :: GHC.Name,
     visibility :: SymbolVisibility
   }
+  deriving (Generic, NFData, Eq, Ord)
 
 data SymbolVisibility
-  = Symbol'ExportedFrom [GHC.Module]
+  = Symbol'ExportedFrom (Set.Set GHC.Module)
   | Symbol'Unexported
-  deriving stock (Eq)
+  deriving (Generic, NFData, Eq, Ord)
 
-symbolExportedFrom :: Symbol -> [GHC.Module]
+symbolExportedFrom :: Symbol -> Set.Set GHC.Module
 symbolExportedFrom symbol =
   case symbol.visibility of
     Symbol'ExportedFrom modules_ -> modules_
-    Symbol'Unexported -> []
+    Symbol'Unexported -> Set.empty
 
-instance Show Symbol where
-  show symbol = showName symbol.name <> " (" <> showVisibility symbol.visibility <> ")"
-    where
-      showName n = case GHC.nameModule_maybe n of
-        Nothing -> "<UNKNOWN>." <> GHC.occNameString (GHC.nameOccName n)
-        Just m -> GHC.moduleNameString (GHC.moduleName m) <> "." <> GHC.occNameString (GHC.nameOccName n)
-      showModule m = GHC.moduleNameString (GHC.moduleName m)
-      showModules xs = intercalate ", " (map showModule xs)
-      showVisibility visibility_ =
-        case visibility_ of
-          Symbol'ExportedFrom modules_ -> "exported from: " <> showModules modules_
-          Symbol'Unexported -> "unexported"
+isSymbolNameMatching :: NormalizedName -> Symbol -> Bool
+isSymbolNameMatching name symbol =
+  let symbolName = normalizeName symbol.name
+      definingModuleName = maybe Set.empty Set.singleton symbolName.moduleName
+      exportingModuleNames = Set.map extractAndNormalizeModuleName (symbolExportedFrom symbol)
+      symbolAssociatedModules = definingModuleName <> exportingModuleNames
+   in case name.moduleName of
+        Nothing -> symbolName.occName == name.occName
+        Just hintedModule ->
+          symbolName.occName == name.occName
+            && hintedModule `Set.member` symbolAssociatedModules

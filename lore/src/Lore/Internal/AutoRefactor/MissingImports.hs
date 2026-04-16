@@ -12,6 +12,7 @@ import Data.List (nubBy, sortBy)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe, listToMaybe, maybeToList)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC as Ghc
@@ -31,7 +32,8 @@ import Lore.Internal.AutoRefactor.MissingImports.Diagnostic
     MissingSymbolKind (..),
     ResolveMissingImportDetails (..),
   )
-import Lore.Internal.Lookup.SymbolsMap (lookupSymbolsInMap)
+import Lore.Internal.Lookup.Name (parseAndNormalizeName)
+import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap)
 import Lore.Internal.Lookup.Types (Symbol (..), SymbolVisibility (..), SymbolsMap, symbolExportedFrom)
 import Lore.Internal.Session (SessionContext (customPrelude))
 import qualified Lore.Logger as Log
@@ -48,7 +50,8 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
           let matchingExportedSymbols =
                 filter (matchesMissingKind requestMissingSymbol) $
                   filter isExportedSymbol $
-                    lookupSymbolsInMap requestMissingSymbol.missingName symbolsMap
+                    Set.toList $
+                      findMatchingSymbolsInMap (parseAndNormalizeName requestMissingSymbol.missingName) symbolsMap
               selectionDecision =
                 decideModuleSelection
                   requestMissingSymbol
@@ -66,7 +69,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
                     listToMaybe
                       [ symbol
                       | symbol <- matchingExportedSymbols,
-                        moduleName `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) (symbolExportedFrom symbol)
+                        moduleName `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) (Set.toList $ symbolExportedFrom symbol)
                       ]
               maybeImportItem <- renderImportItem requestMissingSymbol selectedSymbol
               pure $
@@ -76,7 +79,8 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
           let matchingExportedSymbols =
                 filter (matchesMissingKind requestMissingSymbol) $
                   filter isExportedSymbol $
-                    lookupSymbolsInMap requestMissingSymbol.missingName symbolsMap
+                    Set.toList $
+                      findMatchingSymbolsInMap (parseAndNormalizeName requestMissingSymbol.missingName) symbolsMap
               selectedTargetModule =
                 fromMaybe
                   requestTargetModule
@@ -87,7 +91,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
                         listToMaybe
                           [ symbol
                           | symbol <- matchingExportedSymbols,
-                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) (symbolExportedFrom symbol)
+                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) (Set.toList $ symbolExportedFrom symbol)
                           ]
                   maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
                   if selectedTargetModule /= requestTargetModule
@@ -108,7 +112,7 @@ suggestMissingImportOperations parsedImports symbolsMap requests = do
                         listToMaybe
                           [ symbol
                           | symbol <- matchingExportedSymbols,
-                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) (symbolExportedFrom symbol)
+                            selectedTargetModule `elem` map (T.pack . GHC.moduleNameString . GHC.moduleName) (Set.toList $ symbolExportedFrom symbol)
                           ]
                   maybeImportItem <- maybe (renderImportItem requestMissingSymbol selectedSymbol) (pure . Just) requestImportItemOverride
                   pure $
@@ -188,7 +192,7 @@ candidateModulesForSymbols =
 
 candidateModulesForSymbol :: Symbol -> [Text]
 candidateModulesForSymbol =
-  map (T.pack . GHC.moduleNameString . GHC.moduleName) . symbolExportedFrom
+  map (T.pack . GHC.moduleNameString . GHC.moduleName) . Set.toList . symbolExportedFrom
 
 existingUnqualifiedImportCandidate :: [ParsedImport] -> [Text] -> Maybe Text
 existingUnqualifiedImportCandidate parsedImports candidateModules =

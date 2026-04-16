@@ -9,6 +9,7 @@ module Lore.Definition
     RequiredImport (..),
     ImportQualifiedStyle (..),
     RequiredImportItem (..),
+    resolveInstanceDefinitions,
   )
 where
 
@@ -35,6 +36,7 @@ import Lore.Internal.Lookup.ModSummaries (getModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
+import Lore.Lookup (Instances (..), listAssociatedInstances)
 import Lore.Monad
 import UnliftIO (forConcurrently, modifyMVar_, readMVar)
 
@@ -471,3 +473,10 @@ sortDeclarationSpans =
 dedupeDeclarationSpans :: [DeclarationSpans] -> [DeclarationSpans]
 dedupeDeclarationSpans =
   nubOrdOn (\declarationSpans -> (show declarationSpans.declarationSpan, fmap show declarationSpans.signatureSpan))
+
+resolveInstanceDefinitions :: (MonadLore m) => GHC.Name -> m [DefinitionSlice]
+resolveInstanceDefinitions name = do
+  instances <- listAssociatedInstances name
+  let allNames = [GHC.getName clsInst | clsInst <- instances.classInstances] ++ [GHC.getName famInst | famInst <- instances.familyInstances]
+  resolved <- mapM resolveDefinitionSlice allNames
+  pure $ catMaybes resolved

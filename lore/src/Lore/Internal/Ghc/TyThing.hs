@@ -2,7 +2,7 @@
 
 module Lore.Internal.Ghc.TyThing
   ( isMentionedInTypeOfThing,
-    isMentionedByOccString,
+    isMentionedByOccName,
   )
 where
 
@@ -16,10 +16,10 @@ import GHC.Core.DataCon (DataCon, EqSpec, dataConFullSig, dataConName, eqSpecPre
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
 import GHC.Core.Type
-import GHC.Types.Name (Name, nameOccName)
-import GHC.Types.Name.Occurrence (occNameString)
+import GHC.Types.Name (Name)
 import GHC.Types.TyThing
 import GHC.Types.Var
+import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, normalizeName)
 
 type VisitedNames = Set.Set Name
 
@@ -27,9 +27,9 @@ isMentionedInTypeOfThing :: (Name -> Bool) -> TyThing -> Bool
 isMentionedInTypeOfThing predicate tyThing =
   evalState (mentionsInTyThing predicate tyThing) Set.empty
 
-isMentionedByOccString :: String -> TyThing -> Bool
-isMentionedByOccString occString =
-  isMentionedInTypeOfThing (\name -> occNameString (nameOccName name) == occString)
+isMentionedByOccName :: NormalizedOccName -> TyThing -> Bool
+isMentionedByOccName targetOccName =
+  isMentionedInTypeOfThing (\name -> (normalizeName name).occName == targetOccName)
 
 mentionsInTyThing :: (Name -> Bool) -> TyThing -> State VisitedNames Bool
 mentionsInTyThing predicate = \case

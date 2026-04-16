@@ -55,6 +55,7 @@ library
       Lore.Internal.Ghc.TyThing
       Lore.Internal.Interpreter
       Lore.Internal.Lookup.ModSummaries
+      Lore.Internal.Lookup.Name
       Lore.Internal.Lookup.NameToInstances
       Lore.Internal.Lookup.SymbolsMap
       Lore.Internal.Lookup.Types
@@ -64,6 +65,9 @@ library
       Lore.Internal.Session
       Lore.Internal.Targets
       Lore.Internal.Targets.Result
+      Lore.Lib.Force
+      Lore.Lib.Text
+      Lore.Module
       Paths_lore
   autogen-modules:
       Paths_lore
