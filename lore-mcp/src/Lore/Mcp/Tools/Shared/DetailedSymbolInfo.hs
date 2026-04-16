@@ -4,7 +4,6 @@ module Lore.Mcp.Tools.Shared.DetailedSymbolInfo
 where
 
 import Data.List (intercalate)
-import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -14,10 +13,7 @@ import qualified GHC.Types.TyThing as TyThing
 import qualified GHC.Types.TyThing.Ppr as TyThing
 import Lore (Instances (..), SymbolInfo (..), SymbolVisibility (..))
 import Lore.Mcp.Internal.Render
-  ( ListMarker (BulletMarker),
-    RenderList (..),
-    Renderable (renderText),
-    Truncation (..),
+  ( Renderable (renderText),
     indented,
     (|>),
   )
@@ -37,7 +33,7 @@ instance Renderable DetailedSymbolInfo where
         |> indented
           ( definitionLocation symbolInfo
               |> renderExportedModules symbolInfo
-              |> classInstancesSection instancesInfo
+              |> classInstancesSection symbolInfo instancesInfo
           )
     where
       symbolInfo = detailedSymbolInfo.symbolInfo
@@ -82,25 +78,16 @@ renderExportedModules symbolInfo =
         Symbol'ExportedFrom modules ->
           T.pack (intercalate ", " (map (T.unpack . renderModuleName) (Set.toList modules)))
 
-classInstancesSection :: Instances -> Maybe RenderList
-classInstancesSection instancesInfo =
-  case NE.nonEmpty instancesInfo.classInstances of
-    Nothing -> Nothing
-    Just nonEmptyInstances -> Just (instancesList nonEmptyInstances)
-  where
-    instancesList neInstances =
-      RenderList
-        { renderHeader =
-            \_ -> Just "Class instances:",
-          contentIndentWidth = 2,
-          markerStyle = BulletMarker,
-          itemsList = fmap CompactClassInstance neInstances,
-          skip = 0,
-          truncation =
-            Just
-              Truncation
-                { maxItems = 15,
-                  itemName = "instances",
-                  skipArgName = Nothing
-                }
-        }
+classInstancesSection :: SymbolInfo -> Instances -> Maybe Text
+classInstancesSection symbolInfo instancesInfo =
+  case instancesInfo.classInstances of
+    [] -> Nothing
+    classInstances ->
+      Just
+        ( "Class instances: "
+            <> T.intercalate
+              ", "
+              [ renderText (CompactClassInstance symbolInfo classInstance)
+              | classInstance <- classInstances
+              ]
+        )
