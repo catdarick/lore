@@ -8,8 +8,9 @@ import qualified Data.Aeson as J
 import Data.Either (lefts)
 import Data.Function (on)
 import Data.List (nubBy, sortOn)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.OpenApi (ToSchema)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
@@ -18,9 +19,12 @@ import Lore
   ( DefinitionSlice (..),
     LoadTargetsResult (..),
     MonadLore,
+    Symbol (..),
     SymbolInfo (..),
+    findMatchingSymbolsRoots,
     getLastLoadTargetsResult,
-    lookupRootSymbolInfo,
+    lookupSymbolInfo,
+    parseAndNormalizeName,
     resolveDefinitionClosure,
     resolveDefinitionSlice,
   )
@@ -120,7 +124,7 @@ resolveRequestedSymbols symbols = do
 
 resolveRequestedSymbol :: (MonadLore m) => Text -> m (Either AmbiguousQuery ResolvedQuery)
 resolveRequestedSymbol symbol = do
-  symbolInfos <- lookupRootSymbolInfo symbol
+  symbolInfos <- lookupRootSymbolInfos symbol
   pure $
     case symbolInfos of
       [] ->
@@ -133,6 +137,11 @@ resolveRequestedSymbol symbol = do
             { ambiguousQueryText = symbol,
               ambiguousQueryMatches = ambiguousMatches
             }
+
+lookupRootSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
+lookupRootSymbolInfos query = do
+  rootSymbols <- Set.toList <$> findMatchingSymbolsRoots (parseAndNormalizeName query)
+  catMaybes <$> mapM (lookupSymbolInfo . (.name)) rootSymbols
 
 renderSymbolDefinitions :: (MonadLore m) => Int -> Int -> [SymbolInfo] -> m (Maybe PaginatedDefinitionModules)
 renderSymbolDefinitions skip recursionDepth symbolInfos = do

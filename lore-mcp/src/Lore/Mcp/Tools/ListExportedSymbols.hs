@@ -12,8 +12,19 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as Plugins
-import Lore (ExportedSymbolNode (..), MonadLore, SymbolCategory (..), classifySymbolCategory, getLastLoadTargetsResult, listExportedSymbolsByModule)
-import Lore.Lookup (filterExportedSymbolNodesByTypeHint)
+import Lore
+  ( ExportedSymbolNode (..),
+    MonadLore,
+    SymbolCategory (..),
+    classifySymbolCategory,
+    filterExportedSymbolNodesByTypeHint,
+    getLastLoadTargetsResult,
+    listSymbolsExportedByModule,
+    mkNormalizedModuleName,
+    occName,
+    parseAndNormalizeName,
+    resolveModule,
+  )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Render (ListMarker (..), RenderList (..), Renderable (..), Truncation (..), (|>))
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
@@ -66,12 +77,13 @@ listExportedSymbolsHandler ListExportedSymbolsArgs {moduleName, packageName, typ
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
-      allSymbols <- listExportedSymbolsByModule moduleName packageName
+      allSymbols <- resolveExportedSymbols moduleName packageName
       let totalSymbols = length allSymbols
           symbolsToRender =
             case typeHint of
               Nothing -> allSymbols
-              Just hint -> filterExportedSymbolNodesByTypeHint hint allSymbols
+              Just hint ->
+                filterExportedSymbolNodesByTypeHint (occName (parseAndNormalizeName hint)) allSymbols
       let toRender =
             renderExportedSymbolsResult resolvedSkip moduleName packageName typeHint totalSymbols symbolsToRender
               |> mkPartialWarning loadResult
@@ -79,6 +91,13 @@ listExportedSymbolsHandler ListExportedSymbolsArgs {moduleName, packageName, typ
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
+
+resolveExportedSymbols :: (MonadLore m) => Text -> Maybe Text -> m [ExportedSymbolNode]
+resolveExportedSymbols moduleName maybePackageName = do
+  let normalizedModuleName =
+        mkNormalizedModuleName moduleName
+  maybeModule <- resolveModule normalizedModuleName maybePackageName
+  maybe (pure []) listSymbolsExportedByModule maybeModule
 
 renderExportedSymbolsResult :: Int -> Text -> Maybe Text -> Maybe Text -> Int -> [ExportedSymbolNode] -> Text
 renderExportedSymbolsResult skip moduleName packageName typeHint totalSymbols filteredSymbols =

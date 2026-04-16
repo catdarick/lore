@@ -18,7 +18,6 @@ import qualified Data.List.NonEmpty as NE
 import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import Data.Text (Text)
-import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import qualified GHC.Plugins as GHC
 import qualified Lore
@@ -147,7 +146,7 @@ lookupRootSymbolChains query = do
 listExportedSymbolsByModule :: (Lore.MonadLore m) => Text -> Maybe Text -> m [Lore.ExportedSymbolNode]
 listExportedSymbolsByModule moduleName maybePackageName = do
   let normalizedModuleName =
-        Lore.normalizeModuleName (GHC.mkModuleName (T.unpack moduleName))
+        Lore.mkNormalizedModuleName moduleName
   maybeModule <- Lore.resolveModule normalizedModuleName maybePackageName
   maybe (pure []) Lore.listSymbolsExportedByModule maybeModule
 

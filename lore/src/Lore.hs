@@ -15,6 +15,7 @@ module Lore
     NormalizedName (occName, moduleName),
     parseAndNormalizeName,
     normalizeModuleName,
+    mkNormalizedModuleName,
     Symbol (..),
     SymbolVisibility (..),
     ExportedSymbolNode (..),

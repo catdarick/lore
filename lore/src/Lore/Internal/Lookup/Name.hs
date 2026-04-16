@@ -12,6 +12,7 @@ module Lore.Internal.Lookup.Name
     unNormalizedOccName,
     unNormalizedModuleName,
     normalizeModuleName,
+    mkNormalizedModuleName,
     mkGhcModuleName,
     extractAndNormalizeOccName,
     extractAndNormalizeModuleName,
@@ -71,6 +72,9 @@ normalizeModuleName :: GHC.ModuleName -> NormalizedModuleName
 normalizeModuleName mdlName =
   let moduleName = T.pack $ GHC.moduleNameString mdlName
    in NormalizedModuleName moduleName
+
+mkNormalizedModuleName :: Text -> NormalizedModuleName
+mkNormalizedModuleName = NormalizedModuleName
 
 mkGhcModuleName :: NormalizedModuleName -> GHC.ModuleName
 mkGhcModuleName (NormalizedModuleName moduleName) =

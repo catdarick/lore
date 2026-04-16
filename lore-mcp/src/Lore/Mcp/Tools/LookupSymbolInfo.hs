@@ -6,12 +6,13 @@ where
 import qualified Data.Aeson as J
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.OpenApi (ToSchema)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Lore (MonadLore, SymbolInfo, getLastLoadTargetsResult, lookupRootSymbolInfo)
+import Lore (MonadLore, Symbol (..), SymbolInfo (..), findMatchingSymbolsRoots, getLastLoadTargetsResult, listAssociatedInstances, lookupSymbolInfo, parseAndNormalizeName)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Render
   ( ListMarker (..),
@@ -60,30 +61,31 @@ lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol, skip} = do
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
-      symbolInfos <- lookupRootSymbolInfo symbol
+      symbolInfos <- lookupRootSymbolInfos symbol
+      detailedSymbolInfos <- mapM mkDetailedSymbolInfo symbolInfos
       let toRender =
-            mkRenderedBody symbolInfos
+            mkRenderedBody detailedSymbolInfos
               |> mkPartialWarning loadResult
       pure $ renderText toRender
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
 
-    mkRenderedBody symbolInfos =
-      case NE.nonEmpty symbolInfos of
+    mkRenderedBody detailedSymbolInfos =
+      case NE.nonEmpty detailedSymbolInfos of
         Nothing ->
           "No symbols found for " <> quoteText symbol <> "."
-        Just nonEmptySymbolInfos ->
-          renderText (renderSymbolCandidatesList resolvedSkip nonEmptySymbolInfos)
+        Just nonEmptyDetailedSymbolInfos ->
+          renderText (renderSymbolCandidatesList resolvedSkip nonEmptyDetailedSymbolInfos)
 
-renderSymbolCandidatesList :: Int -> NonEmpty SymbolInfo -> RenderList
-renderSymbolCandidatesList skip symbolInfos =
+renderSymbolCandidatesList :: Int -> NonEmpty DetailedSymbolInfo -> RenderList
+renderSymbolCandidatesList skip detailedSymbolInfos =
   RenderList
     { renderHeader =
         \ctx -> Just $ "Found " <> T.pack (show ctx.totalItems) <> " symbol candidates:",
       contentIndentWidth = 0,
       markerStyle = NumberMarker,
-      itemsList = fmap DetailedSymbolInfo symbolInfos,
+      itemsList = detailedSymbolInfos,
       skip = skip,
       truncation =
         Just
@@ -99,3 +101,17 @@ renderSymbolCandidatesList skip symbolInfos =
 quoteText :: Text -> Text
 quoteText value =
   "\"" <> value <> "\""
+
+lookupRootSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
+lookupRootSymbolInfos query = do
+  rootSymbols <- Set.toList <$> findMatchingSymbolsRoots (parseAndNormalizeName query)
+  catMaybes <$> mapM (lookupSymbolInfo . (.name)) rootSymbols
+
+mkDetailedSymbolInfo :: (MonadLore m) => SymbolInfo -> m DetailedSymbolInfo
+mkDetailedSymbolInfo symbolInfo = do
+  instancesInfo <- listAssociatedInstances symbolInfo.symbolName
+  pure
+    DetailedSymbolInfo
+      { symbolInfo,
+        instancesInfo
+      }

@@ -5,13 +5,14 @@ where
 
 import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Iface.Syntax as Iface
 import qualified GHC.Types.TyThing as TyThing
 import qualified GHC.Types.TyThing.Ppr as TyThing
-import Lore (SymbolInfo (..))
+import Lore (Instances (..), SymbolInfo (..), SymbolVisibility (..))
 import Lore.Mcp.Internal.Render
   ( ListMarker (BulletMarker),
     RenderList (..),
@@ -24,17 +25,23 @@ import Lore.Mcp.Tools.Shared.CompactClassInstance (CompactClassInstance (Compact
 import Lore.Mcp.Tools.Shared.DefinitionLocation (mkDefinitionLocation)
 import Lore.Mcp.Tools.Shared.Outputable (renderOutputable, renderOutputableWith)
 
-newtype DetailedSymbolInfo = DetailedSymbolInfo SymbolInfo
+data DetailedSymbolInfo = DetailedSymbolInfo
+  { symbolInfo :: SymbolInfo,
+    instancesInfo :: Instances
+  }
 
 instance Renderable DetailedSymbolInfo where
-  renderText (DetailedSymbolInfo symbolInfo) =
+  renderText detailedSymbolInfo =
     renderText $
       renderSymbolHeader symbolInfo
         |> indented
           ( definitionLocation symbolInfo
               |> renderExportedModules symbolInfo
-              |> classInstancesSection symbolInfo
+              |> classInstancesSection instancesInfo
           )
+    where
+      symbolInfo = detailedSymbolInfo.symbolInfo
+      instancesInfo = detailedSymbolInfo.instancesInfo
 
 renderSymbolHeader :: SymbolInfo -> Text
 renderSymbolHeader symbolInfo =
@@ -69,13 +76,15 @@ renderExportedModules symbolInfo =
   where
     renderModuleName =
       T.pack . GHC.moduleNameString . GHC.moduleName
-    renderedModules = case symbolInfo.exportedFrom of
-      [] -> "<none>"
-      modules -> T.pack (intercalate ", " (map (T.unpack . renderModuleName) modules))
+    renderedModules =
+      case symbolInfo.visibility of
+        Symbol'Unexported -> "<none>"
+        Symbol'ExportedFrom modules ->
+          T.pack (intercalate ", " (map (T.unpack . renderModuleName) (Set.toList modules)))
 
-classInstancesSection :: SymbolInfo -> Maybe RenderList
-classInstancesSection symbolInfo =
-  case NE.nonEmpty symbolInfo.associatedClassInstances of
+classInstancesSection :: Instances -> Maybe RenderList
+classInstancesSection instancesInfo =
+  case NE.nonEmpty instancesInfo.classInstances of
     Nothing -> Nothing
     Just nonEmptyInstances -> Just (instancesList nonEmptyInstances)
   where

@@ -6,6 +6,7 @@ module Lore.Lookup
     NormalizedName (occName, moduleName),
     parseAndNormalizeName,
     normalizeModuleName,
+    mkNormalizedModuleName,
     Symbol (..),
     SymbolVisibility (..),
     SymbolCategory (..),
@@ -31,7 +32,7 @@ import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
-import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, normalizeModuleName, normalizeName, parseAndNormalizeName)
+import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
