@@ -22,6 +22,7 @@ dependencies:
 - ghc
 - lore
 - text
+- time
 - openapi3
 - lens
 - vector 
@@ -49,6 +50,51 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+
+tests:
+  lore-mcp-test:
+    main:                Spec.hs
+    source-dirs:
+    - test
+    - src
+    other-modules:
+    - GetDefinitionSpec
+    - McpTestSupport
+    - ProtocolRequestSpec
+    - Lore.JsonRpc.Server
+    - Lore.Mcp.Internal.Annotated
+    - Lore.Mcp.Internal.Render
+    - Lore.Mcp.Internal.Tool
+    - Lore.Mcp.Monad
+    - Lore.Mcp.Protocol.Request
+    - Lore.Mcp.Protocol.Server
+    - Lore.Mcp.Server
+    - Lore.Mcp.Tools.ExecuteCode
+    - Lore.Mcp.Tools.Feedback
+    - Lore.Mcp.Tools.FindReferences
+    - Lore.Mcp.Tools.GetDefinition.Cached
+    - Lore.Mcp.Tools.GetDefinition.Regular
+    - Lore.Mcp.Tools.GetDefinition.Shared
+    - Lore.Mcp.Tools.GetTypeOfExpression
+    - Lore.Mcp.Tools.ListExportedSymbols
+    - Lore.Mcp.Tools.LookupInstances
+    - Lore.Mcp.Tools.LookupSymbolInfo
+    - Lore.Mcp.Tools.NotifyKnowledgeReset
+    - Lore.Mcp.Tools.ReloadHomeModules
+    - Lore.Mcp.Tools.Shared
+    - Lore.Mcp.Tools.Shared.CompactClassInstance
+    - Lore.Mcp.Tools.Shared.DefinitionLocation
+    - Lore.Mcp.Tools.Shared.DetailedSymbolInfo
+    - Lore.Mcp.Tools.Shared.Diagnostics
+    - Lore.Mcp.Tools.Shared.Outputable
+    - Lore.Mcp.Tools.Shared.PartialLoadWarning
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -Wno-incomplete-patterns
+    dependencies:
+    - hspec
 
 language: Haskell2010
 

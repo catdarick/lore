@@ -85,7 +85,7 @@ data ResolvedSymbols = ResolvedSymbols
 
 data ResolvedQuery
   = MissingQuery Text
-  | ResolvedQuery SymbolInfo
+  | ResolvedQuery [SymbolInfo]
 
 resolveRequestedSymbols :: (MonadLore m) => [Text] -> m (Either ([Text], [AmbiguousQuery]) ResolvedSymbols)
 resolveRequestedSymbols symbols = do
@@ -96,7 +96,13 @@ resolveRequestedSymbols symbols = do
         Right
           ResolvedSymbols
             { missingQueries = [queryText | Right (MissingQuery queryText) <- resolvedQueries],
-              resolvedSymbolInfos = nubBy ((==) `on` symbolName) [symbolInfo | Right (ResolvedQuery symbolInfo) <- resolvedQueries]
+              resolvedSymbolInfos =
+                nubBy
+                  ((==) `on` symbolName)
+                  [ symbolInfo
+                  | Right (ResolvedQuery symbolInfos) <- resolvedQueries,
+                    symbolInfo <- symbolInfos
+                  ]
             }
       ambiguousQueries ->
         Left
@@ -112,13 +118,23 @@ resolveRequestedSymbol symbol = do
       [] ->
         Right (MissingQuery symbol)
       [symbolInfo] ->
-        Right (ResolvedQuery symbolInfo)
+        Right (ResolvedQuery [symbolInfo])
       ambiguousMatches ->
-        Left
-          AmbiguousQuery
-            { ambiguousQueryText = symbol,
-              ambiguousQueryMatches = ambiguousMatches
-            }
+        if allDefinedInSameModule ambiguousMatches
+          then Right (ResolvedQuery ambiguousMatches)
+          else
+            Left
+              AmbiguousQuery
+                { ambiguousQueryText = symbol,
+                  ambiguousQueryMatches = ambiguousMatches
+                }
+
+allDefinedInSameModule :: [SymbolInfo] -> Bool
+allDefinedInSameModule symbolInfos =
+  case symbolInfos of
+    [] -> True
+    firstSymbolInfo : restSymbolInfos ->
+      all ((== firstSymbolInfo.definedIn) . (.definedIn)) restSymbolInfos
 
 lookupRootSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
 lookupRootSymbolInfos query = do

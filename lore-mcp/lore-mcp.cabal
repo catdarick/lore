@@ -112,6 +112,105 @@ executable lore-mcp
     , mtl
     , openapi3
     , text
+    , time
+    , unliftio
+    , vector
+  default-language: Haskell2010
+
+test-suite lore-mcp-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      GetDefinitionSpec
+      McpTestSupport
+      ProtocolRequestSpec
+      Lore.JsonRpc.Server
+      Lore.Mcp.Internal.Annotated
+      Lore.Mcp.Internal.Render
+      Lore.Mcp.Internal.Tool
+      Lore.Mcp.Monad
+      Lore.Mcp.Protocol.Request
+      Lore.Mcp.Protocol.Server
+      Lore.Mcp.Server
+      Lore.Mcp.Tools.ExecuteCode
+      Lore.Mcp.Tools.Feedback
+      Lore.Mcp.Tools.FindReferences
+      Lore.Mcp.Tools.GetDefinition.Cached
+      Lore.Mcp.Tools.GetDefinition.Regular
+      Lore.Mcp.Tools.GetDefinition.Shared
+      Lore.Mcp.Tools.GetTypeOfExpression
+      Lore.Mcp.Tools.ListExportedSymbols
+      Lore.Mcp.Tools.LookupInstances
+      Lore.Mcp.Tools.LookupSymbolInfo
+      Lore.Mcp.Tools.NotifyKnowledgeReset
+      Lore.Mcp.Tools.ReloadHomeModules
+      Lore.Mcp.Tools.Shared
+      Lore.Mcp.Tools.Shared.CompactClassInstance
+      Lore.Mcp.Tools.Shared.DefinitionLocation
+      Lore.Mcp.Tools.Shared.DetailedSymbolInfo
+      Lore.Mcp.Tools.Shared.Diagnostics
+      Lore.Mcp.Tools.Shared.Outputable
+      Lore.Mcp.Tools.Shared.PartialLoadWarning
+  hs-source-dirs:
+      test
+      src
+  default-extensions:
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -Wno-incomplete-patterns
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , directory
+    , exceptions
+    , filepath
+    , ghc
+    , hspec
+    , lens
+    , lore
+    , mtl
+    , openapi3
+    , text
+    , time
     , unliftio
     , vector
   default-language: Haskell2010
