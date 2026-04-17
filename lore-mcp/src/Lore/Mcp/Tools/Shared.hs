@@ -2,6 +2,7 @@ module Lore.Mcp.Tools.Shared
   ( appendPartialLoadWarning,
     PaginatedDefinitionModules (..),
     paginationSummaryLines,
+    renderDeclarationBodyText,
     renderPaginatedDefinitionModules,
     renderDiagnosticSummary,
     renderFailureWithPartialLoadWarning,
@@ -113,6 +114,10 @@ renderDeclarationSpansText spans = do
   signatureText <- traverse readSpanText spans.signatureSpan
   pure $
     maybe declarationText (<> "\n" <> declarationText) signatureText
+
+renderDeclarationBodyText :: DeclarationSpans -> IO Text
+renderDeclarationBodyText spans =
+  readSpanText spans.declarationSpan
 
 renderDeclarationBlockHeader :: DeclarationSpans -> Text
 renderDeclarationBlockHeader declarationSpans =

@@ -1,75 +1,56 @@
-module Lore.Mcp.Tools.GetDefinition
-  ( getDefinitionTool,
+module Lore.Mcp.Tools.GetDefinition.Shared
+  ( CommonGetDefinitionArgs (..),
+    FilteredDefinitions (..),
+    RenderDefinitionsStrategy,
+    defaultRecursionDepth,
+    maxRenderedDefinitionResults,
+    getDefinitionHandlerWithStrategy,
   )
 where
 
-import Control.Monad.IO.Class (liftIO)
-import qualified Data.Aeson as J
 import Data.Either (lefts)
 import Data.Function (on)
-import Data.List (nubBy, sortOn)
+import Data.List (foldl', nubBy, sortOn)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
-import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GHC
-import GHC.Generics (Generic)
+import qualified GHC.Plugins as GHC
 import Lore
-  ( DefinitionSlice (..),
-    LoadTargetsResult (..),
+  ( LoadTargetsResult (..),
     MonadLore,
+    NamedDefinitionSlice (..),
     Symbol (..),
     SymbolInfo (..),
     findMatchingSymbolsRoots,
     getLastLoadTargetsResult,
     lookupSymbolInfo,
     parseAndNormalizeName,
-    resolveDefinitionClosure,
-    resolveDefinitionSlice,
+    resolveDefinitionClosureNamed,
+    resolveDefinitionSliceNamed,
   )
-import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), Maximum, MinItems, Minimum, WithMeta)
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines)
-import qualified Lore.Mcp.Tools.Shared as Shared
 
-data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
-  { symbols ::
-      Field fieldType [Text]
-        `WithMeta` '[ Description "Exact symbol names to resolve and render definitions for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
-                      ExampleList '["HasIndex", "mkIndexed", "Some.Module.someFunction"],
-                      MinItems 1
-                    ],
-    skip ::
-      Maybe (Field fieldType Int)
-        `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
-                      Example 30
-                    ],
-    recursionDepth ::
-      Field fieldType (Maybe Int)
-        `WithMeta` '[ Description "Maximum recursive definition depth. Defaults to 0. If greater than 0, definitions will be resolved recursively to the specified depth, where 1 means only directly referenced definitions will be included, 2 means definitions directly referenced by those definitions will also be included, and so on.",
-                      Example 2,
-                      Minimum 0,
-                      Maximum 20
-                    ]
+data CommonGetDefinitionArgs = CommonGetDefinitionArgs
+  { symbols :: [Text],
+    skip :: Maybe Int,
+    recursionDepth :: Maybe Int
   }
-  deriving stock (Generic)
 
-instance J.FromJSON (GetDefinitionArgs 'ValueType)
+data FilteredDefinitions = FilteredDefinitions
+  { renderedDefinitions :: Maybe PaginatedDefinitionModules,
+    omittedKnownDefinitions :: [GHC.Name],
+    omittedKnownDefinitionCount :: Int
+  }
 
-instance ToSchema (GetDefinitionArgs 'MetadataType)
+type RenderDefinitionsStrategy m =
+  Int ->
+  [NamedDefinitionSlice] ->
+  m FilteredDefinitions
 
-getDefinitionTool :: (MonadLore m) => SomeTool m
-getDefinitionTool =
-  SomeToolWithArgs
-    ToolWithArgs
-      { name = "getDefinition",
-        description = Just "Render source definitions for one or more exported symbols when source is available. Use recursionDepth to include referenced definitions. Returned imports are minified and may not exactly match original module import formatting. This can still succeed usefully during partial load if the requested definition is available.",
-        handler = getDefinitionHandler
-      }
-
-getDefinitionHandler :: (MonadLore m) => GetDefinitionArgs 'ValueType -> m Text
-getDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} = do
+getDefinitionHandlerWithStrategy :: (MonadLore m) => CommonGetDefinitionArgs -> RenderDefinitionsStrategy m -> m Text
+getDefinitionHandlerWithStrategy CommonGetDefinitionArgs {symbols, skip, recursionDepth} renderDefinitions = do
   maybeLoadResult <- getLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
@@ -80,8 +61,9 @@ getDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} = do
         Left (missingSymbols, ambiguousQueries) ->
           pure (renderAmbiguityResult loadResult missingSymbols ambiguousQueries)
         Right resolvedSymbols -> do
-          renderedDefinitions <- renderSymbolDefinitions resolvedSkip resolvedRecursionDepth resolvedSymbols.resolvedSymbolInfos
-          pure (renderDefinitionResult loadResult symbols resolvedSymbols.missingQueries renderedDefinitions)
+          definitionEntries <- concat <$> mapM (resolveSymbolDefinitions resolvedRecursionDepth) resolvedSymbols.resolvedSymbolInfos
+          filteredDefinitions <- renderDefinitions resolvedSkip definitionEntries
+          pure (renderDefinitionResult loadResult symbols resolvedSymbols.missingQueries filteredDefinitions)
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
@@ -143,30 +125,112 @@ lookupRootSymbolInfos query = do
   rootSymbols <- Set.toList <$> findMatchingSymbolsRoots (parseAndNormalizeName query)
   catMaybes <$> mapM (lookupSymbolInfo . (.name)) rootSymbols
 
-renderSymbolDefinitions :: (MonadLore m) => Int -> Int -> [SymbolInfo] -> m (Maybe PaginatedDefinitionModules)
-renderSymbolDefinitions skip recursionDepth symbolInfos = do
-  definitionSlices <- concat <$> mapM (resolveSymbolDefinitions recursionDepth) symbolInfos
-  liftIO (Shared.renderPaginatedDefinitionModules skip maxRenderedDefinitionResults definitionSlices)
-
-resolveSymbolDefinitions :: (MonadLore m) => Int -> SymbolInfo -> m [DefinitionSlice]
+resolveSymbolDefinitions :: (MonadLore m) => Int -> SymbolInfo -> m [NamedDefinitionSlice]
 resolveSymbolDefinitions recursionDepth symbolInfo
   | recursionDepth == 0 =
-      maybe [] pure <$> resolveDefinitionSlice symbolInfo.symbolName
+      maybe [] pure <$> resolveDefinitionSliceNamed symbolInfo.symbolName
   | otherwise =
-      resolveDefinitionClosure recursionDepth symbolInfo.symbolName
+      resolveDefinitionClosureNamed recursionDepth symbolInfo.symbolName
 
-renderDefinitionResult :: LoadTargetsResult -> [Text] -> [Text] -> Maybe PaginatedDefinitionModules -> Text
+renderDefinitionResult :: LoadTargetsResult -> [Text] -> [Text] -> FilteredDefinitions -> Text
 renderDefinitionResult loadResult symbols missingSymbols renderedDefinitions =
   appendPartialLoadWarning loadResult "Definition results may be incomplete." renderedBody
   where
     renderedBody =
       T.intercalate "\n\n" $
         missingSymbolsSection missingSymbols
-          <> case renderedDefinitions of
-            Nothing ->
-              ["No definitions found for " <> quoteTexts symbols <> "."]
-            Just paginatedDefinitions ->
-              definitionResultsSection paginatedDefinitions
+          <> renderDefinitionSections symbols renderedDefinitions
+
+renderDefinitionSections :: [Text] -> FilteredDefinitions -> [Text]
+renderDefinitionSections symbols filteredDefinitions =
+  case filteredDefinitions.renderedDefinitions of
+    Nothing
+      | filteredDefinitions.omittedKnownDefinitionCount > 0 ->
+          allDefinitionsOmittedSection filteredDefinitions
+      | otherwise ->
+          ["No definitions found for " <> quoteTexts symbols <> "."]
+    Just paginatedDefinitions ->
+      definitionResultsSection paginatedDefinitions
+        <> omittedDefinitionsSection filteredDefinitions
+
+allDefinitionsOmittedSection :: FilteredDefinitions -> [Text]
+allDefinitionsOmittedSection filteredDefinitions =
+  [ T.intercalate "\n" $
+      [ "All matching definitions in this call were already returned earlier in this MCP session and were omitted now:"
+      ]
+        <> omittedDefinitionsDetailLines filteredDefinitions
+  ]
+
+omittedDefinitionsSection :: FilteredDefinitions -> [Text]
+omittedDefinitionsSection filteredDefinitions
+  | filteredDefinitions.omittedKnownDefinitionCount <= 0 =
+      []
+  | otherwise =
+      [ T.intercalate "\n" $
+          [ "Omitted "
+              <> T.pack (show filteredDefinitions.omittedKnownDefinitionCount)
+              <> " definition"
+              <> pluralSuffix filteredDefinitions.omittedKnownDefinitionCount
+              <> " that were already returned earlier in this MCP session:"
+          ]
+            <> omittedDefinitionsDetailLines filteredDefinitions
+      ]
+
+omittedDefinitionsDetailLines :: FilteredDefinitions -> [Text]
+omittedDefinitionsDetailLines filteredDefinitions =
+  omittedDefinitionLines filteredDefinitions.omittedKnownDefinitions
+    <> ["Call this tool with `force` flag to ignore the knowledge check or use `notifyKnowledgeReset` tool to let the server know that client knowledge has been reset to make all the definitions available by default."]
+
+omittedDefinitionLines :: [GHC.Name] -> [Text]
+omittedDefinitionLines omittedDefinitions =
+  map (("  - " <>) . renderModuleOmittedSymbolsLine) groupedDefinitions
+  where
+    groupedDefinitions = sortOn fst (groupOmittedDefinitionsByModule omittedDefinitions)
+
+groupOmittedDefinitionsByModule :: [GHC.Name] -> [(Text, [Text])]
+groupOmittedDefinitionsByModule names =
+  Map.toList $
+    foldl' collectDefinition Map.empty names
+  where
+    collectDefinition grouped name =
+      Map.insertWith (<>) (definitionModuleName name) [definitionSymbolName name] grouped
+
+definitionModuleName :: GHC.Name -> Text
+definitionModuleName name =
+  case GHC.nameModule_maybe name of
+    Just module_ -> renderModuleName module_
+    Nothing -> "<unknown module>"
+
+definitionSymbolName :: GHC.Name -> Text
+definitionSymbolName =
+  T.pack . GHC.getOccString
+
+renderModuleOmittedSymbolsLine :: (Text, [Text]) -> Text
+renderModuleOmittedSymbolsLine (moduleName, symbolNames) =
+  moduleName <> ": " <> renderedSymbols
+  where
+    dedupedSymbols = dedupeTexts symbolNames
+    shownSymbols = take maxRenderedOmittedSymbolsPerModule dedupedSymbols
+    hiddenCount = length dedupedSymbols - length shownSymbols
+    baseRenderedSymbols = T.intercalate ", " shownSymbols
+    renderedSymbols
+      | hiddenCount > 0 =
+          baseRenderedSymbols
+            <> " and "
+            <> T.pack (show hiddenCount)
+            <> " more"
+      | otherwise =
+          baseRenderedSymbols
+
+dedupeTexts :: [Text] -> [Text]
+dedupeTexts =
+  reverse . snd . foldl' dedupeText (Set.empty, [])
+  where
+    dedupeText (seenTexts, deduped) value
+      | Set.member value seenTexts =
+          (seenTexts, deduped)
+      | otherwise =
+          (Set.insert value seenTexts, value : deduped)
 
 definitionResultsSection :: PaginatedDefinitionModules -> [Text]
 definitionResultsSection paginatedDefinitions =
@@ -277,3 +341,6 @@ quoteText value =
 
 maxRenderedDefinitionResults :: Int
 maxRenderedDefinitionResults = 30
+
+maxRenderedOmittedSymbolsPerModule :: Int
+maxRenderedOmittedSymbolsPerModule = 10

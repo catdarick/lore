@@ -3,6 +3,7 @@
 
 module Lore.Internal.Definition.Types
   ( DefinitionSlice (..),
+    NamedDefinitionSlice (..),
     DeclarationSpans (..),
     MinimalTypedImport (..),
     MinimalTypedOccurrence (..),
@@ -36,6 +37,13 @@ data DefinitionSlice = DefinitionSlice
   { definitionModule :: !GHC.Module,
     declarationSpans :: ![DeclarationSpans],
     requiredImports :: ![RequiredImport]
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data NamedDefinitionSlice = NamedDefinitionSlice
+  { definitionName :: !GHC.Name,
+    definitionSlice :: !DefinitionSlice
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)

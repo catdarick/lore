@@ -7,16 +7,19 @@ import Control.Applicative ((<|>))
 import Data.Maybe (fromMaybe)
 import Data.Text (pack)
 import qualified Data.Text as T
-import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConfig (..), noLogHandle, prettyLoggerHandle, runLore)
+import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConfig (..), noLogHandle, prettyLoggerHandle)
+import Lore.Mcp.Monad (newLoreMcpContext, runLoreMcp)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
 import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
 import Lore.Mcp.Tools.Feedback (feedbackTool)
 import Lore.Mcp.Tools.FindReferences (findReferencesTool)
-import Lore.Mcp.Tools.GetDefinition (getDefinitionTool)
+import Lore.Mcp.Tools.GetDefinition.Cached (cachedGetDefinitionTool)
+import Lore.Mcp.Tools.GetDefinition.Regular (regularGetDefinitionTool)
 import Lore.Mcp.Tools.GetTypeOfExpression (getTypeOfExpressionTool)
 import Lore.Mcp.Tools.ListExportedSymbols (listExportedSymbolsTool)
 import Lore.Mcp.Tools.LookupInstances (lookupInstancesTool)
 import Lore.Mcp.Tools.LookupSymbolInfo (lookupSymbolInfoTool)
+import Lore.Mcp.Tools.NotifyKnowledgeReset (notifyKnowledgeResetTool)
 import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
@@ -24,8 +27,10 @@ import Text.Read (readMaybe)
 runLoreMcpServer :: IO ()
 runLoreMcpServer = do
   sessionConfig <- resolveSessionConfig
+  definitionKnowledgeCacheEnabled <- fromMaybe False <$> lookupOptionalEnvParsed "LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE" parseBool
+  mcpContext <- newLoreMcpContext definitionKnowledgeCacheEnabled
   maybeFeedbackFilePath <- lookupEnv "LORE_MCP_FEEDBACK_FILE"
-  runLore sessionConfig do
+  runLoreMcp sessionConfig mcpContext do
     let feedbackTools =
           case maybeFeedbackFilePath of
             Just feedbackFilePath
@@ -33,6 +38,10 @@ runLoreMcpServer = do
                   [feedbackTool feedbackFilePath]
             _ ->
               []
+        definitionKnowledgeTools =
+          if definitionKnowledgeCacheEnabled
+            then [cachedGetDefinitionTool, notifyKnowledgeResetTool]
+            else [regularGetDefinitionTool]
     runMcpServer
       McpServer
         { name = "lore",
@@ -44,9 +53,9 @@ runLoreMcpServer = do
               lookupSymbolInfoTool,
               listExportedSymbolsTool,
               lookupInstancesTool,
-              getDefinitionTool,
               findReferencesTool
             ]
+              <> definitionKnowledgeTools
               <> feedbackTools
         }
   where
@@ -115,4 +124,17 @@ parseLogLevel rawValue =
     "warning" -> Just Warning
     "warn" -> Just Warning
     "error" -> Just Error
+    _ -> Nothing
+
+parseBool :: String -> Maybe Bool
+parseBool rawValue =
+  case T.toLower (T.strip (pack rawValue)) of
+    "1" -> Just True
+    "true" -> Just True
+    "yes" -> Just True
+    "on" -> Just True
+    "0" -> Just False
+    "false" -> Just False
+    "no" -> Just False
+    "off" -> Just False
     _ -> Nothing

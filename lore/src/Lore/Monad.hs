@@ -1,10 +1,10 @@
 module Lore.Monad
   ( MonadLore,
-    LoreMonadT,
+    LoreMonadT (..),
   )
 where
 
 import Lore.Internal.Monad
-  ( LoreMonadT,
+  ( LoreMonadT (..),
     MonadLore,
   )

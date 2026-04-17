@@ -1,9 +1,12 @@
 module Lore.Definition
   ( resolveDefinitionSlice,
+    resolveDefinitionSliceNamed,
     resolveReferenceMatchesForNames,
     resolveDefinitionClosure,
+    resolveDefinitionClosureNamed,
     mergeDefinitionSlices,
     DefinitionSlice (..),
+    NamedDefinitionSlice (..),
     DeclarationSpans (..),
     ReferenceMatch (..),
     RequiredImport (..),
@@ -31,7 +34,7 @@ import qualified GHC
 import qualified GHC.Plugins as GHC
 import Lore.Internal.Definition.Analysis (buildParsedModuleSummary, buildProcessedTypedDefinitionFacts, buildReferenceModuleAnalysis, collectParsedOccurrenceNames, mergeReferenceModuleAnalysisWithCoreFacts, normalizeImportItems)
 import Lore.Internal.Definition.Cache (cacheReferenceModuleAnalysis, getReferenceOccurrenceIndex, lookupReferenceModuleAnalysisCache)
-import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionAnalysis (..), DefinitionSlice (..), ImportQualifiedStyle (..), MinimalCoreModuleFacts, ParsedModuleCache (..), ParsedModuleSummary (..), ProcessedTypedDefinitionFacts, ReferenceMatch (..), ReferenceModuleAnalysis (..), ReferenceOccurrenceIndex (..), RequiredImport (..), RequiredImportItem (..), TypedModuleCache (..), parsedModuleOccurrenceNames)
+import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionAnalysis (..), DefinitionSlice (..), ImportQualifiedStyle (..), MinimalCoreModuleFacts, NamedDefinitionSlice (..), ParsedModuleCache (..), ParsedModuleSummary (..), ProcessedTypedDefinitionFacts, ReferenceMatch (..), ReferenceModuleAnalysis (..), ReferenceOccurrenceIndex (..), RequiredImport (..), RequiredImportItem (..), TypedModuleCache (..), parsedModuleOccurrenceNames)
 import Lore.Internal.Lookup.ModSummaries (getModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Session (SessionContext (..))
@@ -52,9 +55,15 @@ data DefinitionKey = DefinitionKey
 
 data ClosureState = ClosureState
   { closureCache :: ResolverCache,
-    closureSeen :: Set.Set DefinitionKey,
-    closureSlices :: [DefinitionSlice]
+    closureSeen :: Set.Set ClosureEntryKey,
+    closureSlices :: [NamedDefinitionSlice]
   }
+
+data ClosureEntryKey = ClosureEntryKey
+  { closureEntryDefinitionKey :: DefinitionKey,
+    closureEntryName :: GHC.Name
+  }
+  deriving stock (Eq, Ord)
 
 data CachedReferenceModuleArtifacts = CachedReferenceModuleArtifacts
   { cachedParsedModuleSummary :: ParsedModuleSummary,
@@ -64,9 +73,13 @@ data CachedReferenceModuleArtifacts = CachedReferenceModuleArtifacts
 
 resolveDefinitionSlice :: (MonadLore m) => GHC.Name -> m (Maybe DefinitionSlice)
 resolveDefinitionSlice inputName = do
+  fmap (.definitionSlice) <$> resolveDefinitionSliceNamed inputName
+
+resolveDefinitionSliceNamed :: (MonadLore m) => GHC.Name -> m (Maybe NamedDefinitionSlice)
+resolveDefinitionSliceNamed inputName = do
   ModSummaries modSummaries <- getModSummaries
   (_, analysis) <- resolveDefinitionAnalysis modSummaries emptyResolverCache inputName
-  pure (analysisSlice <$> analysis)
+  pure (fmap (\resolvedAnalysis -> NamedDefinitionSlice {definitionName = inputName, definitionSlice = resolvedAnalysis.analysisSlice}) analysis)
 
 resolveReferenceMatchesForNames :: (MonadLore m) => [GHC.Name] -> m [ReferenceMatch]
 resolveReferenceMatchesForNames targetNames = do
@@ -141,10 +154,15 @@ lookupModulesForOccurrenceNames targetOccNames occurrenceIndex =
 
 resolveDefinitionClosure :: (MonadLore m) => Int -> GHC.Name -> m [DefinitionSlice]
 resolveDefinitionClosure maxDepth inputName = do
+  namedSlices <- resolveDefinitionClosureNamed maxDepth inputName
+  pure (mergeSlicesByModule (map (.definitionSlice) namedSlices))
+
+resolveDefinitionClosureNamed :: (MonadLore m) => Int -> GHC.Name -> m [NamedDefinitionSlice]
+resolveDefinitionClosureNamed maxDepth inputName = do
   ModSummaries modSummaries <- getModSummaries
   let depth = max 0 maxDepth
   result <- go modSummaries depth inputName (ClosureState emptyResolverCache Set.empty [])
-  pure (mergeSlicesByModule result.closureSlices)
+  pure result.closureSlices
   where
     go modSummaries depth name state = do
       (cache', analysis) <- resolveDefinitionAnalysis modSummaries state.closureCache name
@@ -153,7 +171,11 @@ resolveDefinitionClosure maxDepth inputName = do
           pure state {closureCache = cache'}
         Just definitionAnalysis ->
           let slice = analysisSlice definitionAnalysis
-              key = definitionKey slice
+              key =
+                ClosureEntryKey
+                  { closureEntryDefinitionKey = definitionKey slice,
+                    closureEntryName = name
+                  }
            in if Set.member key state.closureSeen
                 then pure state {closureCache = cache'}
                 else
@@ -163,7 +185,13 @@ resolveDefinitionClosure maxDepth inputName = do
                         state
                           { closureCache = cache',
                             closureSeen = Set.insert key state.closureSeen,
-                            closureSlices = state.closureSlices <> [slice]
+                            closureSlices =
+                              state.closureSlices
+                                <> [ NamedDefinitionSlice
+                                       { definitionName = name,
+                                         definitionSlice = slice
+                                       }
+                                   ]
                           }
                     else do
                       result <-
@@ -175,7 +203,17 @@ resolveDefinitionClosure maxDepth inputName = do
                               closureSlices = []
                             }
                           (analysisRecursiveNames definitionAnalysis)
-                      pure result {closureSlices = state.closureSlices <> (slice : result.closureSlices)}
+                      pure
+                        result
+                          { closureSlices =
+                              state.closureSlices
+                                <> ( NamedDefinitionSlice
+                                       { definitionName = name,
+                                         definitionSlice = slice
+                                       }
+                                       : result.closureSlices
+                                   )
+                          }
 
     foldlM f = go'
       where

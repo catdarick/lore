@@ -28,17 +28,21 @@ executable lore-mcp
       Lore.Mcp.Internal.Annotated
       Lore.Mcp.Internal.Render
       Lore.Mcp.Internal.Tool
+      Lore.Mcp.Monad
       Lore.Mcp.Protocol.Request
       Lore.Mcp.Protocol.Server
       Lore.Mcp.Server
       Lore.Mcp.Tools.ExecuteCode
       Lore.Mcp.Tools.Feedback
       Lore.Mcp.Tools.FindReferences
-      Lore.Mcp.Tools.GetDefinition
+      Lore.Mcp.Tools.GetDefinition.Cached
+      Lore.Mcp.Tools.GetDefinition.Regular
+      Lore.Mcp.Tools.GetDefinition.Shared
       Lore.Mcp.Tools.GetTypeOfExpression
       Lore.Mcp.Tools.ListExportedSymbols
       Lore.Mcp.Tools.LookupInstances
       Lore.Mcp.Tools.LookupSymbolInfo
+      Lore.Mcp.Tools.NotifyKnowledgeReset
       Lore.Mcp.Tools.ReloadHomeModules
       Lore.Mcp.Tools.Shared
       Lore.Mcp.Tools.Shared.CompactClassInstance
@@ -105,6 +109,7 @@ executable lore-mcp
     , ghc
     , lens
     , lore
+    , mtl
     , openapi3
     , text
     , unliftio
