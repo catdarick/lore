@@ -22,6 +22,7 @@ import McpTestSupport
   )
 import System.FilePath ((</>))
 import Test.Hspec
+import Text.Printf (printf)
 
 spec :: Spec
 spec = do
@@ -65,6 +66,21 @@ spec = do
       cachedCall `shouldContainText` "already returned earlier in this MCP session"
       resetCall `shouldContainText` "Knowledge reset acknowledged. Cleared "
       afterResetCall `shouldContainText` "lookupOrOne"
+
+    it "keeps non-rendered paginated definitions uncached until they are actually shown" do
+      withFixtureCopy \fixtureRoot -> do
+        addPaginatedDefinitionFixture fixtureRoot
+        (firstPageCall, secondPageCall) <-
+          fixtureLoreMcpAtWithCache True fixtureRoot do
+            loadFixtureTargets
+            firstPageCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 0) 0 Nothing)
+            secondPageCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 30) 0 Nothing)
+            pure (firstPageCall, secondPageCall)
+
+        firstPageCall `shouldContainText` "pageDef30 :: Int"
+        firstPageCall `shouldNotContainText` "pageDef31 :: Int"
+        secondPageCall `shouldContainText` "Showing all 1 definition results."
+        secondPageCall `shouldContainText` "pageDef31 :: Int"
 
   describe "getDefinition (regular mode)" do
     it "does not suppress repeated definitions across calls" do
@@ -120,13 +136,63 @@ sameModuleDuplicateFixtureDeclarations =
 
 getDefinitionArgs :: [Text] -> Int -> Maybe Bool -> J.Value
 getDefinitionArgs symbols recursionDepth maybeForce =
+  getDefinitionArgsWithSkip symbols Nothing recursionDepth maybeForce
+
+getDefinitionArgsWithSkip :: [Text] -> Maybe Int -> Int -> Maybe Bool -> J.Value
+getDefinitionArgsWithSkip symbols maybeSkip recursionDepth maybeForce =
   J.object $
     [ "symbols" J..= symbols,
       "recursionDepth" J..= recursionDepth
     ]
+      <> case maybeSkip of
+        Nothing -> []
+        Just skipValue -> ["skip" J..= skipValue]
       <> case maybeForce of
         Nothing -> []
         Just forceValue -> ["force" J..= forceValue]
+
+addPaginatedDefinitionFixture :: FilePath -> IO ()
+addPaginatedDefinitionFixture fixtureRoot = do
+  let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+  source <- TIO.readFile demoFile
+  let sourceWithExports =
+        T.replace paginationExportAnchor paginationExportReplacement source
+  TIO.writeFile demoFile (sourceWithExports <> "\n\n" <> paginatedDefinitionsFixtureDeclarations)
+
+paginationExportAnchor :: Text
+paginationExportAnchor =
+  T.unlines
+    [ "    HasIndex (..),",
+      "  )",
+      "where"
+    ]
+
+paginationExportReplacement :: Text
+paginationExportReplacement =
+  T.unlines $
+    [ "    HasIndex (..),"
+    ]
+      <> map (\symbolName -> "    " <> symbolName <> ",") paginatedDefinitionSymbols
+      <> [ "  )",
+           "where"
+         ]
+
+paginatedDefinitionSymbols :: [Text]
+paginatedDefinitionSymbols =
+  [ T.pack (printf "pageDef%02d" index :: String)
+  | index <- [1 :: Int .. 31]
+  ]
+
+paginatedDefinitionsFixtureDeclarations :: Text
+paginatedDefinitionsFixtureDeclarations =
+  T.unlines $
+    concat
+      [ [ symbolName <> " :: Int",
+          symbolName <> " = " <> T.pack (show index),
+          ""
+        ]
+      | (index, symbolName) <- zip [1 :: Int ..] paginatedDefinitionSymbols
+      ]
 
 shouldContainText :: Text -> Text -> Expectation
 shouldContainText haystack needle =

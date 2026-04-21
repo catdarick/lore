@@ -1,6 +1,8 @@
 module Lore.Mcp.Tools.Shared
   ( appendPartialLoadWarning,
+    PaginatedDefinitionSlices (..),
     PaginatedDefinitionModules (..),
+    paginateDefinitionSlices,
     paginationSummaryLines,
     renderDeclarationBodyText,
     renderPaginatedDefinitionModules,
@@ -57,6 +59,12 @@ data PaginatedDefinitionModules = PaginatedDefinitionModules
     skippedItems :: Int,
     shownItems :: Int,
     renderedPage :: Maybe Text
+  }
+
+data PaginatedDefinitionSlices = PaginatedDefinitionSlices
+  { sliceTotalItems :: Int,
+    sliceSkippedItems :: Int,
+    visibleSlices :: [DefinitionSlice]
   }
 
 renderDefinitionModuleText :: DefinitionSlice -> IO Text
@@ -245,22 +253,37 @@ paginationSummaryLines itemLabel skipArgName paginatedDefinitions
 
 renderPaginatedDefinitionModules :: Int -> Int -> [DefinitionSlice] -> IO (Maybe PaginatedDefinitionModules)
 renderPaginatedDefinitionModules skip maxItems definitionSlices =
-  case expandDefinitionSlices definitionSlices of
-    [] ->
+  case paginateDefinitionSlices skip maxItems definitionSlices of
+    Nothing ->
       pure Nothing
-    expandedSlices -> do
-      let totalItems = length expandedSlices
-          skippedItems = min skip totalItems
-          visibleSlices = take maxItems (drop skippedItems expandedSlices)
+    Just paginatedSlices -> do
       renderedPage <- T.intercalate "\n\n" <$> mapM renderDefinitionModuleText (mergeDefinitionModules visibleSlices)
       pure $
         Just
           PaginatedDefinitionModules
-            { totalItems,
-              skippedItems,
-              shownItems = length visibleSlices,
+            { totalItems = paginatedSlices.sliceTotalItems,
+              skippedItems = paginatedSlices.sliceSkippedItems,
+              shownItems = length paginatedSlices.visibleSlices,
               renderedPage = Just renderedPage
             }
+      where
+        visibleSlices = paginatedSlices.visibleSlices
+
+paginateDefinitionSlices :: Int -> Int -> [DefinitionSlice] -> Maybe PaginatedDefinitionSlices
+paginateDefinitionSlices skip maxItems definitionSlices =
+  case expandDefinitionSlices definitionSlices of
+    [] ->
+      Nothing
+    expandedSlices ->
+      Just $
+        PaginatedDefinitionSlices
+          { sliceTotalItems = totalItems,
+            sliceSkippedItems = skippedItems,
+            visibleSlices = take maxItems (drop skippedItems expandedSlices)
+          }
+      where
+        totalItems = length expandedSlices
+        skippedItems = min skip totalItems
 
 expandDefinitionSlices :: [DefinitionSlice] -> [DefinitionSlice]
 expandDefinitionSlices =
