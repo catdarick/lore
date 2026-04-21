@@ -46,10 +46,6 @@ data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
                       Example 2,
                       Minimum 0,
                       Maximum 20
-                    ],
-    force ::
-      Maybe (Field fieldType Bool)
-        `WithMeta` '[ Description "When true, the knowledge check is ignored and all requested symbol definitions are returned, including recursive results."
                     ]
   }
   deriving stock (Generic)
@@ -68,7 +64,7 @@ cachedGetDefinitionTool =
       }
 
 cachedGetDefinitionHandler :: (MonadLoreMcp m) => GetDefinitionArgs 'ValueType -> m Text
-cachedGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth, force} =
+cachedGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} =
   getDefinitionHandlerWithStrategy commonArgs (renderWithKnowledgeCache forceDefinitions)
   where
     commonArgs =
@@ -77,7 +73,7 @@ cachedGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth, for
           skip,
           recursionDepth = Just (max 0 (fromMaybeDefault defaultRecursionDepth recursionDepth))
         }
-    forceDefinitions = fromMaybeDefault False force
+    forceDefinitions = False 
 
 data HashedDefinitionEntry = HashedDefinitionEntry
   { definitionFingerprint :: Text,

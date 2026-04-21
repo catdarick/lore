@@ -195,7 +195,7 @@ omittedDefinitionsSection filteredDefinitions
 omittedDefinitionsDetailLines :: FilteredDefinitions -> [Text]
 omittedDefinitionsDetailLines filteredDefinitions =
   omittedDefinitionLines filteredDefinitions.omittedKnownDefinitions
-    <> ["Call this tool with `force` flag to ignore the knowledge check or use `notifyKnowledgeReset` tool to let the server know that client knowledge has been reset to make all the definitions available by default."]
+    <> ["Use `notifyKnowledgeReset` tool to let the server know that client knowledge has been reset to make all the definitions available by default."]
 
 omittedDefinitionLines :: [GHC.Name] -> [Text]
 omittedDefinitionLines omittedDefinitions =
