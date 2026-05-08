@@ -4,6 +4,15 @@
 module Lore.Internal.AutoRefactor.ImportNormalize
   ( applyImportOperations,
     normalizeImports,
+    ensureUnqualifiedItem,
+    ensureUnqualifiedOpenImport,
+    ensureQualifiedImport,
+    removeImportItem,
+    mergeImports,
+    appendUniqueImportItems,
+    removeTargetFromImportItem,
+    parseParentImportItem,
+    normalizedFlatBindingText,
   )
 where
 

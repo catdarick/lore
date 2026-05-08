@@ -12,7 +12,7 @@ import System.FilePath (splitDirectories, takeFileName, (</>))
 newtype DirectoryIgnoreList = DirectoryIgnoreList (Set.Set String)
 
 defaultIgnoreList :: DirectoryIgnoreList
-defaultIgnoreList = DirectoryIgnoreList $ Set.fromList [".git", ".stack-work", "dist-newstyle", "dist", ".ghci-work"]
+defaultIgnoreList = DirectoryIgnoreList $ Set.fromList [".git", ".stack-work", "dist-newstyle", "dist", ".ghci-work", "bench-fixtures"]
 
 findFilesByNameRecursively :: Maybe DirectoryIgnoreList -> FilePath -> String -> IO [FilePath]
 findFilesByNameRecursively ignoreList root targetName = do

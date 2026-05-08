@@ -90,6 +90,61 @@ tests:
     - lore
     - hspec
 
+benchmarks:
+  lore-bench:
+    main: Main.hs
+    source-dirs:
+    - bench
+    - src
+    ghc-options:
+    - -O2
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - lore
+    - base
+    - criterion
+    - deepseq
+    - containers
+    - text
+    - bytestring
+    - filepath
+    - directory
+    - mtl
+    - transformers
+    - unordered-containers
+    - ghc
+    - time
+    - async
+  lore-memory-bench:
+    main: MemoryMain.hs
+    source-dirs:
+    - bench-memory
+    - bench
+    - src
+    ghc-options:
+    - -O2
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-T
+    - -main-is
+    - MemoryMain.main
+    dependencies:
+    - lore
+    - base
+    - criterion
+    - deepseq
+    - containers
+    - text
+    - bytestring
+    - filepath
+    - directory
+    - mtl
+    - transformers
+    - ghc
+    - time
+
 default-extensions:
   - RecordWildCards
   - NamedFieldPuns

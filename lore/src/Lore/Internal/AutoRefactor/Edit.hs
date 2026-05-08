@@ -6,6 +6,9 @@ module Lore.Internal.AutoRefactor.Edit
     AppliedFileEdits (..),
     applyFileEdits,
     restoreFileContents,
+    applyReplacementEdits,
+    spanToOffsets,
+    positionToOffset,
   )
 where
 

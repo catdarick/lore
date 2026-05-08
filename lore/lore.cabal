@@ -217,3 +217,265 @@ test-suite lore-test
     , transformers
     , unliftio
   default-language: Haskell2010
+
+benchmark lore-bench
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  other-modules:
+      Lore.Bench.DefinitionIndexBench
+      Lore.Bench.E2EBench
+      Lore.Bench.FixtureProject
+      Lore.Bench.Fixtures
+      Lore.Bench.Memory
+      Lore.Bench.MemoryCases
+      Lore.Bench.MinifiedImportsBench
+      Lore.Bench.ReferenceSearchBench
+      Lore.Bench.RenderingBench
+      Lore
+      Lore.Definition
+      Lore.Definition.Rendering
+      Lore.Definition.RenderSlice
+      Lore.Diagnostics
+      Lore.Internal.AutoRefactor
+      Lore.Internal.AutoRefactor.Edit
+      Lore.Internal.AutoRefactor.ImportDecl
+      Lore.Internal.AutoRefactor.ImportNormalize
+      Lore.Internal.AutoRefactor.ImportOps
+      Lore.Internal.AutoRefactor.ImportRewrite
+      Lore.Internal.AutoRefactor.Issue
+      Lore.Internal.AutoRefactor.MissingImports
+      Lore.Internal.AutoRefactor.MissingImports.Diagnostic
+      Lore.Internal.AutoRefactor.RedundantImports
+      Lore.Internal.Definition.Analysis
+      Lore.Internal.Definition.Cache
+      Lore.Internal.Definition.Callbacks
+      Lore.Internal.Definition.SourceTree
+      Lore.Internal.Definition.Types
+      Lore.Internal.File
+      Lore.Internal.Ghc.DynFlags
+      Lore.Internal.Ghc.TyThing
+      Lore.Internal.Interpreter
+      Lore.Internal.Lookup.ModSummaries
+      Lore.Internal.Lookup.Name
+      Lore.Internal.Lookup.NameToInstances
+      Lore.Internal.Lookup.SymbolsMap
+      Lore.Internal.Lookup.Types
+      Lore.Internal.Monad
+      Lore.Internal.Package
+      Lore.Internal.PackageDB
+      Lore.Internal.Session
+      Lore.Internal.Targets
+      Lore.Internal.Targets.Result
+      Lore.Interpreter
+      Lore.Lib.Force
+      Lore.Lib.Text
+      Lore.Logger
+      Lore.Lookup
+      Lore.Module
+      Lore.Monad
+      Lore.Refactor.Imports
+      Lore.Session
+      Lore.Targets
+      Paths_lore
+  autogen-modules:
+      Paths_lore
+  hs-source-dirs:
+      bench
+      src
+  default-extensions:
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , async
+    , base
+    , bytestring
+    , co-log-core
+    , containers
+    , criterion
+    , deepseq
+    , directory
+    , exceptions
+    , filepath
+    , ghc
+    , ghc-boot
+    , ghc-paths
+    , hpack
+    , lore
+    , mtl
+    , process
+    , text
+    , time
+    , transformers
+    , unliftio
+    , unordered-containers
+  default-language: Haskell2010
+
+benchmark lore-memory-bench
+  type: exitcode-stdio-1.0
+  main-is: MemoryMain.hs
+  other-modules:
+      Lore.Bench.DefinitionIndexBench
+      Lore.Bench.E2EBench
+      Lore.Bench.FixtureProject
+      Lore.Bench.Fixtures
+      Lore.Bench.Memory
+      Lore.Bench.MemoryCases
+      Lore.Bench.MinifiedImportsBench
+      Lore.Bench.ReferenceSearchBench
+      Lore.Bench.RenderingBench
+      Main
+      Lore
+      Lore.Definition
+      Lore.Definition.Rendering
+      Lore.Definition.RenderSlice
+      Lore.Diagnostics
+      Lore.Internal.AutoRefactor
+      Lore.Internal.AutoRefactor.Edit
+      Lore.Internal.AutoRefactor.ImportDecl
+      Lore.Internal.AutoRefactor.ImportNormalize
+      Lore.Internal.AutoRefactor.ImportOps
+      Lore.Internal.AutoRefactor.ImportRewrite
+      Lore.Internal.AutoRefactor.Issue
+      Lore.Internal.AutoRefactor.MissingImports
+      Lore.Internal.AutoRefactor.MissingImports.Diagnostic
+      Lore.Internal.AutoRefactor.RedundantImports
+      Lore.Internal.Definition.Analysis
+      Lore.Internal.Definition.Cache
+      Lore.Internal.Definition.Callbacks
+      Lore.Internal.Definition.SourceTree
+      Lore.Internal.Definition.Types
+      Lore.Internal.File
+      Lore.Internal.Ghc.DynFlags
+      Lore.Internal.Ghc.TyThing
+      Lore.Internal.Interpreter
+      Lore.Internal.Lookup.ModSummaries
+      Lore.Internal.Lookup.Name
+      Lore.Internal.Lookup.NameToInstances
+      Lore.Internal.Lookup.SymbolsMap
+      Lore.Internal.Lookup.Types
+      Lore.Internal.Monad
+      Lore.Internal.Package
+      Lore.Internal.PackageDB
+      Lore.Internal.Session
+      Lore.Internal.Targets
+      Lore.Internal.Targets.Result
+      Lore.Interpreter
+      Lore.Lib.Force
+      Lore.Lib.Text
+      Lore.Logger
+      Lore.Lookup
+      Lore.Module
+      Lore.Monad
+      Lore.Refactor.Imports
+      Lore.Session
+      Lore.Targets
+      Paths_lore
+  autogen-modules:
+      Paths_lore
+  hs-source-dirs:
+      bench-memory
+      bench
+      src
+  default-extensions:
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -threaded -rtsopts -with-rtsopts=-T -main-is MemoryMain.main
+  build-depends:
+      aeson
+    , base
+    , bytestring
+    , co-log-core
+    , containers
+    , criterion
+    , deepseq
+    , directory
+    , exceptions
+    , filepath
+    , ghc
+    , ghc-boot
+    , ghc-paths
+    , hpack
+    , lore
+    , mtl
+    , process
+    , text
+    , time
+    , transformers
+    , unliftio
+  default-language: Haskell2010

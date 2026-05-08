@@ -2,6 +2,8 @@ module Lore.Internal.Definition.SourceTree
   ( collectModuleSourceRegionCandidates,
     buildDefinitionSourceTree,
     chooseBestReferenceContext,
+    nestSourceRegions,
+    flattenSourceRegions,
   )
 where
 

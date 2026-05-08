@@ -8,6 +8,7 @@ module Lore.Internal.Definition.Analysis
     buildDependencies,
     buildRequiredImportsById,
     buildDefinitionModuleIndex,
+    buildMinifiedImports,
     getMinifiedImportsForDefinition,
     buildUsedInstancesByBinder,
     normalizeImportItems,
