@@ -56,6 +56,8 @@ library:
   exposed-modules:
   - Lore
   - Lore.Definition
+  - Lore.Definition.RenderSlice
+  - Lore.Definition.Rendering
   - Lore.Diagnostics
   - Lore.Interpreter
   - Lore.Logger

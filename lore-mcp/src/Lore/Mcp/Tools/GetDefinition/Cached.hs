@@ -3,7 +3,7 @@ module Lore.Mcp.Tools.GetDefinition.Cached
   )
 where
 
-import Control.Concurrent.MVar (modifyMVar, modifyMVar_)
+import Control.Concurrent.MVar (modifyMVar)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
 import Data.List (foldl')
@@ -15,16 +15,19 @@ import qualified Data.Text as T
 import GHC.Fingerprint (Fingerprint (..), fingerprintString)
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
-import Lore (DeclarationSpans (..), DefinitionSlice (..), MonadLore, NamedDefinitionSlice (..))
+import Lore (DeclarationSpans (..), DefinitionId, DefinitionSource (..), MonadLore, NamedDefinitionSource (..))
 import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), Maximum, MinItems, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Monad (MonadLoreMcp (..), sentDefinitionHashes)
 import Lore.Mcp.Tools.GetDefinition.Shared
   ( CommonGetDefinitionArgs (..),
     FilteredDefinitions (..),
+    PaginatedDefinitionSources (..),
     defaultRecursionDepth,
     getDefinitionHandlerWithStrategy,
     maxRenderedDefinitionResults,
+    paginateDefinitionSources,
+    renderPaginatedDefinitionSources,
   )
 import qualified Lore.Mcp.Tools.Shared as Shared
 import Text.Printf (printf)
@@ -66,7 +69,7 @@ cachedGetDefinitionTool =
 
 cachedGetDefinitionHandler :: (MonadLoreMcp m) => GetDefinitionArgs 'ValueType -> m Text
 cachedGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} =
-  getDefinitionHandlerWithStrategy commonArgs (renderWithKnowledgeCache forceDefinitions)
+  getDefinitionHandlerWithStrategy commonArgs renderWithKnowledgeCache
   where
     commonArgs =
       CommonGetDefinitionArgs
@@ -74,121 +77,83 @@ cachedGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} =
           skip,
           recursionDepth = Just (max 0 (fromMaybeDefault defaultRecursionDepth recursionDepth))
         }
-    forceDefinitions = False
 
 data HashedDefinitionEntry = HashedDefinitionEntry
   { definitionFingerprint :: Text,
-    definitionEntry :: NamedDefinitionSlice
+    definitionEntry :: NamedDefinitionSource
   }
 
 renderWithKnowledgeCache ::
   (MonadLoreMcp m) =>
-  Bool ->
   Int ->
-  [NamedDefinitionSlice] ->
+  [NamedDefinitionSource] ->
   m FilteredDefinitions
-renderWithKnowledgeCache forceDefinitions skip definitionEntries = do
+renderWithKnowledgeCache skip definitionEntries = do
   hashedDefinitions <- hashDefinitionEntries definitionEntries
   let uniqueDefinitions =
         dedupeHashedDefinitionEntries hashedDefinitions
+      visibleDefinitionPage =
+        paginateDefinitionSources
+          skip
+          maxRenderedDefinitionResults
+          (map (.definitionEntry) uniqueDefinitions)
       visibleDefinitionFingerprints =
-        visibleDefinitionFingerprintsForPage skip uniqueDefinitions
+        visibleDefinitionFingerprintsForPage visibleDefinitionPage uniqueDefinitions
   cache <- sentDefinitionHashes <$> getLoreMcpContext
-  if forceDefinitions
-    then do
-      let visibleDefinitions =
+  (visibleKnownFingerprints, visibleFreshDefinitions) <- liftIO $
+    modifyMVar cache \knownFingerprints -> do
+      let visibleFreshFingerprints =
+            Set.difference visibleDefinitionFingerprints knownFingerprints
+          visibleKnownFingerprints =
+            Set.intersection visibleDefinitionFingerprints knownFingerprints
+          visibleFreshDefinitions =
             filter
-              (\definition -> Set.member definition.definitionFingerprint visibleDefinitionFingerprints)
+              (\definition -> Set.member definition.definitionFingerprint visibleFreshFingerprints)
               uniqueDefinitions
-          visibleDefinitionSlices =
-            map (\definition -> definition.definitionEntry.definitionSlice) visibleDefinitions
-      liftIO $
-        modifyMVar_ cache \knownFingerprints ->
-          pure (Set.union knownFingerprints visibleDefinitionFingerprints)
-      renderedDefinitions <-
-        liftIO $
-          Shared.renderPaginatedDefinitionModules
-            0
-            maxRenderedDefinitionResults
-            visibleDefinitionSlices
       pure
-        FilteredDefinitions
-          { renderedDefinitions,
-            omittedKnownDefinitions = [],
-            omittedKnownDefinitionCount = 0
-          }
-    else do
-      (visibleKnownFingerprints, visibleFreshDefinitions) <- liftIO $
-        modifyMVar cache \knownFingerprints -> do
-          let visibleFreshFingerprints =
-                Set.difference visibleDefinitionFingerprints knownFingerprints
-              visibleKnownFingerprints =
-                Set.intersection visibleDefinitionFingerprints knownFingerprints
-              visibleFreshDefinitions =
-                filter
-                  (\definition -> Set.member definition.definitionFingerprint visibleFreshFingerprints)
-                  uniqueDefinitions
-          pure
-            ( Set.union knownFingerprints visibleFreshFingerprints,
-              (visibleKnownFingerprints, visibleFreshDefinitions)
-            )
-      let freshDefinitionSlices =
-            map (\definition -> definition.definitionEntry.definitionSlice) visibleFreshDefinitions
-          omittedDefinitions =
-            [ definition.definitionEntry.definitionName
-            | definition <- uniqueDefinitions,
-              Set.member definition.definitionFingerprint visibleKnownFingerprints
-            ]
-      renderedDefinitions <-
-        liftIO $
-          Shared.renderPaginatedDefinitionModules
-            0
-            maxRenderedDefinitionResults
-            freshDefinitionSlices
-      pure
-        FilteredDefinitions
-          { renderedDefinitions,
-            omittedKnownDefinitions = omittedDefinitions,
-            omittedKnownDefinitionCount = length omittedDefinitions
-          }
+        ( Set.union knownFingerprints visibleFreshFingerprints,
+          (visibleKnownFingerprints, visibleFreshDefinitions)
+        )
+  let omittedDefinitions =
+        [ definition.definitionEntry.definitionName
+        | definition <- uniqueDefinitions,
+          Set.member definition.definitionFingerprint visibleKnownFingerprints
+        ]
+  renderedDefinitions <-
+    renderFilteredVisibleDefinitionSources
+      visibleDefinitionPage
+      0
+      maxRenderedDefinitionResults
+      (map (.definitionEntry) visibleFreshDefinitions)
+  pure
+    FilteredDefinitions
+      { renderedDefinitions,
+        omittedKnownDefinitions = omittedDefinitions,
+        omittedKnownDefinitionCount = length omittedDefinitions
+      }
 
-hashDefinitionEntries :: (MonadLore m) => [NamedDefinitionSlice] -> m [HashedDefinitionEntry]
+hashDefinitionEntries :: (MonadLore m) => [NamedDefinitionSource] -> m [HashedDefinitionEntry]
 hashDefinitionEntries definitionEntries =
-  concat <$> mapM hashDefinitionEntry (expandDefinitionEntries definitionEntries)
+  mapM hashDefinitionEntry definitionEntries
   where
     hashDefinitionEntry definitionEntry =
-      case definitionEntry.definitionSlice.declarationSpans of
-        [declarationSpans] -> do
-          declarationBody <- liftIO (Shared.renderDeclarationBodyText declarationSpans)
-          pure
-            [ HashedDefinitionEntry
-                { definitionFingerprint = definitionFingerprintText definitionEntry declarationSpans declarationBody,
-                  definitionEntry
-                }
-            ]
-        _ ->
-          pure []
+      do
+        let declarationSpans = definitionEntry.definitionSource.definitionSourceSpans
+        declarationBody <- liftIO (Shared.renderDeclarationBodyText declarationSpans)
+        pure
+          HashedDefinitionEntry
+            { definitionFingerprint = definitionFingerprintText definitionEntry declarationSpans declarationBody,
+              definitionEntry
+            }
 
-expandDefinitionEntries :: [NamedDefinitionSlice] -> [NamedDefinitionSlice]
-expandDefinitionEntries =
-  concatMap \definitionEntry ->
-    [ definitionEntry
-        { definitionSlice =
-            definitionEntry.definitionSlice
-              { declarationSpans = [declarationSpans]
-              }
-        }
-    | declarationSpans <- definitionEntry.definitionSlice.declarationSpans
-    ]
-
-definitionFingerprintText :: NamedDefinitionSlice -> DeclarationSpans -> Text -> Text
+definitionFingerprintText :: NamedDefinitionSource -> DeclarationSpans -> Text -> Text
 definitionFingerprintText definitionEntry declarationSpans declarationBody =
   definitionBodyHash $
     definitionFingerprintIdentity definitionEntry declarationSpans
       <> "\n"
       <> declarationBody
 
-definitionFingerprintIdentity :: NamedDefinitionSlice -> DeclarationSpans -> Text
+definitionFingerprintIdentity :: NamedDefinitionSource -> DeclarationSpans -> Text
 definitionFingerprintIdentity definitionEntry declarationSpans =
   case declarationSpans.declarationSpan of
     GHC.RealSrcSpan realSpan _ ->
@@ -206,9 +171,9 @@ definitionFingerprintIdentity definitionEntry declarationSpans =
         <> ":"
         <> T.pack (show unhelpfulSpan)
 
-renderModuleName :: NamedDefinitionSlice -> Text
+renderModuleName :: NamedDefinitionSource -> Text
 renderModuleName definitionEntry =
-  renderModuleNameFromModule definitionEntry.definitionSlice.definitionModule
+  renderModuleNameFromModule definitionEntry.definitionSource.definitionSourceModule
 
 renderModuleNameFromModule :: GHC.Module -> Text
 renderModuleNameFromModule definitionModule =
@@ -244,12 +209,36 @@ dedupeHashedDefinitionEntries =
       | otherwise =
           (Set.insert definition.definitionFingerprint seenFingerprints, definition : deduped)
 
-visibleDefinitionFingerprintsForPage :: Int -> [HashedDefinitionEntry] -> Set.Set Text
-visibleDefinitionFingerprintsForPage skip definitions =
-  case Shared.paginateDefinitionSlices skip maxRenderedDefinitionResults definitionSlices of
+renderFilteredVisibleDefinitionSources ::
+  (MonadLore m) =>
+  Maybe PaginatedDefinitionSources ->
+  Int ->
+  Int ->
+  [NamedDefinitionSource] ->
+  m (Maybe Shared.PaginatedDefinitionModules)
+renderFilteredVisibleDefinitionSources visibleDefinitionPage skip maxItems definitions =
+  case visibleDefinitionPage of
+    Just paginatedSources
+      | null paginatedSources.visibleDefinitionSources ->
+          -- Preserve original pagination metadata when the selected page exists but
+          -- all entries were filtered out (for example, all are already known).
+          pure $
+            Just
+              Shared.PaginatedDefinitionModules
+                { totalItems = paginatedSources.sourceTotalItems,
+                  skippedItems = paginatedSources.sourceSkippedItems,
+                  shownItems = 0,
+                  renderedPage = Just ""
+                }
+    _ ->
+      renderPaginatedDefinitionSources skip maxItems definitions
+
+visibleDefinitionFingerprintsForPage :: Maybe PaginatedDefinitionSources -> [HashedDefinitionEntry] -> Set.Set Text
+visibleDefinitionFingerprintsForPage visibleDefinitionPage definitions =
+  case visibleDefinitionPage of
     Nothing ->
       Set.empty
-    Just paginatedSlices ->
+    Just paginatedSources ->
       Set.unions
         [ Map.findWithDefault Set.empty key fingerprintsBySliceKey
         | key <- Set.toList visibleKeys
@@ -257,38 +246,18 @@ visibleDefinitionFingerprintsForPage skip definitions =
       where
         visibleKeys =
           Set.fromList $
-            concatMap definitionSliceCacheKeys paginatedSlices.visibleSlices
+            map definitionSourceCacheKey paginatedSources.visibleDefinitionSources
   where
-    definitionSlices =
-      map (\definition -> definition.definitionEntry.definitionSlice) definitions
     fingerprintsBySliceKey =
       Map.fromListWith Set.union $
         concatMap entryFingerprintKeys definitions
 
     entryFingerprintKeys definition =
-      [ (sliceKey, Set.singleton definition.definitionFingerprint)
-      | sliceKey <- definitionSliceCacheKeys definition.definitionEntry.definitionSlice
-      ]
+      [(definitionSourceCacheKey definition.definitionEntry, Set.singleton definition.definitionFingerprint)]
 
-definitionSliceCacheKeys :: DefinitionSlice -> [Text]
-definitionSliceCacheKeys definitionSlice =
-  [ definitionSpanKey definitionSlice.definitionModule declarationSpans
-  | declarationSpans <- definitionSlice.declarationSpans
-  ]
-
-definitionSpanKey :: GHC.Module -> DeclarationSpans -> Text
-definitionSpanKey definitionModule declarationSpans =
-  case declarationSpans.declarationSpan of
-    GHC.RealSrcSpan realSpan _ ->
-      renderModuleNameFromModule definitionModule
-        <> ":"
-        <> realSpanCoords realSpan
-        <> ":"
-        <> T.pack (GHC.unpackFS (GHC.srcSpanFile realSpan))
-    GHC.UnhelpfulSpan unhelpfulSpan ->
-      renderModuleNameFromModule definitionModule
-        <> ":"
-        <> T.pack (show unhelpfulSpan)
+definitionSourceCacheKey :: NamedDefinitionSource -> DefinitionId
+definitionSourceCacheKey definitionEntry =
+  definitionEntry.definitionSource.definitionSourceId
 
 fromMaybeDefault :: a -> Maybe a -> a
 fromMaybeDefault fallback = \case

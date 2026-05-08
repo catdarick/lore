@@ -131,12 +131,12 @@ loadTargets options = do
     )
   let targetModules = Map.keysSet $ modulesWithComponentOptions targetsPlan
       targets = map (mkModuleTarget homeUnitId) (Set.toList targetModules)
+      totalModulesCount = Set.size targetModules
   GHC.setTargets targets
   LoadAttempt {loadAttemptDiagnostics, loadAttemptResult, loadAttemptAutoRefactFiles, loadAttemptAutoRefactSummaryByFile} <- loadTargets' options targetsPlan
   refreshInterpreterContext
   loadedModulesCount <- countLoadedModules targetModules
-  let totalModulesCount = Set.size targetModules
-      failedModulesCount = totalModulesCount - loadedModulesCount
+  let failedModulesCount = totalModulesCount - loadedModulesCount
   case loadAttemptResult of
     GHC.Succeeded -> do
       Log.debug "Successfully updated GHC targets based on package.yaml configurations"
@@ -161,6 +161,25 @@ loadTargets options = do
     MVar.modifyMVar_ cachedResultVar $
       const (pure (Just loadTargetsResult))
   pure loadTargetsResult
+
+logDiagnosticsSummary :: (MonadLore m) => [Diagnostic] -> m ()
+logDiagnosticsSummary diagnostics = do
+  let diagCount = length diagnostics
+      previewCount = 20
+      previewLines = take previewCount (map show diagnostics)
+  if diagCount == 0
+    then
+      Log.debug "GHC load completed with no diagnostics."
+    else do
+      Log.debug $
+        "GHC load completed with "
+          <> show diagCount
+          <> " diagnostics."
+      Log.debug $
+        "Diagnostics preview (first "
+          <> show previewCount
+          <> "):\n"
+          <> intercalate "\n" previewLines
 
 mkModuleTarget :: GHC.UnitId -> GHC.ModuleName -> GHC.Target
 mkModuleTarget unitId modName =
@@ -277,7 +296,7 @@ loadTargetsOnce targetsPlan = do
     GHC.load' (Just ifaceCache) GHC.LoadAllTargets Nothing patchedModGraph
   loadedModules <- collectLoadedModules patchedModGraph
   filterReferenceCaches loadedModules
-  Log.debug $ "GHC load completed with the following diagnostics:\n" <> intercalate "\n" (map show diagnostics)
+  logDiagnosticsSummary diagnostics
   pure
     LoadAttempt
       { loadAttemptDiagnostics = dependencyDiagnostics <> diagnostics,

@@ -5,9 +5,13 @@ module Lore.Mcp.Tools.GetDefinition.Shared
     defaultRecursionDepth,
     maxRenderedDefinitionResults,
     getDefinitionHandlerWithStrategy,
+    renderPaginatedDefinitionSources,
+    PaginatedDefinitionSources (..),
+    paginateDefinitionSources,
   )
 where
 
+import Control.Monad.IO.Class (liftIO)
 import Data.Either (lefts)
 import Data.Function (on)
 import Data.List (foldl', nubBy, sortOn)
@@ -18,19 +22,25 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC.Plugins as GHC
 import Lore
-  ( LoadTargetsResult (..),
+  ( DeclarationSpans (..),
+    DefinitionId (..),
+    DefinitionSource (..),
+    LoadTargetsResult (..),
     MonadLore,
-    NamedDefinitionSlice (..),
+    NamedDefinitionSource (..),
     Symbol (..),
     SymbolInfo (..),
     findMatchingSymbolsRoots,
     getLastLoadTargetsResult,
+    getMinifiedImportsForDefinition,
     lookupSymbolInfo,
     parseAndNormalizeName,
-    resolveDefinitionClosureNamed,
-    resolveDefinitionSliceNamed,
+    resolveDefinitionClosureSourcesNamed,
+    resolveDefinitionSourceNamed,
   )
+import Lore.Definition.RenderSlice (definitionSourceToRenderSlice)
 import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines)
+import qualified Lore.Mcp.Tools.Shared as Shared
 
 data CommonGetDefinitionArgs = CommonGetDefinitionArgs
   { symbols :: [Text],
@@ -46,7 +56,7 @@ data FilteredDefinitions = FilteredDefinitions
 
 type RenderDefinitionsStrategy m =
   Int ->
-  [NamedDefinitionSlice] ->
+  [NamedDefinitionSource] ->
   m FilteredDefinitions
 
 getDefinitionHandlerWithStrategy :: (MonadLore m) => CommonGetDefinitionArgs -> RenderDefinitionsStrategy m -> m Text
@@ -141,12 +151,12 @@ lookupRootSymbolInfos query = do
   rootSymbols <- Set.toList <$> findMatchingSymbolsRoots (parseAndNormalizeName query)
   catMaybes <$> mapM (lookupSymbolInfo . (.name)) rootSymbols
 
-resolveSymbolDefinitions :: (MonadLore m) => Int -> SymbolInfo -> m [NamedDefinitionSlice]
+resolveSymbolDefinitions :: (MonadLore m) => Int -> SymbolInfo -> m [NamedDefinitionSource]
 resolveSymbolDefinitions recursionDepth symbolInfo
   | recursionDepth == 0 =
-      maybe [] pure <$> resolveDefinitionSliceNamed symbolInfo.symbolName
+      maybe [] (pure . NamedDefinitionSource symbolInfo.symbolName) <$> resolveDefinitionSourceNamed symbolInfo.symbolName
   | otherwise =
-      resolveDefinitionClosureNamed recursionDepth symbolInfo.symbolName
+      resolveDefinitionClosureSourcesNamed recursionDepth symbolInfo.symbolName
 
 renderDefinitionResult :: LoadTargetsResult -> [Text] -> [Text] -> FilteredDefinitions -> Text
 renderDefinitionResult loadResult symbols missingSymbols renderedDefinitions =
@@ -258,6 +268,114 @@ renderPage paginatedDefinitions =
   case paginatedDefinitions.renderedPage of
     Just page -> Just page
     Nothing -> Nothing
+
+renderPaginatedDefinitionSources ::
+  (MonadLore m) =>
+  Int ->
+  Int ->
+  [NamedDefinitionSource] ->
+  m (Maybe PaginatedDefinitionModules)
+renderPaginatedDefinitionSources skip maxItems definitionEntries =
+  case paginateDefinitionSources skip maxItems definitionEntries of
+    Nothing ->
+      pure Nothing
+    Just paginatedSources -> do
+      visibleSlices <- mapM renderSource paginatedSources.visibleDefinitionSources
+      if null visibleSlices
+        then
+          pure $
+            Just
+              PaginatedDefinitionModules
+                { totalItems = paginatedSources.sourceTotalItems,
+                  skippedItems = paginatedSources.sourceSkippedItems,
+                  shownItems = 0,
+                  renderedPage = Just ""
+                }
+        else do
+          renderedDefinitions <-
+            liftIO $
+              Shared.renderPaginatedDefinitionModules
+                0
+                maxItems
+                visibleSlices
+          pure $
+            fmap
+              ( \rendered ->
+                  rendered
+                    { totalItems = paginatedSources.sourceTotalItems,
+                      skippedItems = paginatedSources.sourceSkippedItems,
+                      shownItems = length paginatedSources.visibleDefinitionSources
+                    }
+              )
+              renderedDefinitions
+  where
+    renderSource definitionEntry = do
+      imports <- getMinifiedImportsForDefinition definitionEntry.definitionSource
+      pure (definitionSourceToRenderSlice definitionEntry.definitionSource imports)
+
+data PaginatedDefinitionSources = PaginatedDefinitionSources
+  { sourceTotalItems :: !Int,
+    sourceSkippedItems :: !Int,
+    visibleDefinitionSources :: ![NamedDefinitionSource]
+  }
+
+paginateDefinitionSources :: Int -> Int -> [NamedDefinitionSource] -> Maybe PaginatedDefinitionSources
+paginateDefinitionSources skip maxItems definitionEntries =
+  case sortedSources of
+    [] ->
+      Nothing
+    _ ->
+      Just
+        PaginatedDefinitionSources
+          { sourceTotalItems = totalItems,
+            sourceSkippedItems = skippedItems,
+            visibleDefinitionSources = take maxItems (drop skippedItems sortedSources)
+          }
+  where
+    sortedSources =
+      sortOn definitionSourceSortKey (dedupeDefinitionSources definitionEntries)
+    totalItems =
+      length sortedSources
+    skippedItems =
+      min skip totalItems
+
+dedupeDefinitionSources :: [NamedDefinitionSource] -> [NamedDefinitionSource]
+dedupeDefinitionSources =
+  reverse . snd . foldl' dedupeOne (Set.empty, [])
+  where
+    dedupeOne (seenDefinitionIds, deduped) definitionEntry
+      | Set.member definitionId seenDefinitionIds =
+          (seenDefinitionIds, deduped)
+      | otherwise =
+          (Set.insert definitionId seenDefinitionIds, definitionEntry : deduped)
+      where
+        definitionId =
+          definitionEntry.definitionSource.definitionSourceId
+
+definitionSourceSortKey :: NamedDefinitionSource -> (String, String, Int, Int, Text)
+definitionSourceSortKey definitionEntry =
+  case GHC.srcSpanToRealSrcSpan definitionEntry.definitionSource.definitionSourceSpans.declarationSpan of
+    Just realSpan ->
+      ( moduleName,
+        GHC.unpackFS (GHC.srcSpanFile realSpan),
+        GHC.srcSpanStartLine realSpan,
+        GHC.srcSpanStartCol realSpan,
+        definitionIdSortKey definitionEntry.definitionSource.definitionSourceId
+      )
+    Nothing ->
+      ( moduleName,
+        "",
+        maxBound,
+        maxBound,
+        definitionIdSortKey definitionEntry.definitionSource.definitionSourceId
+      )
+  where
+    moduleName =
+      GHC.moduleNameString (GHC.moduleName definitionEntry.definitionSource.definitionSourceModule)
+
+definitionIdSortKey :: DefinitionId -> Text
+definitionIdSortKey definitionId =
+  T.pack (show definitionId.definitionIdSpanKey)
 
 renderAmbiguityResult :: LoadTargetsResult -> [Text] -> [AmbiguousQuery] -> Text
 renderAmbiguityResult loadResult missingSymbols ambiguousQueries =

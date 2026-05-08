@@ -121,6 +121,7 @@ test-suite lore-mcp-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      FindReferencesSpec
       GetDefinitionSpec
       McpTestSupport
       ProtocolRequestSpec

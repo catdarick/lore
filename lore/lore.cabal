@@ -27,6 +27,8 @@ library
   exposed-modules:
       Lore
       Lore.Definition
+      Lore.Definition.RenderSlice
+      Lore.Definition.Rendering
       Lore.Diagnostics
       Lore.Interpreter
       Lore.Logger
@@ -49,6 +51,7 @@ library
       Lore.Internal.Definition.Analysis
       Lore.Internal.Definition.Cache
       Lore.Internal.Definition.Callbacks
+      Lore.Internal.Definition.SourceTree
       Lore.Internal.Definition.Types
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags

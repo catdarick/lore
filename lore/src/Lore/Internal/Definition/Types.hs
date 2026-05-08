@@ -2,26 +2,45 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
 module Lore.Internal.Definition.Types
-  ( DefinitionSlice (..),
-    NamedDefinitionSlice (..),
+  ( ImportId (..),
+    SpanKey (..),
+    OccKey (..),
+    srcSpanKey,
+    realSrcSpanKey,
+    nameOccKey,
+    occNameKey,
+    rdrNameOccKey,
+    DefinitionId (..),
+    definitionIdFromSpans,
+    dedupeExactNames,
+    dedupeNamesByOccName,
+    DefinitionSlice (..),
+    NamedDefinitionSource (..),
     DeclarationSpans (..),
     MinimalTypedImport (..),
     MinimalTypedOccurrence (..),
     MinimalTypedModuleFacts (..),
-    ProcessedTypedDefinitionFacts (..),
     TypedModuleCache (..),
     MinimalCoreModuleFacts (..),
     ParsedModuleCache (..),
-    ParsedModuleSummary (..),
-    ParsedDefinitionMatch (..),
+    ParsedModuleFacts (..),
     ParsedOccurrenceSyntax (..),
+    SourceRegionCandidate (..),
+    DefinitionSourceTree (..),
+    SourceRegion (..),
+    SourceRegionKind (..),
     ImportQualifiedStyle (..),
     RequiredImport (..),
     RequiredImportItem (..),
+    ImportCandidate (..),
+    DefinitionSource (..),
+    DefinitionDependencies (..),
+    DefinitionBindings (..),
+    ReferenceHit (..),
+    DefinitionOccurrenceFact (..),
     ReferenceMatch (..),
-    DefinitionAnalysis (..),
-    ReferenceOccurrenceIndex (..),
-    ReferenceModuleAnalysis (..),
+    ParsedOccurrenceModuleIndex (..),
+    DefinitionModuleIndex (..),
   )
 where
 
@@ -30,8 +49,79 @@ import Data.Data (Data)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified GHC
 import GHC.Generics (Generic)
+import qualified GHC.Plugins as GHC
+
+newtype ImportId = ImportId
+  { unImportId :: Int
+  }
+  deriving stock (Eq, Ord, Generic)
+  deriving anyclass (NFData)
+
+newtype SpanKey = SpanKey
+  { unSpanKey :: Text
+  }
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (NFData)
+
+newtype OccKey = OccKey
+  { unOccKey :: Text
+  }
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (NFData)
+
+-- SpanKey is a session-local lookup key, not a durable persisted identity.
+-- Prefer structural fields if this ever needs to cross process boundaries.
+srcSpanKey :: GHC.SrcSpan -> SpanKey
+srcSpanKey =
+  SpanKey . T.pack . show
+
+realSrcSpanKey :: GHC.RealSrcSpan -> SpanKey
+realSrcSpanKey =
+  SpanKey . T.pack . show
+
+nameOccKey :: GHC.Name -> OccKey
+nameOccKey =
+  occNameKey . GHC.nameOccName
+
+occNameKey :: GHC.OccName -> OccKey
+occNameKey =
+  OccKey . T.pack . GHC.occNameString
+
+rdrNameOccKey :: GHC.RdrName -> OccKey
+rdrNameOccKey =
+  occNameKey . GHC.rdrNameOcc
+
+data DefinitionId = DefinitionId
+  { definitionIdModule :: !GHC.Module,
+    definitionIdSpanKey :: !SpanKey
+  }
+  deriving stock (Eq, Ord, Generic)
+  deriving anyclass (NFData)
+
+definitionIdFromSpans :: GHC.Module -> DeclarationSpans -> DefinitionId
+definitionIdFromSpans module_ spans =
+  -- DefinitionId identifies the source declaration, not an individual binder.
+  -- Multiple names bound by the same declaration share one DefinitionId.
+  DefinitionId
+    { definitionIdModule = module_,
+      definitionIdSpanKey = srcSpanKey spans.declarationSpan
+    }
+
+dedupeExactNames :: [GHC.Name] -> [GHC.Name]
+dedupeExactNames =
+  go Set.empty
+  where
+    go _ [] = []
+    go seen (name : names)
+      | Set.member name seen = go seen names
+      | otherwise = name : go (Set.insert name seen) names
+
+dedupeNamesByOccName :: [GHC.Name] -> [GHC.Name]
+dedupeNamesByOccName =
+  Map.elems . Map.fromList . map (\name -> (nameOccKey name, name))
 
 data DefinitionSlice = DefinitionSlice
   { definitionModule :: !GHC.Module,
@@ -41,9 +131,9 @@ data DefinitionSlice = DefinitionSlice
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
 
-data NamedDefinitionSlice = NamedDefinitionSlice
+data NamedDefinitionSource = NamedDefinitionSource
   { definitionName :: !GHC.Name,
-    definitionSlice :: !DefinitionSlice
+    definitionSource :: !DefinitionSource
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
@@ -56,31 +146,25 @@ data DeclarationSpans = DeclarationSpans
   deriving anyclass (NFData)
 
 data ParsedOccurrenceSyntax = ParsedOccurrenceSyntax
-  { parsedSyntaxQualifier :: !(Maybe GHC.ModuleName),
-    parsedSyntaxUsageSpans :: ![GHC.SrcSpan],
-    parsedSyntaxSectionSpans :: ![GHC.SrcSpan]
+  { parsedSyntaxQualifier :: !(Maybe GHC.ModuleName)
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
 
-data ParsedDefinitionMatch = ParsedDefinitionMatch
-  { parsedDefinitionSpans :: !DeclarationSpans,
-    parsedOccurrenceSyntaxes :: ![(GHC.SrcSpan, ParsedOccurrenceSyntax)]
+data ParsedModuleFacts = ParsedModuleFacts
+  { parsedOccKeys :: !(Set.Set OccKey),
+    parsedDeclarationsById :: !(Map.Map DefinitionId DeclarationSpans),
+    parsedOccurrenceSyntaxBySpan :: !(Map.Map SpanKey ParsedOccurrenceSyntax),
+    parsedRegionCandidates :: ![SourceRegionCandidate]
   }
   deriving stock (Generic)
   deriving anyclass (NFData)
 
-data ParsedModuleSummary = ParsedModuleSummary
-  { parsedModuleOccurrenceNames :: !(Set.Set Text),
-    parsedModuleDefinitions :: ![ParsedDefinitionMatch]
+newtype ParsedModuleCache = ParsedModuleFactsCache
+  { unParsedModuleFactsCache :: ParsedModuleFacts
   }
   deriving stock (Generic)
   deriving anyclass (NFData)
-
-data ParsedModuleCache
-  = ParsedModuleRaw !GHC.ParsedSource
-  | ParsedModuleProcessed !ParsedModuleSummary
-  deriving stock (Generic)
 
 data ImportQualifiedStyle
   = QualifiedPre
@@ -109,7 +193,7 @@ data RequiredImportItem
   deriving anyclass (NFData)
 
 data MinimalTypedImport = MinimalTypedImport
-  { typedImportId :: !Int,
+  { typedImportId :: !ImportId,
     typedImportModule :: !GHC.ModuleName,
     typedImportPackageQualifier :: !(Maybe String),
     typedImportSource :: !Bool,
@@ -124,7 +208,7 @@ data MinimalTypedOccurrence = MinimalTypedOccurrence
   { typedOccurrenceName :: !GHC.Name,
     typedOccurrenceSpan :: !GHC.SrcSpan,
     typedOccurrenceParent :: !(Maybe GHC.Name),
-    typedOccurrenceCandidates :: ![Int]
+    typedOccurrenceCandidates :: ![ImportId]
   }
   deriving stock (Generic)
   deriving anyclass (NFData)
@@ -137,19 +221,8 @@ data MinimalTypedModuleFacts = MinimalTypedModuleFacts
   deriving stock (Generic)
   deriving anyclass (NFData)
 
-data ProcessedTypedDefinitionFacts = ProcessedTypedDefinitionFacts
-  { processedRequiredImports :: ![RequiredImport],
-    processedReferences :: ![GHC.Name],
-    processedReferenceSpans :: !(Map.Map GHC.Name [GHC.SrcSpan]),
-    processedReferenceUsageSpans :: !(Map.Map GHC.Name [GHC.SrcSpan]),
-    processedReferenceSectionSpans :: !(Map.Map GHC.Name [GHC.SrcSpan])
-  }
-  deriving stock (Generic)
-  deriving anyclass (NFData)
-
-data TypedModuleCache
-  = TypedModuleMinimalFacts !MinimalTypedModuleFacts
-  | TypedModuleProcessedData !(Map.Map GHC.Name ProcessedTypedDefinitionFacts)
+newtype TypedModuleCache
+  = TypedModuleMinimalFacts MinimalTypedModuleFacts
   deriving stock (Generic)
   deriving anyclass (NFData)
 
@@ -159,34 +232,105 @@ data MinimalCoreModuleFacts = MinimalCoreModuleFacts
   deriving stock (Generic)
   deriving anyclass (NFData)
 
-data ReferenceMatch = ReferenceMatch
-  { referenceSlice :: !DefinitionSlice,
-    matchedReferenceSpans :: ![GHC.SrcSpan],
-    matchedReferenceUsageSpans :: ![GHC.SrcSpan],
-    matchedReferenceSectionSpans :: ![GHC.SrcSpan]
+data DefinitionSourceTree = DefinitionSourceTree
+  { sourceTreeDefinition :: !DefinitionSource,
+    sourceTreeRoot :: !SourceRegion
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data SourceRegion = SourceRegion
+  { sourceRegionKind :: !SourceRegionKind,
+    sourceRegionSpan :: !GHC.SrcSpan,
+    sourceRegionChildren :: ![SourceRegion]
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data SourceRegionKind
+  = DefinitionRegion
+  | MatchRegion
+  | GuardRegion
+  | StatementRegion
+  | BindingRegion
+  | ApplicationRegion
+  | RecordRegion
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (NFData)
+
+data SourceRegionCandidate = SourceRegionCandidate
+  { candidateRegionKind :: !SourceRegionKind,
+    candidateRegionSpan :: !GHC.SrcSpan
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data ImportCandidate = ImportCandidate
+  { importCandidateId :: !ImportId,
+    importCandidateBaseImport :: !RequiredImport
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
 
-data DefinitionAnalysis = DefinitionAnalysis
-  { analysisSlice :: !DefinitionSlice,
-    analysisReferences :: ![GHC.Name],
-    analysisUsedInstances :: ![GHC.Name],
-    analysisReferenceSpans :: !(Map.Map GHC.Name [GHC.SrcSpan]),
-    analysisReferenceUsageSpans :: !(Map.Map GHC.Name [GHC.SrcSpan]),
-    analysisReferenceSectionSpans :: !(Map.Map GHC.Name [GHC.SrcSpan])
+data DefinitionSource = DefinitionSource
+  { definitionSourceId :: !DefinitionId,
+    definitionSourceModule :: !GHC.Module,
+    definitionSourceNames :: !(Set.Set GHC.Name),
+    definitionSourceSpans :: !DeclarationSpans
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data DefinitionDependencies = DefinitionDependencies
+  { dependencyDirectReferenceNames :: !(Set.Set GHC.Name),
+    dependencyUsedInstanceNames :: !(Set.Set GHC.Name)
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data DefinitionBindings = DefinitionBindings
+  { bindingDefinitionsById :: !(Map.Map DefinitionId DefinitionSource),
+    bindingDefinitionIdByName :: !(Map.Map GHC.Name DefinitionId)
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data ReferenceHit = ReferenceHit
+  { referenceHitDefinitionId :: !DefinitionId,
+    referenceHitTargetName :: !GHC.Name,
+    referenceHitExactSpan :: !GHC.SrcSpan
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data DefinitionOccurrenceFact = DefinitionOccurrenceFact
+  { occurrenceFactName :: !GHC.Name,
+    occurrenceFactSpan :: !GHC.SrcSpan,
+    occurrenceFactParent :: !(Maybe GHC.Name),
+    occurrenceFactImportCandidates :: ![ImportId]
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data ReferenceMatch = ReferenceMatch
+  { referenceMatchDefinition :: !DefinitionSource,
+    referenceMatchOccurrences :: ![ReferenceHit]
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+newtype ParsedOccurrenceModuleIndex = ParsedOccurrenceModuleIndex
+  { parsedOccurrenceModules :: Map.Map OccKey (Set.Set GHC.Module)
   }
   deriving stock (Generic)
   deriving anyclass (NFData)
 
-newtype ReferenceOccurrenceIndex = ReferenceOccurrenceIndex
-  { referenceOccurrenceModules :: Map.Map Text (Set.Set GHC.Module)
+data DefinitionModuleIndex = DefinitionModuleIndex
+  { definitionsById :: !(Map.Map DefinitionId DefinitionSource),
+    definitionIdByName :: !(Map.Map GHC.Name DefinitionId),
+    referenceHitsByOccKey :: !(Map.Map OccKey [ReferenceHit]),
+    dependenciesById :: !(Map.Map DefinitionId DefinitionDependencies),
+    requiredImportsById :: Map.Map DefinitionId [RequiredImport]
   }
-  deriving stock (Generic)
-  deriving anyclass (NFData)
-
-newtype ReferenceModuleAnalysis = ReferenceModuleAnalysis
-  { referenceModuleDefinitions :: Map.Map GHC.Name (Maybe DefinitionAnalysis)
-  }
-  deriving stock (Generic)
+  deriving stock (Eq, Generic)
   deriving anyclass (NFData)

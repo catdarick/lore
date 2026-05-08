@@ -3,12 +3,11 @@ module Lore.Mcp.Tools.GetDefinition.Regular
   )
 where
 
-import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Lore (MonadLore, NamedDefinitionSlice (..))
+import Lore (MonadLore, NamedDefinitionSource (..))
 import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), Maximum, MinItems, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.GetDefinition.Shared
@@ -17,8 +16,8 @@ import Lore.Mcp.Tools.GetDefinition.Shared
     defaultRecursionDepth,
     getDefinitionHandlerWithStrategy,
     maxRenderedDefinitionResults,
+    renderPaginatedDefinitionSources,
   )
-import qualified Lore.Mcp.Tools.Shared as Shared
 
 data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
   { symbols ::
@@ -69,15 +68,14 @@ regularGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} =
 renderWithoutKnowledgeCache ::
   (MonadLore m) =>
   Int ->
-  [NamedDefinitionSlice] ->
+  [NamedDefinitionSource] ->
   m FilteredDefinitions
 renderWithoutKnowledgeCache skip definitionEntries = do
   renderedDefinitions <-
-    liftIO $
-      Shared.renderPaginatedDefinitionModules
-        skip
-        maxRenderedDefinitionResults
-        (map (.definitionSlice) definitionEntries)
+    renderPaginatedDefinitionSources
+      skip
+      maxRenderedDefinitionResults
+      definitionEntries
   pure
     FilteredDefinitions
       { renderedDefinitions,

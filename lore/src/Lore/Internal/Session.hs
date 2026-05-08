@@ -14,7 +14,7 @@ import Data.Text (Text)
 import qualified GHC as GHC
 import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
-import Lore.Internal.Definition.Types (MinimalCoreModuleFacts, ParsedModuleCache, ReferenceModuleAnalysis, ReferenceOccurrenceIndex, TypedModuleCache)
+import Lore.Internal.Definition.Types (DefinitionModuleIndex, MinimalCoreModuleFacts, ParsedModuleCache, ParsedOccurrenceModuleIndex, TypedModuleCache)
 import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
 import Lore.Internal.Lookup.Types (ExternalPackagesSymbolsCache, ModSummaries, NameToInstancesIndex, SymbolsIndex)
@@ -34,8 +34,8 @@ data SessionContext = SessionContext
     symbolsMapDependencySet :: MVar (Set.Set String),
     modSummariesCache :: MVar (Maybe ModSummaries),
     nameToInstancesIndexCache :: MVar (Maybe NameToInstancesIndex),
-    referenceOccurrenceIndexCache :: MVar (Maybe ReferenceOccurrenceIndex),
-    referenceModuleAnalysisCache :: MVar (Map.Map GHC.Module (Maybe ReferenceModuleAnalysis)),
+    parsedOccurrenceModuleIndexCache :: MVar (Maybe ParsedOccurrenceModuleIndex),
+    definitionModuleIndexCache :: MVar (Map.Map GHC.Module (Maybe DefinitionModuleIndex)),
     referenceTypedModuleCache :: MVar (Map.Map GHC.Module TypedModuleCache),
     referenceMinimalCoreModuleFactsCache :: MVar (Map.Map GHC.Module MinimalCoreModuleFacts),
     referenceParsedModuleCache :: MVar (Map.Map GHC.Module ParsedModuleCache),
@@ -71,8 +71,8 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
   symbolsMapDependencySet <- GHC.newMVar Set.empty
   modSummariesCache <- GHC.newMVar Nothing
   nameToInstancesIndexCache <- GHC.newMVar Nothing
-  referenceOccurrenceIndexCache <- GHC.newMVar Nothing
-  referenceModuleAnalysisCache <- GHC.newMVar Map.empty
+  parsedOccurrenceModuleIndexCache <- GHC.newMVar Nothing
+  definitionModuleIndexCache <- GHC.newMVar Map.empty
   referenceTypedModuleCache <- GHC.newMVar Map.empty
   referenceMinimalCoreModuleFactsCache <- GHC.newMVar Map.empty
   referenceParsedModuleCache <- GHC.newMVar Map.empty
@@ -95,8 +95,8 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
               symbolsMapDependencySet,
               modSummariesCache,
               nameToInstancesIndexCache,
-              referenceOccurrenceIndexCache,
-              referenceModuleAnalysisCache,
+              parsedOccurrenceModuleIndexCache,
+              definitionModuleIndexCache,
               referenceTypedModuleCache,
               referenceMinimalCoreModuleFactsCache,
               referenceParsedModuleCache,

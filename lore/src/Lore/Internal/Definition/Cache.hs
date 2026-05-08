@@ -1,67 +1,79 @@
 module Lore.Internal.Definition.Cache
-  ( getReferenceOccurrenceIndex,
-    cacheReferenceModuleAnalysis,
+  ( getParsedOccurrenceModuleIndex,
+    getParsedModuleFacts,
+    cacheDefinitionModuleIndex,
     filterReferenceCaches,
-    lookupReferenceModuleAnalysisCache,
+    lookupDefinitionModuleIndexCache,
     invalidateReferenceCaches,
   )
 where
 
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (asks)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified GHC
-import Lore.Internal.Definition.Types (ReferenceModuleAnalysis, ReferenceOccurrenceIndex)
+import Lore.Internal.Definition.Types (DefinitionModuleIndex, ParsedModuleCache (..), ParsedModuleFacts, ParsedOccurrenceModuleIndex)
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Monad (MonadLore)
-import UnliftIO (modifyMVar)
+import UnliftIO (modifyMVar, readMVar)
 
-getReferenceOccurrenceIndex ::
+getParsedOccurrenceModuleIndex ::
   (MonadLore m) =>
-  m ReferenceOccurrenceIndex ->
-  m ReferenceOccurrenceIndex
-getReferenceOccurrenceIndex prepareIndex = do
-  cacheVar <- asks referenceOccurrenceIndexCache
+  m ParsedOccurrenceModuleIndex ->
+  m ParsedOccurrenceModuleIndex
+getParsedOccurrenceModuleIndex prepareIndex = do
+  cacheVar <- asks parsedOccurrenceModuleIndexCache
   modifyMVar cacheVar \cache ->
     case cache of
-      Just referenceOccurrenceIndex ->
-        pure (cache, referenceOccurrenceIndex)
+      Just parsedOccurrenceModuleIndex ->
+        pure (cache, parsedOccurrenceModuleIndex)
       Nothing -> do
-        referenceOccurrenceIndex <- prepareIndex
-        pure (Just referenceOccurrenceIndex, referenceOccurrenceIndex)
+        parsedOccurrenceModuleIndex <- prepareIndex
+        pure (Just parsedOccurrenceModuleIndex, parsedOccurrenceModuleIndex)
 
-lookupReferenceModuleAnalysisCache ::
+lookupDefinitionModuleIndexCache ::
   (MonadLore m) =>
   GHC.Module ->
-  m (Maybe (Maybe ReferenceModuleAnalysis))
-lookupReferenceModuleAnalysisCache homeModule = do
-  cacheVar <- asks referenceModuleAnalysisCache
+  m (Maybe (Maybe DefinitionModuleIndex))
+lookupDefinitionModuleIndexCache homeModule = do
+  cacheVar <- asks definitionModuleIndexCache
   modifyMVar cacheVar \cache ->
     pure (cache, Map.lookup homeModule cache)
 
-cacheReferenceModuleAnalysis ::
+cacheDefinitionModuleIndex ::
   (MonadLore m) =>
   GHC.Module ->
-  Maybe ReferenceModuleAnalysis ->
+  Maybe DefinitionModuleIndex ->
   m ()
-cacheReferenceModuleAnalysis homeModule moduleAnalysis = do
-  cacheVar <- asks referenceModuleAnalysisCache
+cacheDefinitionModuleIndex homeModule moduleAnalysis = do
+  cacheVar <- asks definitionModuleIndexCache
   modifyMVar cacheVar \cache ->
     pure (Map.insert homeModule moduleAnalysis cache, ())
+
+getParsedModuleFacts :: (MonadLore m) => GHC.Module -> m (Maybe ParsedModuleFacts)
+getParsedModuleFacts homeModule = do
+  parsedModuleCacheVar <- asks referenceParsedModuleCache
+  parsedModuleCache <- liftIO (readMVar parsedModuleCacheVar)
+  case Map.lookup homeModule parsedModuleCache of
+    Just (ParsedModuleFactsCache parsedFacts) ->
+      pure (Just parsedFacts)
+    Nothing ->
+      pure Nothing
 
 filterReferenceCaches ::
   (MonadLore m) =>
   Set.Set GHC.Module ->
   m ()
 filterReferenceCaches loadedModules = do
-  occurrenceCacheVar <- asks referenceOccurrenceIndexCache
-  analysisCacheVar <- asks referenceModuleAnalysisCache
+  occurrenceCacheVar <- asks parsedOccurrenceModuleIndexCache
+  moduleIndexCacheVar <- asks definitionModuleIndexCache
   typedModuleCacheVar <- asks referenceTypedModuleCache
   minimalCoreFactsCacheVar <- asks referenceMinimalCoreModuleFactsCache
   parsedModuleCacheVar <- asks referenceParsedModuleCache
   modifyMVar occurrenceCacheVar \_ ->
     pure (Nothing, ())
-  modifyMVar analysisCacheVar \_ ->
+  modifyMVar moduleIndexCacheVar \_ ->
     pure (Map.empty, ())
   modifyMVar typedModuleCacheVar \cache ->
     pure (Map.restrictKeys cache loadedModules, ())
@@ -72,14 +84,14 @@ filterReferenceCaches loadedModules = do
 
 invalidateReferenceCaches :: (MonadLore m) => m ()
 invalidateReferenceCaches = do
-  occurrenceCacheVar <- asks referenceOccurrenceIndexCache
-  analysisCacheVar <- asks referenceModuleAnalysisCache
+  occurrenceCacheVar <- asks parsedOccurrenceModuleIndexCache
+  moduleIndexCacheVar <- asks definitionModuleIndexCache
   typedModuleCacheVar <- asks referenceTypedModuleCache
   minimalCoreFactsCacheVar <- asks referenceMinimalCoreModuleFactsCache
   parsedModuleCacheVar <- asks referenceParsedModuleCache
   modifyMVar occurrenceCacheVar \_ ->
     pure (Nothing, ())
-  modifyMVar analysisCacheVar \_ ->
+  modifyMVar moduleIndexCacheVar \_ ->
     pure (Map.empty, ())
   modifyMVar typedModuleCacheVar \_ ->
     pure (Map.empty, ())

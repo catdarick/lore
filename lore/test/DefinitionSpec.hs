@@ -9,7 +9,9 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC
 import qualified GHC.Plugins
-import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), ImportQualifiedStyle (..), ReferenceMatch (..), RequiredImport (..), declarationSpans, mergeDefinitionSlices, resolveDefinitionClosure, resolveDefinitionSlice, resolveReferenceMatchesForNames)
+import qualified GHC.Types.Unique as GHC.Unique
+import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), DefinitionSource (..), ImportQualifiedStyle (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..), RequiredImport (..), RequiredImportItem (..), declarationSpans, getMinifiedImportsForDefinition, mergeDefinitionSlices, resolveDefinitionClosureSourcesNamed, resolveDefinitionSourceNamed, resolveReferenceMatchesForNames)
+import Lore.Definition.RenderSlice (definitionSourceToRenderSlice)
 import Lore.Lookup (Symbol (..))
 import Lore.Monad (MonadLore)
 import Lore.Targets (defaultLoadTargetsOptions)
@@ -24,7 +26,7 @@ loadTargets options = void (Targets.loadTargets options)
 
 spec :: Spec
 spec = do
-  describe "resolveDefinitionSlice" do
+  describe "resolveDefinitionSourceNamed + renderDefinitionSourceSlice" do
     it "resolves declaration spans and the minimal imports for a symbol" do
       slice <- fixtureDefinition "lookupOrZero"
 
@@ -46,8 +48,86 @@ spec = do
         "explicitQualified ch =\n  Set.member ch (Set.fromList \"abc\")"
         (Just "explicitQualified :: Char -> Bool")
       let imports = slice.requiredImports
-      any (\i -> GHC.moduleNameString i.importModule == "Data.Set" && not (null i.importItems)) imports
+      any
+        ( \i ->
+            GHC.moduleNameString i.importModule == "Data.Set"
+              && i.importQualifiedStyle == Lore.Definition.QualifiedPre
+              && fmap GHC.moduleNameString i.importAlias == Just "Set"
+              && not (null i.importItems)
+        )
+        imports
         `shouldBe` True
+
+    it "preserves a qualified import without an alias when referenced by module name" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestImports"
+            moduleFile = moduleDir </> "QualifiedNoAlias.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile qualifiedNoAliasImportFixtureModuleSource
+
+        slice <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestImports.QualifiedNoAlias.emptyMap"
+            targetName <-
+              maybe
+                (error "symbol not found: TestImports.QualifiedNoAlias.emptyMap")
+                pure
+                (findFixtureSymbolInModule "TestImports.QualifiedNoAlias" "emptyMap" exportedSymbols)
+            source <-
+              maybe
+                (error "definition not found: TestImports.QualifiedNoAlias.emptyMap")
+                pure
+                =<< resolveDefinitionSourceNamed targetName
+            renderDefinitionSourceSlice source
+
+        any
+          ( \i ->
+              GHC.moduleNameString i.importModule == "Data.Map.Strict"
+                && i.importQualifiedStyle == Lore.Definition.QualifiedPre
+                && i.importAlias == Nothing
+          )
+          slice.requiredImports
+          `shouldBe` True
+
+    it "does not use an aliased qualified import for module-qualified syntax" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestImports"
+            moduleFile = moduleDir </> "QualifiedAliasDecoy.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile qualifiedAliasDecoyImportFixtureModuleSource
+
+        slice <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestImports.QualifiedAliasDecoy.emptyMap"
+            targetName <-
+              maybe
+                (error "symbol not found: TestImports.QualifiedAliasDecoy.emptyMap")
+                pure
+                (findFixtureSymbolInModule "TestImports.QualifiedAliasDecoy" "emptyMap" exportedSymbols)
+            source <-
+              maybe
+                (error "definition not found: TestImports.QualifiedAliasDecoy.emptyMap")
+                pure
+                =<< resolveDefinitionSourceNamed targetName
+            renderDefinitionSourceSlice source
+
+        any
+          ( \i ->
+              GHC.moduleNameString i.importModule == "Data.Map.Strict"
+                && i.importQualifiedStyle == Lore.Definition.QualifiedPre
+                && i.importAlias == Nothing
+          )
+          slice.requiredImports
+          `shouldBe` True
+        any
+          ( \i ->
+              GHC.moduleNameString i.importModule == "Data.Map.Strict"
+                && fmap GHC.moduleNameString i.importAlias == Just "M"
+          )
+          slice.requiredImports
+          `shouldBe` False
 
     it "resolves imports for definitions that reference another module" do
       slice <- fixtureDefinition "crossModuleRecord"
@@ -70,10 +150,12 @@ spec = do
               (error "symbol not found: Demo.Support.supportValues")
               pure
               (findFixtureSymbolInModule "Demo.Support" "supportValues" symbols)
-          maybe
-            (error "definition not found: Demo.Support.supportValues")
-            pure
-            =<< resolveDefinitionSlice targetName
+          source <-
+            maybe
+              (error "definition not found: Demo.Support.supportValues")
+              pure
+              =<< resolveDefinitionSourceNamed targetName
+          renderDefinitionSourceSlice source
 
       definitionTexts <- traverse definitionTextFromSpans slice.declarationSpans
       GHC.moduleNameString (GHC.moduleName slice.definitionModule) `shouldBe` "Demo.Support"
@@ -169,7 +251,8 @@ spec = do
           loadTargets defaultLoadTargetsOptions
           exportedSymbols <- findSymbols "lookupOrZero"
           targetName <- maybe (error "symbol not found: lookupOrZero") pure (findFixtureSymbol "lookupOrZero" exportedSymbols)
-          maybe (error "definition not found: lookupOrZero") pure =<< resolveDefinitionSlice targetName
+          source <- maybe (error "definition not found: lookupOrZero") pure =<< resolveDefinitionSourceNamed targetName
+          renderDefinitionSourceSlice source
 
       shouldHaveSingleDefinitionText
         slice
@@ -229,7 +312,38 @@ spec = do
         Nothing ->
           expectationFailure "expected merged slice"
 
-  describe "resolveDefinitionClosure" do
+  describe "merged import items" do
+    it "deduplicates import names by rendered occurrence text" do
+      slice <- fixtureDefinition "lookupOrZero"
+      let firstName = testNameWithOcc "duplicate" 1
+          secondName = testNameWithOcc "duplicate" 2
+          firstSlice = slice {requiredImports = [testRequiredImport 1 [ImportName firstName]]}
+          secondSlice = slice {requiredImports = [testRequiredImport 1 [ImportName secondName]]}
+
+      case mergeDefinitionSlices [firstSlice, secondSlice] of
+        Just merged ->
+          concatMap importItems merged.requiredImports == [ImportName firstName]
+            `shouldBe` True
+        Nothing ->
+          expectationFailure "expected merged slice"
+
+    it "deduplicates import parents and children by rendered occurrence text" do
+      slice <- fixtureDefinition "lookupOrZero"
+      let firstParent = testNameWithOcc "Parent" 1
+          secondParent = testNameWithOcc "Parent" 2
+          firstChild = testNameWithOcc "Child" 3
+          secondChild = testNameWithOcc "Child" 4
+          firstSlice = slice {requiredImports = [testRequiredImport 1 [ImportParent firstParent [firstChild]]]}
+          secondSlice = slice {requiredImports = [testRequiredImport 1 [ImportParent secondParent [secondChild]]]}
+
+      case mergeDefinitionSlices [firstSlice, secondSlice] of
+        Just merged ->
+          concatMap importItems merged.requiredImports == [ImportParent firstParent [firstChild]]
+            `shouldBe` True
+        Nothing ->
+          expectationFailure "expected merged slice"
+
+  describe "resolveDefinitionClosureSourcesNamed + renderDefinitionClosureSlices" do
     it "respects the requested recursion depth for same-module function references" do
       depthZero <- fixtureDefinitionClosure 0 "derivedValue"
       depthOne <- fixtureDefinitionClosure 1 "derivedValue"
@@ -305,6 +419,18 @@ spec = do
                                         )
                                       ]
 
+    it "orders recursive closure results with dependencies before the queried root definition" do
+      moduleOrder <-
+        fixtureLore do
+          loadTargets defaultLoadTargetsOptions
+          exportedSymbols <- findSymbols "crossModuleRecord"
+          targetName <- maybe (error "symbol not found: crossModuleRecord") pure (findFixtureSymbol "crossModuleRecord" exportedSymbols)
+          namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+          pure (map (GHC.moduleNameString . GHC.moduleName . (.definitionSource.definitionSourceModule)) namedSources)
+
+      last moduleOrder `shouldBe` "Demo"
+      "Demo.Support" `shouldSatisfy` (`elem` moduleOrder)
+
     it "merges qualified explicit import lists when same-module declarations use different items" do
       closure <- fixtureDefinitionClosure 2 "crossModuleBundle"
 
@@ -342,7 +468,8 @@ spec = do
                 (error "symbol not found: TestClosure.Render.renderInt")
                 pure
                 (findFixtureSymbolInModule "TestClosure.Render" "renderInt" exportedSymbols)
-            resolveDefinitionClosure 1 targetName
+            namedSources <- resolveDefinitionClosureSourcesNamed 1 targetName
+            renderDefinitionClosureSlices namedSources
 
         closure
           `shouldHaveModuleDefinitions` [ ( "TestClosure.Render",
@@ -361,7 +488,8 @@ spec = do
           loadTargets defaultLoadTargetsOptions
           exportedSymbols <- findSymbols "crossModuleRecord"
           targetName <- maybe (error "symbol not found: crossModuleRecord") pure (findFixtureSymbol "crossModuleRecord" exportedSymbols)
-          resolveDefinitionClosure 2 targetName
+          namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+          renderDefinitionClosureSlices namedSources
 
       closure
         `shouldHaveModuleDefinitions` [ ( "Demo",
@@ -397,23 +525,17 @@ spec = do
                 (findFixtureSymbolInModule "Demo.Support" "supportSeed" exportedSymbols)
             resolveReferenceMatchesForNames [targetName]
 
-        let referenceSlices = map referenceSlice references
-        referenceSlices
-          `shouldHaveModuleDefinitions` [ ( "Demo",
-                                            ["crossModuleSeed :: Int\ncrossModuleSeed = Support.supportSeed"],
-                                            ["Demo.Support"]
-                                          ),
-                                          ( "Demo",
-                                            ["instance HasIndex Support.SupportRecord where\n  toIndex _ =\n    Map.singleton (show Support.supportSeed) (Support.mkSupportRecord Support.supportSeed)"],
-                                            [ "Data.Map.Strict",
-                                              "Demo.Support"
-                                            ]
-                                          ),
-                                          ( "Demo.Support",
-                                            ["supportStep :: Int -> Int\nsupportStep value = value + supportSeed"],
-                                            []
-                                          )
-                                        ]
+        map referenceMatchDefinition references
+          `shouldHaveModuleDefinitionSources` [ ( "Demo",
+                                                  ["crossModuleSeed :: Int\ncrossModuleSeed = Support.supportSeed"]
+                                                ),
+                                                ( "Demo",
+                                                  ["instance HasIndex Support.SupportRecord where\n  toIndex _ =\n    Map.singleton (show Support.supportSeed) (Support.mkSupportRecord Support.supportSeed)"]
+                                                ),
+                                                ( "Demo.Support",
+                                                  ["supportStep :: Int -> Int\nsupportStep value = value + supportSeed"]
+                                                )
+                                              ]
 
     it "merges root chains with the same root before matching references" do
       withFixtureCopy \fixtureRoot -> do
@@ -432,17 +554,20 @@ spec = do
               _ ->
                 error ("unexpected resolved roots count: " <> show (length resolvedRootChains))
 
-        let referenceSlices = map referenceSlice references
-        referenceSlices
-          `shouldHaveModuleDefinitions` [ ( "TestChain.Roots",
-                                            ["mkWrapped :: Int -> Wrapped\nmkWrapped = Wrapped"],
-                                            []
-                                          ),
-                                          ( "TestChain.Roots",
-                                            ["unwrapWrapped :: Wrapped -> Int\nunwrapWrapped (Wrapped value) = value"],
-                                            []
-                                          )
-                                        ]
+        map referenceMatchDefinition references
+          `shouldHaveModuleDefinitionSources` [ ( "TestChain.Roots",
+                                                  ["mkWrapped :: Int -> Wrapped\nmkWrapped = Wrapped"]
+                                                ),
+                                                ( "TestChain.Roots",
+                                                  ["unwrapWrapped :: Wrapped -> Int\nunwrapWrapped (Wrapped value) = value"]
+                                                )
+                                              ]
+        let occurrenceKeys =
+              [ (referenceHitTargetName occurrence, show occurrence.referenceHitExactSpan)
+              | reference <- references,
+                occurrence <- reference.referenceMatchOccurrences
+              ]
+        length occurrenceKeys `shouldBe` length (nub occurrenceKeys)
 
   describe "resolveReferenceMatches" do
     it "returns exact matched reference spans for each occurrence in a definition" do
@@ -464,91 +589,13 @@ spec = do
             resolveReferenceMatchesForNames [targetName]
 
         case referenceMatches of
-          [ReferenceMatch {referenceSlice, matchedReferenceSpans, matchedReferenceUsageSpans}] -> do
-            GHC.moduleNameString (GHC.moduleName referenceSlice.definitionModule) `shouldBe` "TestRefs.Snippet"
-            sort (mapMaybe matchedSpanStartLine matchedReferenceSpans) `shouldBe` [11, 12, 13]
-            mapMaybe matchedSpanLineRange matchedReferenceUsageSpans `shouldSatisfy` elem (11, 13)
+          [referenceMatch] -> do
+            GHC.moduleNameString (GHC.moduleName referenceMatch.referenceMatchDefinition.definitionSourceModule) `shouldBe` "TestRefs.Snippet"
+            sort (mapMaybe matchedSpanStartLine (referenceMatchExactSpans referenceMatch)) `shouldBe` [11, 12, 13]
           other ->
-            expectationFailure ("expected a single reference match, got: " <> show (length other))
+            expectationFailure ("expected a single definition-level reference match, got: " <> show (length other))
 
-    it "collects multiline usage spans for record constructor references" do
-      withFixtureCopy \fixtureRoot -> do
-        let moduleDir = fixtureRoot </> "src" </> "TestRefs"
-            moduleFile = moduleDir </> "RecordSnippet.hs"
-        createDirectoryIfMissing True moduleDir
-        TIO.writeFile moduleFile multilineRecordReferenceFixtureModuleSource
-
-        referenceMatches <-
-          fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
-            resolvedRootChains <- lookupRootSymbolChains "TestRefs.RecordSnippet.Result"
-            case resolvedRootChains of
-              [rootChain] ->
-                resolveReferenceMatchesForNames rootChain
-              _ ->
-                error ("unexpected resolved roots count: " <> show (length resolvedRootChains))
-
-        case referenceMatches of
-          [ReferenceMatch {matchedReferenceSpans, matchedReferenceUsageSpans}] -> do
-            mapMaybe matchedSpanStartLine matchedReferenceSpans `shouldSatisfy` elem 10
-            mapMaybe matchedSpanLineRange matchedReferenceUsageSpans `shouldBe` [(10, 17)]
-          other ->
-            expectationFailure ("expected a single reference match, got: " <> show (length other))
-
-    it "collects multiline usage spans for multiline function applications" do
-      withFixtureCopy \fixtureRoot -> do
-        let moduleDir = fixtureRoot </> "src" </> "TestRefs"
-            moduleFile = moduleDir </> "CallSnippet.hs"
-        createDirectoryIfMissing True moduleDir
-        TIO.writeFile moduleFile multilineFunctionReferenceFixtureModuleSource
-
-        referenceMatches <-
-          fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
-            exportedSymbols <- findSymbols "TestRefs.CallSnippet.target"
-            targetName <-
-              maybe
-                (error "symbol not found: TestRefs.CallSnippet.target")
-                pure
-                (findFixtureSymbolInModule "TestRefs.CallSnippet" "target" exportedSymbols)
-            resolveReferenceMatchesForNames [targetName]
-
-        case referenceMatches of
-          [ReferenceMatch {matchedReferenceSpans, matchedReferenceUsageSpans}] -> do
-            sort (mapMaybe matchedSpanStartLine matchedReferenceSpans) `shouldBe` [11]
-            mapMaybe matchedSpanLineRange matchedReferenceUsageSpans
-              `shouldSatisfy` any (\(startLine, endLine) -> startLine == 11 && endLine > startLine)
-          other ->
-            expectationFailure ("expected a single reference match, got: " <> show (length other))
-
-    it "keeps multiple parent usage spans for nested multiline references" do
-      withFixtureCopy \fixtureRoot -> do
-        let moduleDir = fixtureRoot </> "src" </> "TestRefs"
-            moduleFile = moduleDir </> "NestedSnippet.hs"
-        createDirectoryIfMissing True moduleDir
-        TIO.writeFile moduleFile nestedMultilineReferenceFixtureModuleSource
-
-        referenceMatches <-
-          fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
-            exportedSymbols <- findSymbols "TestRefs.NestedSnippet.target"
-            targetName <-
-              maybe
-                (error "symbol not found: TestRefs.NestedSnippet.target")
-                pure
-                (findFixtureSymbolInModule "TestRefs.NestedSnippet" "target" exportedSymbols)
-            resolveReferenceMatchesForNames [targetName]
-
-        case referenceMatches of
-          [ReferenceMatch {matchedReferenceSpans, matchedReferenceUsageSpans}] -> do
-            sort (mapMaybe matchedSpanStartLine matchedReferenceSpans) `shouldBe` [13]
-            let usageRanges = sort (nub (mapMaybe matchedSpanLineRange matchedReferenceUsageSpans))
-            usageRanges `shouldSatisfy` elem (12, 15)
-            usageRanges `shouldSatisfy` elem (11, 15)
-          other ->
-            expectationFailure ("expected a single reference match, got: " <> show (length other))
-
-    it "collects AST section spans for case alternative references" do
+    it "returns exact reference spans inside case alternatives" do
       withFixtureCopy \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestRefs"
             moduleFile = moduleDir </> "CaseSectionSnippet.hs"
@@ -566,12 +613,7 @@ spec = do
                 (findFixtureSymbolInModule "TestRefs.CaseSectionSnippet" "target" exportedSymbols)
             resolveReferenceMatchesForNames [targetName]
 
-        case referenceMatches of
-          [ReferenceMatch {matchedReferenceSpans, matchedReferenceSectionSpans}] -> do
-            sort (mapMaybe matchedSpanStartLine matchedReferenceSpans) `shouldBe` [14]
-            sort (nub (mapMaybe matchedSpanLineRange matchedReferenceSectionSpans)) `shouldSatisfy` elem (13, 15)
-          other ->
-            expectationFailure ("expected a single reference match, got: " <> show (length other))
+        sort (concatMap (mapMaybe matchedSpanStartLine . referenceMatchExactSpans) referenceMatches) `shouldBe` [14]
 
   describe "renderDefinitionModulesText" do
     it "renders a single definition as a minified module fragment" do
@@ -649,6 +691,24 @@ normalizeModuleDefinition :: (String, [String], [String]) -> (String, [String], 
 normalizeModuleDefinition (moduleName, definitions, imports) =
   (moduleName, sort definitions, sort (nubOrd imports))
 
+shouldHaveModuleDefinitionSources :: [DefinitionSource] -> [(String, [String])] -> IO ()
+shouldHaveModuleDefinitionSources sources expectedDefinitions = do
+  actualDefinitions <- traverse renderedModuleDefinitionSource sources
+  fmap normalizeModuleDefinitionSource actualDefinitions
+    `shouldMatchList` fmap normalizeModuleDefinitionSource expectedDefinitions
+
+renderedModuleDefinitionSource :: DefinitionSource -> IO (String, [String])
+renderedModuleDefinitionSource source = do
+  text <- definitionTextFromSpans source.definitionSourceSpans
+  pure
+    ( GHC.moduleNameString (GHC.moduleName source.definitionSourceModule),
+      [text]
+    )
+
+normalizeModuleDefinitionSource :: (String, [String]) -> (String, [String])
+normalizeModuleDefinitionSource (moduleName, definitions) =
+  (moduleName, sort definitions)
+
 definitionTextFromSpans :: DeclarationSpans -> IO String
 definitionTextFromSpans spans = do
   declarationText <- readSpanText spans.declarationSpan
@@ -696,7 +756,8 @@ fixtureDefinition symbol =
     loadTargets defaultLoadTargetsOptions
     exportedSymbols <- findSymbols (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
-    maybe (error ("definition not found: " <> symbol)) pure =<< resolveDefinitionSlice targetName
+    source <- maybe (error ("definition not found: " <> symbol)) pure =<< resolveDefinitionSourceNamed targetName
+    renderDefinitionSourceSlice source
 
 fixtureDefinitionClosure :: Int -> String -> IO [DefinitionSlice]
 fixtureDefinitionClosure depth symbol =
@@ -704,7 +765,18 @@ fixtureDefinitionClosure depth symbol =
     loadTargets defaultLoadTargetsOptions
     exportedSymbols <- findSymbols (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
-    resolveDefinitionClosure depth targetName
+    namedSources <- resolveDefinitionClosureSourcesNamed depth targetName
+    renderDefinitionClosureSlices namedSources
+
+renderDefinitionSourceSlice :: (MonadLore m) => DefinitionSource -> m DefinitionSlice
+renderDefinitionSourceSlice source = do
+  imports <- getMinifiedImportsForDefinition source
+  pure (definitionSourceToRenderSlice source imports)
+
+renderDefinitionClosureSlices :: (MonadLore m) => [NamedDefinitionSource] -> m [DefinitionSlice]
+renderDefinitionClosureSlices namedSources = do
+  renderedSlices <- mapM (renderDefinitionSourceSlice . (.definitionSource)) namedSources
+  pure (mergeRenderedDefinitionModules renderedSlices)
 
 fixtureRenderedDefinition :: String -> IO String
 fixtureRenderedDefinition symbol =
@@ -819,6 +891,23 @@ findFixtureSymbolInModule moduleName symbol =
             && maybe False ((== moduleName) . GHC.moduleNameString . GHC.moduleName) (GHC.Plugins.nameModule_maybe matchedSymbol.name)
       )
 
+testNameWithOcc :: String -> Int -> GHC.Name
+testNameWithOcc occurrence unique =
+  GHC.Plugins.mkSystemName (GHC.Unique.mkUnique 'd' unique) (GHC.Plugins.mkVarOcc occurrence)
+
+testRequiredImport :: Int -> [RequiredImportItem] -> RequiredImport
+testRequiredImport importKey importItems =
+  RequiredImport
+    { importKey,
+      importModule = GHC.mkModuleName "Test.Import",
+      importPackageQualifier = Nothing,
+      importSource = False,
+      importQualifiedStyle = NotQualified,
+      importAlias = Nothing,
+      importOriginallyExplicit = True,
+      importItems
+    }
+
 enableFlexibleInstances :: FilePath -> IO ()
 enableFlexibleInstances fixtureRoot = do
   let packageFile = fixtureRoot </> "package.yaml"
@@ -894,85 +983,41 @@ preciseReferenceMatchesFixtureModuleSource =
       "    + target"
     ]
 
+qualifiedNoAliasImportFixtureModuleSource :: T.Text
+qualifiedNoAliasImportFixtureModuleSource =
+  T.unlines
+    [ "module TestImports.QualifiedNoAlias",
+      "  ( emptyMap",
+      "  ) where",
+      "",
+      "import qualified Data.Map.Strict",
+      "",
+      "emptyMap :: Data.Map.Strict.Map String Int",
+      "emptyMap = Data.Map.Strict.empty"
+    ]
+
+qualifiedAliasDecoyImportFixtureModuleSource :: T.Text
+qualifiedAliasDecoyImportFixtureModuleSource =
+  T.unlines
+    [ "module TestImports.QualifiedAliasDecoy",
+      "  ( emptyMap",
+      "  ) where",
+      "",
+      "import qualified Data.Map.Strict as M",
+      "import qualified Data.Map.Strict",
+      "",
+      "emptyMap :: Data.Map.Strict.Map String Int",
+      "emptyMap = Data.Map.Strict.empty"
+    ]
+
 matchedSpanStartLine :: GHC.SrcSpan -> Maybe Int
 matchedSpanStartLine = \case
   GHC.RealSrcSpan realSpan _ -> Just (GHC.srcSpanStartLine realSpan)
   GHC.UnhelpfulSpan {} -> Nothing
 
-matchedSpanLineRange :: GHC.SrcSpan -> Maybe (Int, Int)
-matchedSpanLineRange = \case
-  GHC.RealSrcSpan realSpan _ -> Just (GHC.srcSpanStartLine realSpan, GHC.srcSpanEndLine realSpan)
-  GHC.UnhelpfulSpan {} -> Nothing
-
-multilineRecordReferenceFixtureModuleSource :: T.Text
-multilineRecordReferenceFixtureModuleSource =
-  T.unlines
-    [ "module TestRefs.RecordSnippet",
-      "  ( Result(..),",
-      "    build",
-      "  ) where",
-      "",
-      "data Result = Result { fieldA :: Int, fieldB :: Int, fieldC :: Int, fieldD :: Int, fieldE :: Int, fieldF :: Int }",
-      "",
-      "build :: IO Result",
-      "build = do",
-      "  let res = Result",
-      "        { fieldA = 1",
-      "        , fieldB = 2",
-      "        , fieldC = 3",
-      "        , fieldD = 4",
-      "        , fieldE = 5",
-      "        , fieldF = 6",
-      "        }",
-      "  pure res"
-    ]
-
-multilineFunctionReferenceFixtureModuleSource :: T.Text
-multilineFunctionReferenceFixtureModuleSource =
-  T.unlines
-    [ "module TestRefs.CallSnippet",
-      "  ( target,",
-      "    build",
-      "  ) where",
-      "",
-      "target :: Int -> Int -> Int -> Int",
-      "target a b c = a + b + c",
-      "",
-      "build :: Int",
-      "build =",
-      "  target",
-      "    1",
-      "    2",
-      "    3"
-    ]
-
-nestedMultilineReferenceFixtureModuleSource :: T.Text
-nestedMultilineReferenceFixtureModuleSource =
-  T.unlines
-    [ "module TestRefs.NestedSnippet",
-      "  ( target,",
-      "    build",
-      "  ) where",
-      "",
-      "target :: Int",
-      "target = 1",
-      "",
-      "build :: Int",
-      "build =",
-      "  consume",
-      "    (Wrapper",
-      "      { wrapped = target",
-      "      , other = 2",
-      "      })",
-      "",
-      "consume :: Wrapper -> Int",
-      "consume wrapper = wrapped wrapper",
-      "",
-      "data Wrapper = Wrapper",
-      "  { wrapped :: Int",
-      "  , other :: Int",
-      "  }"
-    ]
+referenceMatchExactSpans :: ReferenceMatch -> [GHC.SrcSpan]
+referenceMatchExactSpans =
+  map (.referenceHitExactSpan) . (.referenceMatchOccurrences)
 
 caseSectionReferenceFixtureModuleSource :: T.Text
 caseSectionReferenceFixtureModuleSource =

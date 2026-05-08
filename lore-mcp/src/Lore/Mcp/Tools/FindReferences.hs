@@ -19,10 +19,11 @@ import GHC.Generics (Generic)
 import qualified GHC.Plugins as Plugins
 import Lore
   ( DeclarationSpans (..),
-    DefinitionSlice (..),
+    DefinitionSource (..),
     LoadTargetsResult,
     MonadLore,
     PathToRoot (..),
+    ReferenceHit (..),
     ReferenceMatch (..),
     Symbol (..),
     SymbolInfo (..),
@@ -34,6 +35,7 @@ import Lore
     resolvePathToRoot,
     resolveReferenceMatchesForNames,
   )
+import Lore.Definition.Rendering (chooseBestReferenceContext, getDefinitionSourceTree)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines)
@@ -82,7 +84,7 @@ findReferencesHandler FindReferencesArgs {symbol, skip} = do
         [(_, rootChain)] -> do
           references <- resolveReferenceMatchesForNames (filterRootChainByQuery symbol rootChain)
           renderedReferences <- renderReferenceDefinitions resolvedSkip references
-          liftIO $ renderReferencesResult loadResult symbol renderedReferences
+          renderReferencesResult loadResult symbol renderedReferences
         ambiguousRoots ->
           pure $ renderAmbiguousResult loadResult symbol (map fst ambiguousRoots)
   where
@@ -158,7 +160,7 @@ renderMissingResult loadResult symbol =
   appendPartialLoadWarning loadResult "Reference results may be incomplete." $
     "No symbols found for " <> quoteText symbol <> "."
 
-renderReferencesResult :: LoadTargetsResult -> Text -> Maybe PaginatedReferenceMatches -> IO Text
+renderReferencesResult :: (MonadLore m) => LoadTargetsResult -> Text -> Maybe PaginatedReferenceMatches -> m Text
 renderReferencesResult loadResult symbol renderedReferences =
   case renderedReferences of
     Nothing ->
@@ -218,22 +220,22 @@ referenceResultsSection paginatedReferences =
   paginationSummaryLines "reference results" "skip" paginatedReferences
     <> maybe [] pure paginatedReferences.renderedPage
 
-renderReferenceResultsPage :: PaginatedReferenceMatches -> IO Text
+renderReferenceResultsPage :: (MonadLore m) => PaginatedReferenceMatches -> m Text
 renderReferenceResultsPage paginatedReferences =
   T.intercalate "\n\n"
     . (referenceResultsSection paginatedReferences.paginationInfo <>)
     . pure
     <$> renderedReferenceMatches paginatedReferences.visibleMatches
 
-renderedReferenceMatches :: [ReferenceMatch] -> IO Text
+renderedReferenceMatches :: (MonadLore m) => [ReferenceMatch] -> m Text
 renderedReferenceMatches referenceMatches =
   T.intercalate "\n\n" <$> mapM renderReferenceModuleGroup (groupByModule referenceMatches)
 
-renderReferenceModuleGroup :: [ReferenceMatch] -> IO Text
+renderReferenceModuleGroup :: (MonadLore m) => [ReferenceMatch] -> m Text
 renderReferenceModuleGroup [] =
   pure ""
 renderReferenceModuleGroup moduleMatches@(referenceMatch : _) = do
-  renderedPath <- renderReferenceModulePath referenceMatch.referenceSlice
+  renderedPath <- liftIO $ renderReferenceModulePath referenceMatch.referenceMatchDefinition
   renderedBlocks <- mapM renderReferenceMatchBlock moduleMatches
   pure $
     T.intercalate "\n\n" $
@@ -244,46 +246,61 @@ groupByModule :: [ReferenceMatch] -> [[ReferenceMatch]]
 groupByModule [] = []
 groupByModule (referenceMatch : rest) =
   let (matchingModule, remaining) =
-        span ((== referenceMatch.referenceSlice.definitionModule) . (.referenceSlice.definitionModule)) rest
+        span ((== referenceMatch.referenceMatchDefinition.definitionSourceModule) . (.referenceMatchDefinition.definitionSourceModule)) rest
    in (referenceMatch : matchingModule) : groupByModule remaining
 
-renderReferenceMatchBlock :: ReferenceMatch -> IO Text
-renderReferenceMatchBlock referenceMatch =
-  case referenceMatch.referenceSlice.declarationSpans of
-    declarationSpans : _ -> do
-      snippetText <- renderReferenceSnippet declarationSpans referenceMatch.matchedReferenceSectionSpans referenceMatch.matchedReferenceUsageSpans referenceMatch.matchedReferenceSpans
-      pure $
-        T.intercalate
-          "\n"
-          [ "--- " <> renderReferenceBlockHeader declarationSpans <> " ---",
-            snippetText
-          ]
-    [] ->
-      pure "--- definition ---\n<definition source unavailable>"
+renderReferenceMatchBlock :: (MonadLore m) => ReferenceMatch -> m Text
+renderReferenceMatchBlock referenceMatch = do
+  let declarationSpans = referenceMatch.referenceMatchDefinition.definitionSourceSpans
+  maybeSourceTree <- getDefinitionSourceTree referenceMatch.referenceMatchDefinition
+  let referenceContexts =
+        [ ( maybeSourceTree >>= \sourceTree ->
+              chooseBestReferenceContext sourceTree occurrence.referenceHitExactSpan,
+            occurrence.referenceHitExactSpan
+          )
+        | occurrence <- referenceMatch.referenceMatchOccurrences
+        ]
+  snippetText <- liftIO $ renderReferenceSnippet declarationSpans referenceContexts
+  pure $
+    T.intercalate
+      "\n"
+      [ "--- " <> renderReferenceBlockHeader declarationSpans <> " ---",
+        snippetText
+      ]
 
-renderReferenceSnippet :: DeclarationSpans -> [GHC.SrcSpan] -> [GHC.SrcSpan] -> [GHC.SrcSpan] -> IO Text
-renderReferenceSnippet declarationSpans matchedSectionSpans matchedUsageSpans matchedSpans = do
+renderReferenceSnippet :: DeclarationSpans -> [(Maybe GHC.SrcSpan, GHC.SrcSpan)] -> IO Text
+renderReferenceSnippet declarationSpans referenceContexts = do
   declarationLines <- readSpanLines declarationSpans.declarationSpan
   signatureText <- traverse readSpanText declarationSpans.signatureSpan
-  let referenceSpans =
-        case matchedUsageSpans of
-          [] -> matchedSpans
-          _ -> matchedUsageSpans
-  let sectionRanges =
-        mapMaybe (sectionStartContextRange declarationSpans.declarationSpan (length declarationLines)) matchedSectionSpans
+  let bodyReferenceContexts =
+        filter (not . isSignatureReference declarationSpans . snd) referenceContexts
   let referenceRanges =
-        concatMap (referenceSnippetRanges declarationLines declarationSpans.declarationSpan (length declarationLines)) referenceSpans
+        concatMap
+          (referenceSnippetRanges declarationLines declarationSpans.declarationSpan (length declarationLines) . snd)
+          bodyReferenceContexts
+      contextRanges =
+        concatMap
+          ( maybe
+              []
+              (contextSnippetRanges declarationSpans.declarationSpan (length declarationLines))
+              . fst
+          )
+          bodyReferenceContexts
   let selectedRanges =
         mergeLineRanges $
           [ trimDistantDeclarationPrefix declarationLines (minimumMaybe (map fst referenceRanges)) (firstDefinitionRange (length declarationLines)),
             lastDefinitionRange (length declarationLines)
           ]
-            <> sectionRanges
+            <> contextRanges
             <> referenceRanges
       declarationSnippet =
         renderLineRanges declarationLines selectedRanges
   pure $
     maybe declarationSnippet (<> "\n" <> declarationSnippet) signatureText
+
+isSignatureReference :: DeclarationSpans -> GHC.SrcSpan -> Bool
+isSignatureReference declarationSpans referenceSpan =
+  maybe False (referenceSpan `GHC.isSubspanOf`) declarationSpans.signatureSpan
 
 referenceLineRange :: GHC.SrcSpan -> GHC.SrcSpan -> Maybe (Int, Int)
 referenceLineRange declarationSpan referenceSpan = do
@@ -322,11 +339,17 @@ referenceSnippetRanges _ declarationSpan declarationLineCount referenceSpan =
     validRange (startLine, endLine) =
       startLine <= endLine
 
-sectionStartContextRange :: GHC.SrcSpan -> Int -> GHC.SrcSpan -> Maybe (Int, Int)
-sectionStartContextRange declarationSpan declarationLineCount sectionSpan = do
-  (sectionStartLine, _) <- referenceLineRange declarationSpan sectionSpan
-  let clampedStartLine = min declarationLineCount sectionStartLine
-  pure (clampedStartLine, clampedStartLine)
+contextSnippetRanges :: GHC.SrcSpan -> Int -> GHC.SrcSpan -> [(Int, Int)]
+contextSnippetRanges declarationSpan declarationLineCount contextSpan =
+  case referenceLineRange declarationSpan contextSpan of
+    Nothing -> []
+    Just (contextStartLine, contextEndLine)
+      | contextEndLine - contextStartLine <= 8 ->
+          [(contextStartLine, contextEndLine)]
+      | otherwise ->
+          [ (contextStartLine, min contextEndLine (contextStartLine + 1)),
+            (max contextStartLine (contextEndLine - 1), min declarationLineCount contextEndLine)
+          ]
 
 lineIndentation :: [Text] -> Int -> Maybe Int
 lineIndentation declarationLines lineNumber = do
@@ -424,9 +447,9 @@ renderLineRanges declarationLines ranges =
         Nothing -> ""
         Just lineText -> T.takeWhile (== ' ') lineText
 
-renderReferenceModulePath :: DefinitionSlice -> IO Text
-renderReferenceModulePath definitionSlice =
-  case definitionSliceRealSrcSpan definitionSlice of
+renderReferenceModulePath :: DefinitionSource -> IO Text
+renderReferenceModulePath definitionSource =
+  case definitionSourceRealSrcSpan definitionSource of
     Nothing ->
       pure "<definition source unavailable>"
     Just realSrcSpan -> do
@@ -434,11 +457,9 @@ renderReferenceModulePath definitionSlice =
       pure . T.pack $
         relativeSourcePath currentDirectory (Plugins.unpackFS (GHC.srcSpanFile realSrcSpan))
 
-definitionSliceRealSrcSpan :: DefinitionSlice -> Maybe GHC.RealSrcSpan
-definitionSliceRealSrcSpan definitionSlice =
-  case mapMaybe declarationSpansRealSrcSpan definitionSlice.declarationSpans of
-    realSrcSpan : _ -> Just realSrcSpan
-    [] -> Nothing
+definitionSourceRealSrcSpan :: DefinitionSource -> Maybe GHC.RealSrcSpan
+definitionSourceRealSrcSpan definitionSource =
+  declarationSpansRealSrcSpan definitionSource.definitionSourceSpans
 
 declarationSpansRealSrcSpan :: DeclarationSpans -> Maybe GHC.RealSrcSpan
 declarationSpansRealSrcSpan declarationSpans =
@@ -517,15 +538,15 @@ maximumMaybe = \case
 
 referenceMatchSortKey :: ReferenceMatch -> (String, String, Int, Int)
 referenceMatchSortKey referenceMatch =
-  case definitionSliceRealSrcSpan referenceMatch.referenceSlice of
+  case definitionSourceRealSrcSpan referenceMatch.referenceMatchDefinition of
     Just realSrcSpan ->
-      ( GHC.moduleNameString (GHC.moduleName referenceMatch.referenceSlice.definitionModule),
+      ( GHC.moduleNameString (GHC.moduleName referenceMatch.referenceMatchDefinition.definitionSourceModule),
         Plugins.unpackFS (GHC.srcSpanFile realSrcSpan),
         GHC.srcSpanStartLine realSrcSpan,
         GHC.srcSpanStartCol realSrcSpan
       )
     Nothing ->
-      (GHC.moduleNameString (GHC.moduleName referenceMatch.referenceSlice.definitionModule), "", maxBound, maxBound)
+      (GHC.moduleNameString (GHC.moduleName referenceMatch.referenceMatchDefinition.definitionSourceModule), "", maxBound, maxBound)
 
 maxRenderedReferenceResults :: Int
 maxRenderedReferenceResults = 15

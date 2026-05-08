@@ -7,6 +7,7 @@ import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Data.IOEnv as GHC.IOEnv
 import qualified GHC.Driver.Env as GHC.Env
@@ -15,10 +16,10 @@ import qualified GHC.Driver.Plugins as GHC.Plugins
 import qualified GHC.Hs as GHC.Hs
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
-import Lore.Internal.Definition.Analysis (buildMinimalTypedModuleFacts, buildUsedInstancesByBinder)
-import Lore.Internal.Definition.Types (MinimalCoreModuleFacts (..), ParsedModuleCache (..), TypedModuleCache (..))
+import Lore.Internal.Definition.Analysis (buildMinimalTypedModuleFacts, buildParsedModuleFacts, buildUsedInstancesByBinder)
+import Lore.Internal.Definition.Types (MinimalCoreModuleFacts (..), MinimalTypedModuleFacts (..), ParsedModuleCache (..), TypedModuleCache (..))
 import Lore.Internal.Session (SessionContext (..))
-import UnliftIO (modifyMVar_)
+import UnliftIO (modifyMVar_, readMVar)
 
 installDefinitionCallbacks :: SessionContext -> GHC.HscEnv -> GHC.HscEnv
 installDefinitionCallbacks sessionContext hscEnv =
@@ -64,9 +65,9 @@ parsedResultAction sessionContext _ summary parsedResult = do
         GHC.Hs.hpm_module (GHC.Plugins.parsedResultModule parsedResult)
       homeModule = GHC.ms_mod summary
   liftIO do
-    forcedParsedSource <- evaluate parsedSource
+    parsedFacts <- evaluate $ force $ buildParsedModuleFacts homeModule parsedSource
     modifyMVar_ (referenceParsedModuleCache sessionContext) \cache ->
-      let cache' = Map.insert homeModule (ParsedModuleRaw forcedParsedSource) cache
+      let cache' = Map.insert homeModule (ParsedModuleFactsCache parsedFacts) cache
        in evaluate cache'
   pure parsedResult
 
@@ -96,12 +97,25 @@ installCoreToDos sessionContext _ todos =
 rawArtifactsTcCoreProcessedCorePass :: SessionContext -> GHC.ModGuts -> GHC.CoreM GHC.ModGuts
 rawArtifactsTcCoreProcessedCorePass sessionContext modGuts = do
   let homeModule = GHC.mg_module modGuts
-      coreFacts =
-        MinimalCoreModuleFacts
-          { coreUsedInstancesByBinder = buildUsedInstancesByBinder (GHC.mg_binds modGuts)
-          }
   GHC.IOEnv.liftIO do
+    typedCache <- readMVar (referenceTypedModuleCache sessionContext)
+    let interestingBinders =
+          case Map.lookup homeModule typedCache of
+            Just (TypedModuleMinimalFacts typedFacts) ->
+              Set.fromList typedFacts.typedDefinitionNames
+            Nothing ->
+              Set.empty
+        coreFacts =
+          MinimalCoreModuleFacts
+            { coreUsedInstancesByBinder =
+                buildUsedInstancesByBinder interestingBinders (GHC.mg_binds modGuts)
+            }
     modifyMVar_ (referenceMinimalCoreModuleFactsCache sessionContext) \cache ->
       let cache' = Map.insert homeModule coreFacts cache
+       in evaluate cache'
+    -- Core facts arriving after a previously built definition index would leave
+    -- dependencyUsedInstanceNames stale. Drop that module index so it is rebuilt.
+    modifyMVar_ (definitionModuleIndexCache sessionContext) \cache ->
+      let cache' = Map.delete homeModule cache
        in evaluate cache'
   pure modGuts
