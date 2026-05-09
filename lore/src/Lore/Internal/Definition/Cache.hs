@@ -1,5 +1,6 @@
 module Lore.Internal.Definition.Cache
-  ( getParsedOccurrenceModuleIndex,
+  ( CacheLookup (..),
+    getParsedOccurrenceModuleIndex,
     getParsedModuleFacts,
     cacheDefinitionModuleIndex,
     filterReferenceCaches,
@@ -18,6 +19,10 @@ import Lore.Internal.Session (SessionContext (..))
 import Lore.Monad (MonadLore)
 import UnliftIO (modifyMVar, readMVar)
 
+data CacheLookup a
+  = CacheMiss
+  | CacheHit a
+
 getParsedOccurrenceModuleIndex ::
   (MonadLore m) =>
   m ParsedOccurrenceModuleIndex ->
@@ -35,11 +40,16 @@ getParsedOccurrenceModuleIndex prepareIndex = do
 lookupDefinitionModuleIndexCache ::
   (MonadLore m) =>
   GHC.Module ->
-  m (Maybe (Maybe DefinitionModuleIndex))
+  m (CacheLookup (Maybe DefinitionModuleIndex))
 lookupDefinitionModuleIndexCache homeModule = do
   cacheVar <- asks definitionModuleIndexCache
   modifyMVar cacheVar \cache ->
-    pure (cache, Map.lookup homeModule cache)
+    pure
+      ( cache,
+        case Map.lookup homeModule cache of
+          Nothing -> CacheMiss
+          Just cachedModuleIndex -> CacheHit cachedModuleIndex
+      )
 
 cacheDefinitionModuleIndex ::
   (MonadLore m) =>

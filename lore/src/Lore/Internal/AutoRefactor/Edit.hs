@@ -20,6 +20,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Lore.Diagnostics (Span (..))
+import Lore.Internal.SourceSpan (spanStartKey)
+import Lore.Internal.SourceText (positionToOffset, spanToOffsets)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 
@@ -85,25 +87,6 @@ applyReplacementEdits source =
         Nothing ->
           contents
 
-spanToOffsets :: Text -> Span -> Maybe (Int, Int)
-spanToOffsets contents Span {spanStartLine, spanStartCol, spanEndLine, spanEndCol} = do
-  startOffset <- positionToOffset contents (spanStartLine, spanStartCol)
-  endOffset <- positionToOffset contents (spanEndLine, spanEndCol)
-  pure (startOffset, endOffset)
-
-positionToOffset :: Text -> (Int, Int) -> Maybe Int
-positionToOffset contents (targetLine, targetCol)
-  | targetLine < 1 || targetCol < 1 = Nothing
-  | otherwise = go 1 1 0 (T.unpack contents)
-  where
-    go line col offset remaining
-      | (line, col) == (targetLine, targetCol) = Just offset
-      | otherwise =
-          case remaining of
-            [] -> Nothing
-            '\n' : rest -> go (line + 1) 1 (offset + 1) rest
-            _ : rest -> go line (col + 1) (offset + 1) rest
-
 takeText :: Int -> Text -> Text
 takeText =
   T.take
@@ -111,9 +94,6 @@ takeText =
 dropText :: Int -> Text -> Text
 dropText =
   T.drop
-
-spanStartKey :: Span -> (Int, Int)
-spanStartKey Span {spanStartLine, spanStartCol} = (spanStartLine, spanStartCol)
 
 editFilePath :: FileEdit -> FilePath
 editFilePath = \case

@@ -13,7 +13,6 @@ import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import qualified GHC
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as Plugins
@@ -37,10 +36,12 @@ import Lore
   )
 import Lore.Definition.Rendering (chooseBestReferenceContext, getDefinitionSourceTree)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.List (maximumMaybe, minimumMaybe)
+import Lore.Mcp.Internal.SourceSpan (realSrcSpanFromSrcSpan)
+import Lore.Mcp.Internal.SourceText (readSpanLines, readSpanText, relativeSourcePath)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines)
 import System.Directory (getCurrentDirectory)
-import System.FilePath (isRelative, makeRelative, normalise)
 
 data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
   { symbol ::
@@ -475,66 +476,6 @@ declarationSpansLineRange declarationSpans = do
     realSrcSpans =
       mapMaybe realSrcSpanFromSrcSpan $
         maybeToList declarationSpans.signatureSpan <> [declarationSpans.declarationSpan]
-
-realSrcSpanFromSrcSpan :: GHC.SrcSpan -> Maybe GHC.RealSrcSpan
-realSrcSpanFromSrcSpan = \case
-  GHC.RealSrcSpan realSrcSpan _ ->
-    Just realSrcSpan
-  GHC.UnhelpfulSpan {} ->
-    Nothing
-
-readSpanText :: GHC.SrcSpan -> IO Text
-readSpanText span' =
-  T.intercalate "\n" <$> readSpanLines span'
-
-readSpanLines :: GHC.SrcSpan -> IO [Text]
-readSpanLines = \case
-  GHC.RealSrcSpan realSpan _ ->
-    sliceRealSpan realSpan . T.lines <$> TIO.readFile (Plugins.unpackFS (GHC.srcSpanFile realSpan))
-  GHC.UnhelpfulSpan {} ->
-    pure ["<definition source unavailable>"]
-
-sliceRealSpan :: GHC.RealSrcSpan -> [Text] -> [Text]
-sliceRealSpan realSpan fileLines =
-  case drop (GHC.srcSpanStartLine realSpan - 1) fileLines of
-    [] ->
-      []
-    relevantLines ->
-      zipWith
-        sliceLine
-        [GHC.srcSpanStartLine realSpan .. GHC.srcSpanEndLine realSpan]
-        (take (GHC.srcSpanEndLine realSpan - GHC.srcSpanStartLine realSpan + 1) relevantLines)
-  where
-    sliceLine lineNo line
-      | lineNo == GHC.srcSpanStartLine realSpan && lineNo == GHC.srcSpanEndLine realSpan =
-          T.take width (T.drop startCol line)
-      | lineNo == GHC.srcSpanStartLine realSpan =
-          T.drop startCol line
-      | lineNo == GHC.srcSpanEndLine realSpan =
-          T.take endCol line
-      | otherwise =
-          line
-      where
-        startCol = GHC.srcSpanStartCol realSpan - 1
-        endCol = GHC.srcSpanEndCol realSpan - 1
-        width = endCol - startCol
-
-relativeSourcePath :: FilePath -> FilePath -> FilePath
-relativeSourcePath currentDirectory sourcePath =
-  normalise $
-    if isRelative sourcePath
-      then sourcePath
-      else makeRelative currentDirectory sourcePath
-
-minimumMaybe :: (Ord a) => [a] -> Maybe a
-minimumMaybe = \case
-  [] -> Nothing
-  values -> Just (minimum values)
-
-maximumMaybe :: (Ord a) => [a] -> Maybe a
-maximumMaybe = \case
-  [] -> Nothing
-  values -> Just (maximum values)
 
 referenceMatchSortKey :: ReferenceMatch -> (String, String, Int, Int)
 referenceMatchSortKey referenceMatch =

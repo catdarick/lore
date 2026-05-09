@@ -23,10 +23,11 @@ where
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
-import qualified GHC.Data.FastString as FastString
 import GHC.Hs (GhcPs, HsModule (..), IE, ImportDecl (..), LImportDecl)
 import qualified GHC.Utils.Outputable as Outputable
 import Lore.Diagnostics (Span (..))
+import Lore.Internal.List (mapMaybeToList, maybeToList)
+import Lore.Internal.SourceSpan (spanContains, srcSpanToSpan)
 
 newtype ImportId = ImportId Int
   deriving (Eq, Ord, Show)
@@ -185,40 +186,3 @@ parsedImportEffectiveQualifier parsedImport
 parsedImportContainsSpan :: ParsedImport -> Span -> Bool
 parsedImportContainsSpan parsedImport targetSpan =
   spanContains parsedImport.parsedImportSpan targetSpan
-
-srcSpanToSpan :: GHC.SrcSpan -> Maybe Span
-srcSpanToSpan = \case
-  GHC.RealSrcSpan span' _ ->
-    Just
-      Span
-        { spanFile = FastString.unpackFS (GHC.srcSpanFile span'),
-          spanStartLine = GHC.srcSpanStartLine span',
-          spanStartCol = GHC.srcSpanStartCol span',
-          spanEndLine = GHC.srcSpanEndLine span',
-          spanEndCol = GHC.srcSpanEndCol span'
-        }
-  GHC.UnhelpfulSpan {} ->
-    Nothing
-
-spanContains :: Span -> Span -> Bool
-spanContains outer inner =
-  outer.spanFile == inner.spanFile
-    && spanStartKey outer <= spanStartKey inner
-    && spanEndKey outer >= spanEndKey inner
-
-spanStartKey :: Span -> (Int, Int)
-spanStartKey Span {spanStartLine, spanStartCol} = (spanStartLine, spanStartCol)
-
-spanEndKey :: Span -> (Int, Int)
-spanEndKey Span {spanEndLine, spanEndCol} = (spanEndLine, spanEndCol)
-
-maybeToList :: Maybe a -> [a]
-maybeToList = \case
-  Just value -> [value]
-  Nothing -> []
-
-mapMaybeToList :: (a -> Maybe b) -> [a] -> [b]
-mapMaybeToList f =
-  foldr
-    (\value acc -> maybe acc (: acc) (f value))
-    []

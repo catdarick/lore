@@ -21,6 +21,7 @@ import Lore.Internal.Definition.Types
     SourceRegionCandidate (..),
     SourceRegionKind (..),
   )
+import Lore.Internal.SourceSpan (srcSpanSize, srcSpanSortKey)
 
 collectModuleSourceRegionCandidates :: GHC.ParsedSource -> [SourceRegionCandidate]
 collectModuleSourceRegionCandidates parsedSource =
@@ -204,29 +205,9 @@ candidateSortKey :: SourceRegionCandidate -> ((String, Int, Int, Int, Int), Int,
 candidateSortKey candidate =
   (srcSpanSortKey candidate.candidateRegionSpan, candidateSpanSize candidate, candidate.candidateRegionKind)
 
-srcSpanSortKey :: GHC.SrcSpan -> (String, Int, Int, Int, Int)
-srcSpanSortKey span' =
-  case GHC.srcSpanToRealSrcSpan span' of
-    Nothing -> ("", maxBound, maxBound, maxBound, maxBound)
-    Just realSpan ->
-      ( GHC.unpackFS (GHC.srcSpanFile realSpan),
-        GHC.srcSpanStartLine realSpan,
-        GHC.srcSpanStartCol realSpan,
-        GHC.srcSpanEndLine realSpan,
-        GHC.srcSpanEndCol realSpan
-      )
-
 candidateSpanSize :: SourceRegionCandidate -> Int
 candidateSpanSize =
   srcSpanSize . candidateRegionSpan
-
-srcSpanSize :: GHC.SrcSpan -> Int
-srcSpanSize span' =
-  case GHC.srcSpanToRealSrcSpan span' of
-    Nothing -> maxBound
-    Just realSpan ->
-      (GHC.srcSpanEndLine realSpan - GHC.srcSpanStartLine realSpan) * 10000
-        + (GHC.srcSpanEndCol realSpan - GHC.srcSpanStartCol realSpan)
 
 properlyContainedBy :: GHC.SrcSpan -> GHC.SrcSpan -> Bool
 properlyContainedBy child parent =

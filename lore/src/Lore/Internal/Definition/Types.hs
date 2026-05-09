@@ -326,10 +326,17 @@ newtype ParsedOccurrenceModuleIndex = ParsedOccurrenceModuleIndex
   deriving anyclass (NFData)
 
 data DefinitionModuleIndex = DefinitionModuleIndex
-  { definitionsById :: !(Map.Map DefinitionId DefinitionSource),
+  { -- | Canonical source set for this module index.
+    definitionsById :: !(Map.Map DefinitionId DefinitionSource),
+    -- | Maps every known top-level definition name to an id in 'definitionsById'.
     definitionIdByName :: !(Map.Map GHC.Name DefinitionId),
+    -- | Candidate reference index grouped by occurrence key.
+    -- Exact 'GHC.Name' filtering is still required at query time.
     referenceHitsByOccKey :: !(Map.Map OccKey [ReferenceHit]),
+    -- | Definition dependencies keyed by ids from 'definitionsById'.
     dependenciesById :: !(Map.Map DefinitionId DefinitionDependencies),
+    -- | Required imports keyed by ids from 'definitionsById'.
+    -- Intentionally not strict/deeply forced to avoid eager import minimification work.
     requiredImportsById :: Map.Map DefinitionId [RequiredImport]
   }
   deriving stock (Eq, Generic)

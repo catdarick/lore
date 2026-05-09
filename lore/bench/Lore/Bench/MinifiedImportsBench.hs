@@ -7,7 +7,7 @@ where
 
 import Criterion.Main
 import Lore.Bench.Fixtures
-import Lore.Internal.Definition.Analysis (buildMinifiedImports, normalizeImportItems)
+import Lore.Internal.Definition.RequiredImports (buildMinifiedImports, normalizeImportItems)
 import qualified Lore.Internal.Definition.Types as Def
 
 benchmarks :: Benchmark

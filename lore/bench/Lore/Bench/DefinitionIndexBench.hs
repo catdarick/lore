@@ -15,8 +15,8 @@ import Lore.Internal.Definition.Analysis
     buildDefinitionOccurrences,
     buildDependencies,
     buildReferenceHitsByOccKey,
-    buildRequiredImportsById,
   )
+import Lore.Internal.Definition.RequiredImports (buildRequiredImportsById)
 import qualified Lore.Internal.Definition.Types as Def
 
 benchmarks :: Benchmark

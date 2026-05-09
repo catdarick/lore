@@ -21,9 +21,11 @@ import qualified Data.Text as T
 import qualified GHC.Plugins as GHC
 import Lore (DeclarationSpans (..), DefinitionSlice (..), LoadTargetsResult (..), mergeDefinitionSlices)
 import Lore.Diagnostics (Diagnostic (..))
+import Lore.Mcp.Internal.List (maximumMaybe, minimumMaybe)
+import Lore.Mcp.Internal.SourceSpan (realSrcSpanFromSrcSpan)
+import Lore.Mcp.Internal.SourceText (readSpanText, relativeSourcePath)
 import Lore.Mcp.Tools.Shared.Diagnostics (renderDiagnosticSummary)
 import System.Directory (getCurrentDirectory)
-import System.FilePath (isRelative, makeRelative, normalise)
 
 appendPartialLoadWarning :: LoadTargetsResult -> Text -> Text -> Text
 appendPartialLoadWarning loadResult partialLoadSuffix body
@@ -99,13 +101,6 @@ declarationSpansRealSrcSpan spans =
   realSrcSpanFromSrcSpan spans.declarationSpan
     <|> (spans.signatureSpan >>= realSrcSpanFromSrcSpan)
 
-realSrcSpanFromSrcSpan :: GHC.SrcSpan -> Maybe GHC.RealSrcSpan
-realSrcSpanFromSrcSpan = \case
-  GHC.RealSrcSpan realSrcSpan _ ->
-    Just realSrcSpan
-  GHC.UnhelpfulSpan {} ->
-    Nothing
-
 renderDeclarationBlock :: DeclarationSpans -> IO Text
 renderDeclarationBlock declarationSpans = do
   declarationText <- renderDeclarationSpansText declarationSpans
@@ -144,58 +139,6 @@ declarationSpansLineRange declarationSpans = do
     realSrcSpans =
       mapMaybe realSrcSpanFromSrcSpan $
         maybeToList declarationSpans.signatureSpan <> [declarationSpans.declarationSpan]
-
-minimumMaybe :: (Ord a) => [a] -> Maybe a
-minimumMaybe = \case
-  [] -> Nothing
-  values -> Just (minimum values)
-
-maximumMaybe :: (Ord a) => [a] -> Maybe a
-maximumMaybe = \case
-  [] -> Nothing
-  values -> Just (maximum values)
-
-relativeSourcePath :: FilePath -> FilePath -> FilePath
-relativeSourcePath currentDirectory sourcePath =
-  normalise $
-    if isRelative sourcePath
-      then sourcePath
-      else makeRelative currentDirectory sourcePath
-
-readSpanText :: GHC.SrcSpan -> IO Text
-readSpanText = \case
-  GHC.RealSrcSpan realSpan _ ->
-    sliceRealSpan realSpan . T.lines . T.pack <$> readFile (GHC.unpackFS (GHC.srcSpanFile realSpan))
-  GHC.UnhelpfulSpan {} ->
-    pure "<definition source unavailable>"
-
-sliceRealSpan :: GHC.RealSrcSpan -> [Text] -> Text
-sliceRealSpan realSpan fileLines =
-  case drop (GHC.srcSpanStartLine realSpan - 1) fileLines of
-    [] ->
-      ""
-    relevantLines ->
-      T.intercalate
-        "\n"
-        ( zipWith
-            sliceLine
-            [GHC.srcSpanStartLine realSpan .. GHC.srcSpanEndLine realSpan]
-            (take (GHC.srcSpanEndLine realSpan - GHC.srcSpanStartLine realSpan + 1) relevantLines)
-        )
-  where
-    sliceLine lineNo line
-      | lineNo == GHC.srcSpanStartLine realSpan && lineNo == GHC.srcSpanEndLine realSpan =
-          T.take width (T.drop startCol line)
-      | lineNo == GHC.srcSpanStartLine realSpan =
-          T.drop startCol line
-      | lineNo == GHC.srcSpanEndLine realSpan =
-          T.take endCol line
-      | otherwise =
-          line
-      where
-        startCol = GHC.srcSpanStartCol realSpan - 1
-        endCol = GHC.srcSpanEndCol realSpan - 1
-        width = endCol - startCol
 
 sortDeclarationSpans :: [DeclarationSpans] -> [DeclarationSpans]
 sortDeclarationSpans =

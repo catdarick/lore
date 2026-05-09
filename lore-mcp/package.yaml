@@ -64,7 +64,10 @@ tests:
     - ProtocolRequestSpec
     - Lore.JsonRpc.Server
     - Lore.Mcp.Internal.Annotated
+    - Lore.Mcp.Internal.List
     - Lore.Mcp.Internal.Render
+    - Lore.Mcp.Internal.SourceSpan
+    - Lore.Mcp.Internal.SourceText
     - Lore.Mcp.Internal.Tool
     - Lore.Mcp.Monad
     - Lore.Mcp.Protocol.Request

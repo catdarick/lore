@@ -25,10 +25,8 @@ import Lore.Bench.Memory
     printMemoryResult,
   )
 import Lore.Definition (matchingReferenceMatches)
-import Lore.Internal.Definition.Analysis
-  ( buildDefinitionModuleIndex,
-    buildMinifiedImports,
-  )
+import Lore.Internal.Definition.Analysis (buildDefinitionModuleIndex)
+import Lore.Internal.Definition.RequiredImports (buildMinifiedImports)
 
 runMemoryBenchmarks :: Maybe String -> IO ()
 runMemoryBenchmarks maybeMode = do

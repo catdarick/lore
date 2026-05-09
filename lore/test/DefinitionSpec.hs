@@ -431,6 +431,36 @@ spec = do
       last moduleOrder `shouldBe` "Demo"
       "Demo.Support" `shouldSatisfy` (`elem` moduleOrder)
 
+    it "orders nested dependencies before their dependents within closure output" do
+      definitionOrder <-
+        fixtureLore do
+          loadTargets defaultLoadTargetsOptions
+          exportedSymbols <- findSymbols "derivedValue"
+          targetName <- maybe (error "symbol not found: derivedValue") pure (findFixtureSymbol "derivedValue" exportedSymbols)
+          namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+          pure (map (GHC.Plugins.getOccString . definitionName) namedSources)
+
+      definitionOrder `shouldBe` ["seedValue", "bumpWithSeed", "derivedValue"]
+
+    it "keeps transitive dependencies before direct dependencies in branching closures" do
+      definitionOrder <-
+        fixtureLore do
+          loadTargets defaultLoadTargetsOptions
+          exportedSymbols <- findSymbols "crossModuleBundle"
+          targetName <- maybe (error "symbol not found: crossModuleBundle") pure (findFixtureSymbol "crossModuleBundle" exportedSymbols)
+          namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+          pure (map (GHC.Plugins.getOccString . definitionName) namedSources)
+
+      let indexOf occName =
+            maybe
+              (error ("missing definition in closure: " <> occName))
+              id
+              (lookup occName (zip definitionOrder [0 :: Int ..]))
+      indexOf "supportSeed" `shouldSatisfy` (< indexOf "crossModuleSeed")
+      indexOf "supportStep" `shouldSatisfy` (< indexOf "crossModuleRecord")
+      indexOf "crossModuleRecord" `shouldSatisfy` (< indexOf "crossModuleBundle")
+      indexOf "crossModuleSeed" `shouldSatisfy` (< indexOf "crossModuleBundle")
+
     it "merges qualified explicit import lists when same-module declarations use different items" do
       closure <- fixtureDefinitionClosure 2 "crossModuleBundle"
 

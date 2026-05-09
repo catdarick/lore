@@ -15,6 +15,7 @@ import qualified Data.Text as T
 import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..))
 import Lore.Internal.AutoRefactor.ImportDecl (ImportItem (..), ImportList (..), ParsedImport (..), parsedImportContainsSpan)
 import Lore.Internal.AutoRefactor.ImportOps (ImportOperation (..))
+import Lore.Internal.SourceSpan (spansOverlap)
 
 data RedundantImportRequest = RedundantImportRequest
   { redundantImportDiagnosticSpan :: Span,
@@ -110,20 +111,6 @@ itemSpanMatches diagnosticSpan importItem =
     Nothing -> False
     Just importItemSpan ->
       spansOverlap importItemSpan diagnosticSpan
-
-spansOverlap :: Span -> Span -> Bool
-spansOverlap left right =
-  left.spanFile == right.spanFile
-    && spanStartKey left <= spanEndKey right
-    && spanStartKey right <= spanEndKey left
-
-spanStartKey :: Span -> (Int, Int)
-spanStartKey Span {spanStartLine, spanStartCol} =
-  (spanStartLine, spanStartCol)
-
-spanEndKey :: Span -> (Int, Int)
-spanEndKey Span {spanEndLine, spanEndCol} =
-  (spanEndLine, spanEndCol)
 
 data ParsedRedundantImportDiagnostic
   = RemoveBindings (NonEmpty T.Text)

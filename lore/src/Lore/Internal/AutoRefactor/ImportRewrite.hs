@@ -15,16 +15,11 @@ import qualified Data.Text as T
 import qualified GHC
 import Lore.Diagnostics (Span (..))
 import Lore.Internal.AutoRefactor.Edit (FileEdit (ReplaceSpanEdit))
-import Lore.Internal.AutoRefactor.ImportDecl
-  ( NormalizedImport (..),
-    ParsedImport (..),
-    normalizedImportFromParsed,
-    parseImports,
-    renderNormalizedImport,
-    srcSpanToSpan,
-  )
+import Lore.Internal.AutoRefactor.ImportDecl (NormalizedImport (..), ParsedImport (..), normalizedImportFromParsed, parseImports, renderNormalizedImport)
 import Lore.Internal.AutoRefactor.ImportNormalize (applyImportOperations)
 import Lore.Internal.AutoRefactor.ImportOps (ImportOperation)
+import Lore.Internal.SourceSpan (srcSpanToSpan)
+import Lore.Internal.SourceText (offsetToPosition, spanText, spanToOffsets, splitAtSpanEnd)
 
 data ImportRewriteResult = ImportRewriteResult
   { rewriteEdits :: [FileEdit],
@@ -130,26 +125,13 @@ offsetSpan source offset = do
 extendToWholeLineIfPossible :: Text -> Span -> Span
 extendToWholeLineIfPossible contents span'
   | Just (_, endOffset) <- spanToOffsets contents span',
-    let after = dropText endOffset contents,
+    let after = T.drop endOffset contents,
     let (spaces, rest) = T.span (\ch -> isSpace ch && ch /= '\n') after,
     not (T.null rest),
     T.head rest == '\n',
     Just (newEndLine, newEndCol) <- offsetToPosition contents (endOffset + T.length spaces + 1) =
       span' {spanEndLine = newEndLine, spanEndCol = newEndCol}
   | otherwise = span'
-
-spanText :: Text -> Span -> Text
-spanText source span' =
-  case spanToOffsets source span' of
-    Just (startOffset, endOffset) ->
-      T.take (endOffset - startOffset) (T.drop startOffset source)
-    Nothing ->
-      ""
-
-splitAtSpanEnd :: Text -> Span -> Maybe (Text, Text)
-splitAtSpanEnd source span' = do
-  (_, endOffset) <- spanToOffsets source span'
-  pure (T.take endOffset source, T.drop endOffset source)
 
 spanEndOffset :: Text -> Span -> Int
 spanEndOffset source span' =
@@ -161,42 +143,3 @@ findSubstringOffset needle haystack =
     (prefix, suffix)
       | T.null suffix -> Nothing
       | otherwise -> Just (T.length prefix)
-
-spanToOffsets :: Text -> Span -> Maybe (Int, Int)
-spanToOffsets contents Span {spanStartLine, spanStartCol, spanEndLine, spanEndCol} = do
-  startOffset <- positionToOffset contents (spanStartLine, spanStartCol)
-  endOffset <- positionToOffset contents (spanEndLine, spanEndCol)
-  pure (startOffset, endOffset)
-
-positionToOffset :: Text -> (Int, Int) -> Maybe Int
-positionToOffset contents (targetLine, targetCol)
-  | targetLine < 1 || targetCol < 1 = Nothing
-  | otherwise = go 1 1 0 (T.unpack contents)
-  where
-    go line col offset remaining
-      | (line, col) == (targetLine, targetCol) = Just offset
-      | otherwise =
-          case remaining of
-            [] -> Nothing
-            '\n' : rest -> go (line + 1) 1 (offset + 1) rest
-            _ : rest -> go line (col + 1) (offset + 1) rest
-
-offsetToPosition :: Text -> Int -> Maybe (Int, Int)
-offsetToPosition contents targetOffset
-  | targetOffset < 0 = Nothing
-  | otherwise = go 1 1 0 (T.unpack contents)
-  where
-    go line col offset remaining
-      | offset == targetOffset = Just (line, col)
-      | otherwise =
-          case remaining of
-            [] ->
-              if offset == targetOffset
-                then Just (line, col)
-                else Nothing
-            '\n' : rest -> go (line + 1) 1 (offset + 1) rest
-            _ : rest -> go line (col + 1) (offset + 1) rest
-
-dropText :: Int -> Text -> Text
-dropText =
-  T.drop
