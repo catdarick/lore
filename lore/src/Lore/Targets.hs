@@ -2,7 +2,7 @@ module Lore.Targets
   ( LoadTargetsResult (..),
     LoadTargetsOptions (..),
     defaultLoadTargetsOptions,
-    getLastLoadTargetsResult,
+    lookupLastLoadTargetsResult,
     loadTargets,
     retainUnresolvedRollback,
   )
@@ -12,7 +12,12 @@ import Lore.Internal.Targets
   ( LoadTargetsOptions (..),
     LoadTargetsResult (..),
     defaultLoadTargetsOptions,
-    getLastLoadTargetsResult,
     loadTargets,
+    lookupLastLoadTargetsResultCache,
     retainUnresolvedRollback,
   )
+import Lore.Monad (MonadLore)
+
+lookupLastLoadTargetsResult :: (MonadLore m) => m (Maybe LoadTargetsResult)
+lookupLastLoadTargetsResult =
+  lookupLastLoadTargetsResultCache

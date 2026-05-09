@@ -1,9 +1,22 @@
 {-# LANGUAGE DeriveAnyClass #-}
 
 module Lore.Internal.Lookup.SymbolsMap
-  ( getSymbolsMap,
-    invalidateHomeSymbolsMapCache,
-    setSymbolsMapDependencies,
+  ( HomeSymbolsIndexCache (..),
+    ExternalSymbolsIndexCache (..),
+    ExternalSymbolsSnapshot (..),
+    SymbolsDependencySetCache (..),
+    emptyHomeSymbolsIndexCache,
+    emptyExternalSymbolsIndexCache,
+    emptySymbolsDependencySetCache,
+    getCachedSymbolsMap,
+    getCachedHomeSymbolsIndex,
+    getCachedExternalSymbolsIndex,
+    prepareHomeSymbolsIndex,
+    prepareExternalSymbolsIndex,
+    setSymbolsDependencySetCache,
+    readSymbolsDependencySetCache,
+    invalidateHomeSymbolsIndexCache,
+    invalidateExternalSymbolsIndexCache,
     findMatchingSymbolsInMap,
   )
 where
@@ -20,19 +33,44 @@ import qualified GHC.Driver.Main as GHC
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Avail as GHC
-import Lore.Internal.Lookup.ModSummaries (getModSummaries)
+import Lore.Internal.Lookup.Cache.Types
+  ( ExternalSymbolsIndexCache (..),
+    ExternalSymbolsSnapshot (..),
+    HomeSymbolsIndexCache (..),
+    SymbolsDependencySetCache (..),
+  )
+import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Name (NormalizedName (..), extractAndNormalizeOccName)
-import Lore.Internal.Lookup.Types (ExternalPackagesSymbolsCache (..), ModSummaries (..), Symbol (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..), isSymbolNameMatching)
+import Lore.Internal.Lookup.Types
+  ( ModSummaries (..),
+    Symbol (..),
+    SymbolVisibility (..),
+    SymbolsIndex (..),
+    SymbolsMap (..),
+    isSymbolNameMatching,
+  )
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Lib.Force (evaluateNFM)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import UnliftIO (SomeException, handle, modifyMVar, pooledForConcurrently, readMVar)
 
-getSymbolsMap :: (MonadLore m) => m SymbolsMap
-getSymbolsMap = do
-  homeSymbolsMap <- getHomeSymbolsMap
-  externalSymbolsMap <- getExternalSymbolsMap
+emptyHomeSymbolsIndexCache :: HomeSymbolsIndexCache
+emptyHomeSymbolsIndexCache =
+  HomeSymbolsIndexCache Nothing
+
+emptyExternalSymbolsIndexCache :: ExternalSymbolsIndexCache
+emptyExternalSymbolsIndexCache =
+  ExternalSymbolsIndexCache Nothing
+
+emptySymbolsDependencySetCache :: SymbolsDependencySetCache
+emptySymbolsDependencySetCache =
+  SymbolsDependencySetCache Set.empty
+
+getCachedSymbolsMap :: (MonadLore m) => m SymbolsMap
+getCachedSymbolsMap = do
+  homeSymbolsMap <- getCachedHomeSymbolsIndex
+  externalSymbolsMap <- getCachedExternalSymbolsIndex
   pure SymbolsMap {homeSymbolsMap, externalSymbolsMap}
 
 findMatchingSymbolsInMap :: NormalizedName -> SymbolsMap -> Set.Set Symbol
@@ -44,50 +82,61 @@ findMatchingSymbolsInMap targetName SymbolsMap {homeSymbolsMap, externalSymbolsM
     homeMatchingSymbols = lookupSymbolsInIndex homeSymbolsMap
     externalMatchingSymbols = lookupSymbolsInIndex externalSymbolsMap
 
-invalidateHomeSymbolsMapCache :: (MonadLore m) => m ()
-invalidateHomeSymbolsMapCache = do
-  cacheVar <- asks homeModulesSymbolsCache
-  modifyMVar cacheVar $ \_ -> pure (Nothing, ())
+invalidateHomeSymbolsIndexCache :: (MonadLore m) => m ()
+invalidateHomeSymbolsIndexCache = do
+  cacheVar <- asks homeSymbolsIndexCacheVar
+  modifyMVar cacheVar $ \_ -> pure (emptyHomeSymbolsIndexCache, ())
 
-setSymbolsMapDependencies :: (MonadLore m) => Set.Set String -> m ()
-setSymbolsMapDependencies dependencies = do
-  dependencyVar <- asks symbolsMapDependencySet
-  dependenciesChanged <- modifyMVar dependencyVar $ \cachedDependencies ->
-    pure (dependencies, cachedDependencies /= dependencies)
+invalidateExternalSymbolsIndexCache :: (MonadLore m) => m ()
+invalidateExternalSymbolsIndexCache = do
+  cacheVar <- asks externalSymbolsIndexCacheVar
+  modifyMVar cacheVar $ \_ -> pure (emptyExternalSymbolsIndexCache, ())
+
+setSymbolsDependencySetCache :: (MonadLore m) => Set.Set String -> m ()
+setSymbolsDependencySetCache dependencies = do
+  dependencyVar <- asks symbolsDependencySetCacheVar
+  dependenciesChanged <- modifyMVar dependencyVar $ \(SymbolsDependencySetCache cachedDependencies) ->
+    pure (SymbolsDependencySetCache dependencies, cachedDependencies /= dependencies)
   when dependenciesChanged do
     Log.debug $ "External symbol cache dependencies changed to " <> show (Set.toList dependencies) <> ". Invalidating external symbols cache."
-    cacheVar <- asks externalPackagesSymbolsCache
-    modifyMVar cacheVar $ \_ -> pure (Nothing, ())
+    invalidateExternalSymbolsIndexCache
 
-getHomeSymbolsMap :: (MonadLore m) => m SymbolsIndex
-getHomeSymbolsMap = do
-  cacheVar <- asks homeModulesSymbolsCache
-  modifyMVar cacheVar $ \case
-    Just symbolsMap -> pure (Just symbolsMap, symbolsMap)
-    Nothing -> do
-      symbolsMap <- prepareHomeSymbolsMap
-      pure (Just symbolsMap, symbolsMap)
+readSymbolsDependencySetCache :: (MonadLore m) => m (Set.Set String)
+readSymbolsDependencySetCache = do
+  dependencyVar <- asks symbolsDependencySetCacheVar
+  SymbolsDependencySetCache dependencies <- liftIO (readMVar dependencyVar)
+  pure dependencies
 
-getExternalSymbolsMap :: (MonadLore m) => m SymbolsIndex
-getExternalSymbolsMap = do
-  dependencyVar <- asks symbolsMapDependencySet
-  currentDependencies <- liftIO $ readMVar dependencyVar
-  cacheVar <- asks externalPackagesSymbolsCache
-  modifyMVar cacheVar $ \case
-    Just cache
-      | cache.externalPackagesDependencies == currentDependencies ->
-          pure (Just cache, cache.externalPackagesSymbolsMap)
-    _ -> do
-      symbolsMap <- prepareExternalSymbolsMap currentDependencies
-      let cache =
-            ExternalPackagesSymbolsCache
-              { externalPackagesDependencies = currentDependencies,
-                externalPackagesSymbolsMap = symbolsMap
-              }
-      pure (Just cache, symbolsMap)
+getCachedHomeSymbolsIndex :: (MonadLore m) => m SymbolsIndex
+getCachedHomeSymbolsIndex = do
+  cacheVar <- asks homeSymbolsIndexCacheVar
+  modifyMVar cacheVar $ \cacheState ->
+    case cacheState.cachedHomeSymbolsIndex of
+      Just symbolsMap -> pure (cacheState, symbolsMap)
+      Nothing -> do
+        symbolsMap <- prepareHomeSymbolsIndex
+        pure (HomeSymbolsIndexCache (Just symbolsMap), symbolsMap)
 
-prepareHomeSymbolsMap :: (MonadLore m) => m SymbolsIndex
-prepareHomeSymbolsMap = do
+getCachedExternalSymbolsIndex :: (MonadLore m) => m SymbolsIndex
+getCachedExternalSymbolsIndex = do
+  currentDependencies <- readSymbolsDependencySetCache
+  cacheVar <- asks externalSymbolsIndexCacheVar
+  modifyMVar cacheVar $ \cacheState ->
+    case cacheState.cachedExternalSymbolsSnapshot of
+      Just cachedSnapshot
+        | cachedSnapshot.externalSymbolsSnapshotDependencies == currentDependencies ->
+            pure (cacheState, cachedSnapshot.externalSymbolsSnapshotIndex)
+      _ -> do
+        symbolsMap <- prepareExternalSymbolsIndex currentDependencies
+        let snapshot =
+              ExternalSymbolsSnapshot
+                { externalSymbolsSnapshotDependencies = currentDependencies,
+                  externalSymbolsSnapshotIndex = symbolsMap
+                }
+        pure (ExternalSymbolsIndexCache (Just snapshot), symbolsMap)
+
+prepareHomeSymbolsIndex :: (MonadLore m) => m SymbolsIndex
+prepareHomeSymbolsIndex = do
   Log.debug "Preparing symbols map for home modules..."
   homeModules <- enumerateHomeModules
   Log.debug $ "Enumerated " <> show (length homeModules) <> " home modules."
@@ -97,8 +146,8 @@ prepareHomeSymbolsMap = do
   logPreparedSymbolsIndex "home modules" symbolsMap
   pure symbolsMap
 
-prepareExternalSymbolsMap :: (MonadLore m) => Set.Set String -> m SymbolsIndex
-prepareExternalSymbolsMap dependencies = do
+prepareExternalSymbolsIndex :: (MonadLore m) => Set.Set String -> m SymbolsIndex
+prepareExternalSymbolsIndex dependencies = do
   Log.debug $ "Preparing symbols map for external modules with dependencies " <> show (Set.toList dependencies) <> "."
   externalModules <- enumerateVisiblePackageModules
   Log.debug $ "Enumerated " <> show (length externalModules) <> " visible package modules."
@@ -111,7 +160,7 @@ prepareExternalSymbolsMap dependencies = do
 
 enumerateHomeModules :: (MonadLore m) => m [GHC.Module]
 enumerateHomeModules = do
-  ModSummaries summaries <- getModSummaries
+  ModSummaries summaries <- getCachedModSummaries
   pure $ map GHC.ms_mod (Map.elems summaries)
 
 enumerateVisiblePackageModules :: (MonadLore m) => m [GHC.Module]

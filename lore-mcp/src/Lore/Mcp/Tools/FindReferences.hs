@@ -27,7 +27,7 @@ import Lore
     Symbol (..),
     SymbolInfo (..),
     findMatchingSymbols,
-    getLastLoadTargetsResult,
+    lookupLastLoadTargetsResult,
     lookupSymbolInfo,
     mergePathsToRootOn,
     parseAndNormalizeName,
@@ -73,7 +73,7 @@ findReferencesTool =
 
 findReferencesHandler :: (MonadLore m) => FindReferencesArgs 'ValueType -> m Text
 findReferencesHandler FindReferencesArgs {symbol, skip} = do
-  maybeLoadResult <- getLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."

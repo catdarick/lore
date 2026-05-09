@@ -5,8 +5,6 @@ where
 
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
-import Control.Monad.IO.Class (liftIO)
-import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Data.IOEnv as GHC.IOEnv
@@ -17,9 +15,12 @@ import qualified GHC.Hs as GHC.Hs
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
 import Lore.Internal.Definition.Analysis (buildMinimalTypedModuleFacts, buildParsedModuleFacts, buildUsedInstancesByBinder)
-import Lore.Internal.Definition.Types (MinimalCoreModuleFacts (..), MinimalTypedModuleFacts (..), ParsedModuleCache (..), TypedModuleCache (..))
+import Lore.Internal.Definition.Cache.CoreModuleFacts (storeCoreModuleFactsCacheInContext)
+import Lore.Internal.Definition.Cache.DefinitionModuleIndex (invalidateDefinitionModuleIndexCacheForModuleInContext)
+import Lore.Internal.Definition.Cache.ParsedModuleFacts (storeParsedModuleFactsCacheInContext)
+import Lore.Internal.Definition.Cache.TypedModuleFacts (lookupTypedModuleFactsCacheInContext, storeTypedModuleFactsCacheInContext)
+import Lore.Internal.Definition.Types (MinimalCoreModuleFacts (..), MinimalTypedModuleFacts (..))
 import Lore.Internal.Session (SessionContext (..))
-import UnliftIO (modifyMVar_, readMVar)
 
 installDefinitionCallbacks :: SessionContext -> GHC.HscEnv -> GHC.HscEnv
 installDefinitionCallbacks sessionContext hscEnv =
@@ -64,11 +65,9 @@ parsedResultAction sessionContext _ summary parsedResult = do
   let parsedSource =
         GHC.Hs.hpm_module (GHC.Plugins.parsedResultModule parsedResult)
       homeModule = GHC.ms_mod summary
-  liftIO do
+  GHC.IOEnv.liftIO do
     parsedFacts <- evaluate $ force $ buildParsedModuleFacts homeModule parsedSource
-    modifyMVar_ (referenceParsedModuleCache sessionContext) \cache ->
-      let cache' = Map.insert homeModule (ParsedModuleFactsCache parsedFacts) cache
-       in evaluate cache'
+    storeParsedModuleFactsCacheInContext sessionContext homeModule parsedFacts
   pure parsedResult
 
 typeCheckResultAction ::
@@ -81,9 +80,7 @@ typeCheckResultAction sessionContext _ summary tcg = do
   let homeModule = GHC.ms_mod summary
   GHC.IOEnv.liftIO do
     typedFacts <- evaluate $ force $ buildMinimalTypedModuleFacts homeModule tcg
-    modifyMVar_ (referenceTypedModuleCache sessionContext) \cache ->
-      let cache' = Map.insert homeModule (TypedModuleMinimalFacts typedFacts) cache
-       in evaluate cache'
+    storeTypedModuleFactsCacheInContext sessionContext homeModule typedFacts
   pure tcg
 
 installCoreToDos ::
@@ -98,10 +95,10 @@ rawArtifactsTcCoreProcessedCorePass :: SessionContext -> GHC.ModGuts -> GHC.Core
 rawArtifactsTcCoreProcessedCorePass sessionContext modGuts = do
   let homeModule = GHC.mg_module modGuts
   GHC.IOEnv.liftIO do
-    typedCache <- readMVar (referenceTypedModuleCache sessionContext)
+    maybeTypedFacts <- lookupTypedModuleFactsCacheInContext sessionContext homeModule
     let interestingBinders =
-          case Map.lookup homeModule typedCache of
-            Just (TypedModuleMinimalFacts typedFacts) ->
+          case maybeTypedFacts of
+            Just typedFacts ->
               Set.fromList typedFacts.typedDefinitionNames
             Nothing ->
               Set.empty
@@ -110,12 +107,8 @@ rawArtifactsTcCoreProcessedCorePass sessionContext modGuts = do
             { coreUsedInstancesByBinder =
                 buildUsedInstancesByBinder interestingBinders (GHC.mg_binds modGuts)
             }
-    modifyMVar_ (referenceMinimalCoreModuleFactsCache sessionContext) \cache ->
-      let cache' = Map.insert homeModule coreFacts cache
-       in evaluate cache'
+    storeCoreModuleFactsCacheInContext sessionContext homeModule coreFacts
     -- Core facts arriving after a previously built definition index would leave
     -- dependencyUsedInstanceNames stale. Drop that module index so it is rebuilt.
-    modifyMVar_ (definitionModuleIndexCache sessionContext) \cache ->
-      let cache' = Map.delete homeModule cache
-       in evaluate cache'
+    invalidateDefinitionModuleIndexCacheForModuleInContext sessionContext homeModule
   pure modGuts

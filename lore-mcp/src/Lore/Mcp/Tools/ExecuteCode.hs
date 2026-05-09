@@ -14,8 +14,8 @@ import Lore
     LoadTargetsResult (..),
     MonadLore,
     executeStatement,
-    getLastLoadTargetsResult,
     interpreterContextIsReady,
+    lookupLastLoadTargetsResult,
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
@@ -50,7 +50,7 @@ executeCodeTool =
 
 executeCodeHandler :: (MonadLore m) => ExecuteCodeArgs 'ValueType -> m Text
 executeCodeHandler ExecuteCodeArgs {code} = do
-  maybeLoadResult <- getLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadTargetsResult
   contextReady <- interpreterContextIsReady
   case maybeLoadResult of
     Nothing ->

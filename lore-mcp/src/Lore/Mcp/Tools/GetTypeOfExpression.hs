@@ -16,9 +16,9 @@ import qualified GHC.Utils.Outputable as Outputable
 import Lore
   ( LoadTargetsResult (..),
     MonadLore,
-    getLastLoadTargetsResult,
     getTypeOfExpression,
     interpreterContextIsReady,
+    lookupLastLoadTargetsResult,
   )
 import Lore.Diagnostics
   ( Diagnostic (..),
@@ -54,7 +54,7 @@ getTypeOfExpressionTool =
 
 getTypeOfExpressionHandler :: (MonadLore m) => GetTypeOfExpressionArgs 'ValueType -> m Text
 getTypeOfExpressionHandler GetTypeOfExpressionArgs {expression} = do
-  maybeLoadResult <- getLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadTargetsResult
   contextReady <- interpreterContextIsReady
   case maybeLoadResult of
     Nothing ->

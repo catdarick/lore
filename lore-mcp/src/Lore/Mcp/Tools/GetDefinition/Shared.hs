@@ -31,8 +31,8 @@ import Lore
     Symbol (..),
     SymbolInfo (..),
     findMatchingSymbolsRoots,
-    getLastLoadTargetsResult,
     getMinifiedImportsForDefinition,
+    lookupLastLoadTargetsResult,
     lookupSymbolInfo,
     parseAndNormalizeName,
     resolveDefinitionClosureSourcesNamed,
@@ -61,7 +61,7 @@ type RenderDefinitionsStrategy m =
 
 getDefinitionHandlerWithStrategy :: (MonadLore m) => CommonGetDefinitionArgs -> RenderDefinitionsStrategy m -> m Text
 getDefinitionHandlerWithStrategy CommonGetDefinitionArgs {symbols, skip, recursionDepth} renderDefinitions = do
-  maybeLoadResult <- getLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."

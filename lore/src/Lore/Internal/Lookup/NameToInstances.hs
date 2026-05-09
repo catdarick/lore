@@ -1,35 +1,34 @@
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
-{-# HLINT ignore "Avoid restricted function" #-}
 module Lore.Internal.Lookup.NameToInstances
-  ( getNameToInstancesIndex,
-    invalidateNameToInstancesIndex,
+  ( getCachedNameToInstancesIndex,
+    invalidateNameToInstancesIndexCache,
   )
 where
 
 import Control.Monad.Reader (asks)
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified GHC
-import qualified GHC.Plugins as GHC
+import qualified GHC.Plugins as GHC.Plugins
+import Lore.Internal.Lookup.Cache.Types (NameToInstancesIndexCache (..))
 import Lore.Internal.Lookup.Types (NameToInstancesIndex (..))
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import UnliftIO (modifyMVar, tryAny)
 
-getNameToInstancesIndex :: (MonadLore m) => m NameToInstancesIndex
-getNameToInstancesIndex = do
-  cacheVar <- asks nameToInstancesIndexCache
-  modifyMVar cacheVar $ \case
-    Just nameToInstancesIndex -> pure (Just nameToInstancesIndex, nameToInstancesIndex)
-    Nothing -> do
-      nameToInstancesIndex <- prepareNameToInstancesIndex
-      pure (Just nameToInstancesIndex, nameToInstancesIndex)
+getCachedNameToInstancesIndex :: (MonadLore m) => m NameToInstancesIndex
+getCachedNameToInstancesIndex = do
+  cacheVar <- asks nameToInstancesIndexCacheVar
+  modifyMVar cacheVar $ \cacheState ->
+    case cacheState.cachedNameToInstancesIndex of
+      Just nameToInstancesIndex -> pure (cacheState, nameToInstancesIndex)
+      Nothing -> do
+        nameToInstancesIndex <- prepareNameToInstancesIndex
+        pure (NameToInstancesIndexCache (Just nameToInstancesIndex), nameToInstancesIndex)
 
-invalidateNameToInstancesIndex :: (MonadLore m) => m ()
-invalidateNameToInstancesIndex = do
-  cacheVar <- asks nameToInstancesIndexCache
-  modifyMVar cacheVar $ \_ -> pure (Nothing, ())
+invalidateNameToInstancesIndexCache :: (MonadLore m) => m ()
+invalidateNameToInstancesIndexCache = do
+  cacheVar <- asks nameToInstancesIndexCacheVar
+  modifyMVar cacheVar $ \_ -> pure (NameToInstancesIndexCache Nothing, ())
 
 prepareNameToInstancesIndex :: (MonadLore m) => m NameToInstancesIndex
 prepareNameToInstancesIndex = do
@@ -40,8 +39,8 @@ prepareNameToInstancesIndex = do
   mods <- catMaybes <$> mapM keepLoadedModule candidateMods
   Log.debug $ "Loaded " <> show (length mods) <> " modules for name-to-instances index."
   (_, mIndex) <- GHC.getNameToInstancesIndex mods (Just mods)
-  Log.debug $ "Name-to-instances index prepared with " <> show (GHC.sizeUFM (fromMaybe GHC.emptyNameEnv mIndex)) <> " entries."
-  pure $ NameToInstancesIndex (fromMaybe GHC.emptyNameEnv mIndex)
+  Log.debug $ "Name-to-instances index prepared with " <> show (GHC.Plugins.sizeUFM (fromMaybe GHC.Plugins.emptyNameEnv mIndex)) <> " entries."
+  pure $ NameToInstancesIndex (fromMaybe GHC.Plugins.emptyNameEnv mIndex)
   where
     keepLoadedModule mod' =
       tryAny (GHC.getModuleInfo mod') >>= \case

@@ -9,7 +9,7 @@ module Lore
     LoadTargetsOptions (..),
     defaultLoadTargetsOptions,
     loadTargets,
-    getLastLoadTargetsResult,
+    lookupLastLoadTargetsResult,
     NormalizedOccName,
     NormalizedModuleName,
     NormalizedName (occName, moduleName),

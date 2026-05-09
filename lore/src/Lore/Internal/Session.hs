@@ -11,15 +11,14 @@ import qualified Control.Concurrent as GHC
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
-import qualified GHC as GHC
 import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
-import Lore.Internal.Definition.Types (DefinitionModuleIndex, MinimalCoreModuleFacts, ParsedModuleCache, ParsedOccurrenceModuleIndex, TypedModuleCache)
+import Lore.Internal.Definition.Cache.Types (CoreModuleFactsCache (..), DefinitionModuleIndexCache (..), ParsedModuleFactsCache (..), ParsedOccurrenceModuleIndexCache (..), TypedModuleFactsCache (..))
 import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
-import Lore.Internal.Lookup.Types (ExternalPackagesSymbolsCache, ModSummaries, NameToInstancesIndex, SymbolsIndex)
+import Lore.Internal.Lookup.Cache.Types (ExternalSymbolsIndexCache (..), HomeSymbolsIndexCache (..), ModSummariesCache (..), NameToInstancesIndexCache (..), SymbolsDependencySetCache (..))
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
-import Lore.Internal.Targets.Result (LoadTargetsResult)
+import Lore.Internal.Session.Cache.Types (InterpreterContextCache (..), LastLoadTargetsResultCache (..))
 import Lore.Logger (LoggerHandle, noLogHandle)
 
 data SessionContext = SessionContext
@@ -29,18 +28,18 @@ data SessionContext = SessionContext
     customPrelude :: Maybe Text,
     packageDbPaths :: [FilePath],
     ifaceCache :: GHC.ModIfaceCache,
-    homeModulesSymbolsCache :: MVar (Maybe SymbolsIndex),
-    externalPackagesSymbolsCache :: MVar (Maybe ExternalPackagesSymbolsCache),
-    symbolsMapDependencySet :: MVar (Set.Set String),
-    modSummariesCache :: MVar (Maybe ModSummaries),
-    nameToInstancesIndexCache :: MVar (Maybe NameToInstancesIndex),
-    parsedOccurrenceModuleIndexCache :: MVar (Maybe ParsedOccurrenceModuleIndex),
-    definitionModuleIndexCache :: MVar (Map.Map GHC.Module (Maybe DefinitionModuleIndex)),
-    referenceTypedModuleCache :: MVar (Map.Map GHC.Module TypedModuleCache),
-    referenceMinimalCoreModuleFactsCache :: MVar (Map.Map GHC.Module MinimalCoreModuleFacts),
-    referenceParsedModuleCache :: MVar (Map.Map GHC.Module ParsedModuleCache),
-    interpreterContextCache :: MVar (Maybe [GHC.ModuleName]),
-    lastLoadTargetsResult :: MVar (Maybe LoadTargetsResult)
+    homeSymbolsIndexCacheVar :: MVar HomeSymbolsIndexCache,
+    externalSymbolsIndexCacheVar :: MVar ExternalSymbolsIndexCache,
+    symbolsDependencySetCacheVar :: MVar SymbolsDependencySetCache,
+    modSummariesCacheVar :: MVar ModSummariesCache,
+    nameToInstancesIndexCacheVar :: MVar NameToInstancesIndexCache,
+    parsedOccurrenceModuleIndexCacheVar :: MVar ParsedOccurrenceModuleIndexCache,
+    definitionModuleIndexCacheVar :: MVar DefinitionModuleIndexCache,
+    typedModuleFactsCacheVar :: MVar TypedModuleFactsCache,
+    coreModuleFactsCacheVar :: MVar CoreModuleFactsCache,
+    parsedModuleFactsCacheVar :: MVar ParsedModuleFactsCache,
+    interpreterContextCacheVar :: MVar InterpreterContextCache,
+    lastLoadTargetsResultCacheVar :: MVar LastLoadTargetsResultCache
   }
 
 data SessionConfig = SessionConfig
@@ -66,18 +65,18 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
   packageFiles <- findFilesByNameRecursively (Just defaultIgnoreList) projectRoot "package.yaml"
   eiPackageDbPaths <- resolvePackageDbPaths projectRoot
   ifaceCache <- GHC.newIfaceCache
-  homeModulesSymbolsCache <- GHC.newMVar Nothing
-  externalPackagesSymbolsCache <- GHC.newMVar Nothing
-  symbolsMapDependencySet <- GHC.newMVar Set.empty
-  modSummariesCache <- GHC.newMVar Nothing
-  nameToInstancesIndexCache <- GHC.newMVar Nothing
-  parsedOccurrenceModuleIndexCache <- GHC.newMVar Nothing
-  definitionModuleIndexCache <- GHC.newMVar Map.empty
-  referenceTypedModuleCache <- GHC.newMVar Map.empty
-  referenceMinimalCoreModuleFactsCache <- GHC.newMVar Map.empty
-  referenceParsedModuleCache <- GHC.newMVar Map.empty
-  interpreterContextCache <- GHC.newMVar Nothing
-  lastLoadTargetsResult <- GHC.newMVar Nothing
+  homeSymbolsIndexCacheVar <- GHC.newMVar (HomeSymbolsIndexCache Nothing)
+  externalSymbolsIndexCacheVar <- GHC.newMVar (ExternalSymbolsIndexCache Nothing)
+  symbolsDependencySetCacheVar <- GHC.newMVar (SymbolsDependencySetCache Set.empty)
+  modSummariesCacheVar <- GHC.newMVar (ModSummariesCache Nothing)
+  nameToInstancesIndexCacheVar <- GHC.newMVar (NameToInstancesIndexCache Nothing)
+  parsedOccurrenceModuleIndexCacheVar <- GHC.newMVar (ParsedOccurrenceModuleIndexCache Nothing)
+  definitionModuleIndexCacheVar <- GHC.newMVar (DefinitionModuleIndexCache Map.empty)
+  typedModuleFactsCacheVar <- GHC.newMVar (TypedModuleFactsCache Map.empty)
+  coreModuleFactsCacheVar <- GHC.newMVar (CoreModuleFactsCache Map.empty)
+  parsedModuleFactsCacheVar <- GHC.newMVar (ParsedModuleFactsCache Map.empty)
+  interpreterContextCacheVar <- GHC.newMVar (InterpreterContextCache Nothing)
+  lastLoadTargetsResultCacheVar <- GHC.newMVar (LastLoadTargetsResultCache Nothing)
   case eiPackageDbPaths of
     Left err -> pure $ Left $ "Failed to resolve package database paths: " <> err
     Right packageDbPaths -> do
@@ -90,16 +89,16 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
               customPrelude,
               packageDbPaths = packageDbPaths,
               ifaceCache,
-              homeModulesSymbolsCache,
-              externalPackagesSymbolsCache,
-              symbolsMapDependencySet,
-              modSummariesCache,
-              nameToInstancesIndexCache,
-              parsedOccurrenceModuleIndexCache,
-              definitionModuleIndexCache,
-              referenceTypedModuleCache,
-              referenceMinimalCoreModuleFactsCache,
-              referenceParsedModuleCache,
-              interpreterContextCache,
-              lastLoadTargetsResult
+              homeSymbolsIndexCacheVar,
+              externalSymbolsIndexCacheVar,
+              symbolsDependencySetCacheVar,
+              modSummariesCacheVar,
+              nameToInstancesIndexCacheVar,
+              parsedOccurrenceModuleIndexCacheVar,
+              definitionModuleIndexCacheVar,
+              typedModuleFactsCacheVar,
+              coreModuleFactsCacheVar,
+              parsedModuleFactsCacheVar,
+              interpreterContextCacheVar,
+              lastLoadTargetsResultCacheVar
             }

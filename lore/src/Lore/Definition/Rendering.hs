@@ -5,7 +5,7 @@ module Lore.Definition.Rendering
 where
 
 import qualified Data.Map.Strict as Map
-import Lore.Internal.Definition.Cache (getParsedModuleFacts)
+import Lore.Internal.Definition.Cache.ParsedModuleFacts (lookupParsedModuleFactsCache)
 import Lore.Internal.Definition.SourceTree (buildDefinitionSourceTree, chooseBestReferenceContext)
 import Lore.Internal.Definition.Types
   ( DefinitionSource (..),
@@ -16,7 +16,7 @@ import Lore.Monad (MonadLore)
 
 getDefinitionSourceTree :: (MonadLore m) => DefinitionSource -> m (Maybe DefinitionSourceTree)
 getDefinitionSourceTree source = do
-  maybeParsedFacts <- getParsedModuleFacts source.definitionSourceModule
+  maybeParsedFacts <- lookupParsedModuleFactsCache source.definitionSourceModule
   pure do
     parsedFacts <- maybeParsedFacts
     spans <- Map.lookup source.definitionSourceId parsedFacts.parsedDeclarationsById

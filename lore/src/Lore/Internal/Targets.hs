@@ -5,7 +5,8 @@ module Lore.Internal.Targets
   ( LoadTargetsResult (..),
     LoadTargetsOptions (..),
     defaultLoadTargetsOptions,
-    getLastLoadTargetsResult,
+    lookupLastLoadTargetsResultCache,
+    storeLastLoadTargetsResultCache,
     loadTargets,
     retainUnresolvedRollback,
   )
@@ -32,15 +33,15 @@ import GHC.Utils.Monad (mapMaybeM)
 import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor, rollbackAutoRefactorEdits)
 import Lore.Internal.AutoRefactor.Issue (classifyAutoRefactorIssues)
-import Lore.Internal.Definition.Cache (filterReferenceCaches)
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
-import Lore.Internal.Interpreter (invalidateInterpreterContext, refreshInterpreterContext)
-import Lore.Internal.Lookup.ModSummaries (getModSummaries, invalidateModSummaries)
-import Lore.Internal.Lookup.NameToInstances (invalidateNameToInstancesIndex)
-import Lore.Internal.Lookup.SymbolsMap (invalidateHomeSymbolsMapCache, setSymbolsMapDependencies)
+import Lore.Internal.Interpreter (refreshInterpreterContext)
+import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
+import Lore.Internal.Lookup.SymbolsMap (setSymbolsDependencySetCache)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Package (ComponentData (..), PackageData (..), defaultExtensions, extractDependencies, extractSourceDirs, prepareComponentsData)
 import Lore.Internal.Session (SessionContext (..))
+import Lore.Internal.Session.Cache.Types (LastLoadTargetsResultCache (..))
+import Lore.Internal.Session.CacheInvalidation (invalidateCachesAfterSourceEdits, invalidateCachesForTargetConfigurationChange, retainCachesForLoadedModules)
 import Lore.Internal.Targets.Result (LoadTargetsResult (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
@@ -70,10 +71,18 @@ defaultLoadTargetsOptions =
     { enableAutoRefactor = False
     }
 
-getLastLoadTargetsResult :: (MonadLore m) => m (Maybe LoadTargetsResult)
-getLastLoadTargetsResult = do
-  cachedResultVar <- asks lastLoadTargetsResult
-  liftIO (MVar.readMVar cachedResultVar)
+lookupLastLoadTargetsResultCache :: (MonadLore m) => m (Maybe LoadTargetsResult)
+lookupLastLoadTargetsResultCache = do
+  cachedResultVar <- asks lastLoadTargetsResultCacheVar
+  LastLoadTargetsResultCache maybeLoadTargetsResult <- liftIO (MVar.readMVar cachedResultVar)
+  pure maybeLoadTargetsResult
+
+storeLastLoadTargetsResultCache :: (MonadLore m) => LoadTargetsResult -> m ()
+storeLastLoadTargetsResultCache loadTargetsResult = do
+  cachedResultVar <- asks lastLoadTargetsResultCacheVar
+  liftIO $
+    MVar.modifyMVar_ cachedResultVar $
+      const (pure (LastLoadTargetsResultCache (Just loadTargetsResult)))
 
 prepareTargetsPlan :: (MonadLore m) => [ComponentData] -> m TargetsPlan
 prepareTargetsPlan components = do
@@ -119,11 +128,8 @@ loadTargets options = do
   Log.debug $ "Common GHC options: " <> show (Set.toList $ commonGhcOptions targetsPlan)
   Log.debug $ "Common extensions: " <> show (Set.toList $ commonExtensions targetsPlan)
   Log.debug $ "Dependencies to add: " <> show (Set.toList dependenciesToAdd)
-  invalidateInterpreterContext
-  setSymbolsMapDependencies dependenciesToAdd
-  invalidateHomeSymbolsMapCache
-  invalidateModSummaries
-  invalidateNameToInstancesIndex
+  invalidateCachesForTargetConfigurationChange
+  setSymbolsDependencySetCache dependenciesToAdd
   modifySessionDynFlagsM
     ( setGhcOptionsAndExtensions targetsPlan.commonLanguage (Set.toList $ commonGhcOptions targetsPlan) (Set.toList $ commonExtensions targetsPlan)
         . setGhcSourceDirs (Set.toList sourceDirs)
@@ -156,10 +162,7 @@ loadTargets options = do
             loadTargetsAutofixSummaryByFile = loadAttemptAutoRefactSummaryByFile,
             loadTargetsModulesTotal = totalModulesCount
           }
-  cachedResultVar <- asks lastLoadTargetsResult
-  liftIO $
-    MVar.modifyMVar_ cachedResultVar $
-      const (pure (Just loadTargetsResult))
+  storeLastLoadTargetsResultCache loadTargetsResult
   pure loadTargetsResult
 
 logDiagnosticsSummary :: (MonadLore m) => [Diagnostic] -> m ()
@@ -236,9 +239,7 @@ loadTargets' options targetsPlan =
                   if autoRefactorApplied
                     then do
                       Log.info "Auto-refact applied import fixes. Retrying target load."
-                      invalidateHomeSymbolsMapCache
-                      invalidateModSummaries
-                      invalidateNameToInstancesIndex
+                      invalidateCachesAfterSourceEdits
                       go
                         (attemptNo + 1)
                         (Map.union unresolvedRollback autoRefactorOriginalContents)
@@ -276,9 +277,7 @@ rollbackUnresolvedAutoRefact targetsPlan rollbackState failedAttempt
   | otherwise = do
       Log.info "Auto-refact: rolling back unresolved edits."
       rollbackAutoRefactorEdits rollbackState
-      invalidateHomeSymbolsMapCache
-      invalidateModSummaries
-      invalidateNameToInstancesIndex
+      invalidateCachesAfterSourceEdits
       loadTargetsOnce targetsPlan
 
 loadTargetsOnce :: (MonadLore m) => TargetsPlan -> m LoadAttempt
@@ -295,7 +294,7 @@ loadTargetsOnce targetsPlan = do
   (diagnostics, r) <- withDiagnosticsCapturing do
     GHC.load' (Just ifaceCache) GHC.LoadAllTargets Nothing patchedModGraph
   loadedModules <- collectLoadedModules patchedModGraph
-  filterReferenceCaches loadedModules
+  retainCachesForLoadedModules loadedModules
   logDiagnosticsSummary diagnostics
   pure
     LoadAttempt
@@ -319,7 +318,7 @@ collectLoadedModules moduleGraph = do
 
 countLoadedModules :: (MonadLore m) => Set.Set GHC.ModuleName -> m Int
 countLoadedModules targetModules = do
-  ModSummaries modSummaries <- getModSummaries
+  ModSummaries modSummaries <- getCachedModSummaries
   let targetMods =
         [ mod'
         | mod' <- Map.keys modSummaries,

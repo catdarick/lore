@@ -3,7 +3,6 @@
 module Lore.Internal.Lookup.Types
   ( SymbolsMap (..),
     SymbolsIndex (..),
-    ExternalPackagesSymbolsCache (..),
     ModSummaries (..),
     NameToInstancesIndex (..),
     Symbol (..),
@@ -28,11 +27,6 @@ newtype SymbolsIndex = SymbolsIndex
 data SymbolsMap = SymbolsMap
   { homeSymbolsMap :: SymbolsIndex,
     externalSymbolsMap :: SymbolsIndex
-  }
-
-data ExternalPackagesSymbolsCache = ExternalPackagesSymbolsCache
-  { externalPackagesDependencies :: Set.Set String,
-    externalPackagesSymbolsMap :: SymbolsIndex
   }
 
 newtype ModSummaries = ModSummaries

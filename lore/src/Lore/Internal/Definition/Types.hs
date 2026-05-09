@@ -20,9 +20,7 @@ module Lore.Internal.Definition.Types
     MinimalTypedImport (..),
     MinimalTypedOccurrence (..),
     MinimalTypedModuleFacts (..),
-    TypedModuleCache (..),
     MinimalCoreModuleFacts (..),
-    ParsedModuleCache (..),
     ParsedModuleFacts (..),
     ParsedOccurrenceSyntax (..),
     SourceRegionCandidate (..),
@@ -160,12 +158,6 @@ data ParsedModuleFacts = ParsedModuleFacts
   deriving stock (Generic)
   deriving anyclass (NFData)
 
-newtype ParsedModuleCache = ParsedModuleFactsCache
-  { unParsedModuleFactsCache :: ParsedModuleFacts
-  }
-  deriving stock (Generic)
-  deriving anyclass (NFData)
-
 data ImportQualifiedStyle
   = QualifiedPre
   | QualifiedPost
@@ -218,11 +210,6 @@ data MinimalTypedModuleFacts = MinimalTypedModuleFacts
     typedSourceImports :: ![MinimalTypedImport],
     typedOccurrences :: ![MinimalTypedOccurrence]
   }
-  deriving stock (Generic)
-  deriving anyclass (NFData)
-
-newtype TypedModuleCache
-  = TypedModuleMinimalFacts MinimalTypedModuleFacts
   deriving stock (Generic)
   deriving anyclass (NFData)
 

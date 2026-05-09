@@ -12,7 +12,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Lore (MonadLore, Symbol (..), SymbolInfo (..), findMatchingSymbolsRoots, getLastLoadTargetsResult, listAssociatedInstances, lookupSymbolInfo, parseAndNormalizeName)
+import Lore (MonadLore, Symbol (..), SymbolInfo (..), findMatchingSymbolsRoots, listAssociatedInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Render
   ( ListMarker (..),
@@ -56,7 +56,7 @@ lookupSymbolInfoTool =
 
 lookupSymbolInfoHandler :: (MonadLore m) => LookupSymbolInfoArgs 'ValueType -> m Text
 lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol, skip} = do
-  maybeLoadResult <- getLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."

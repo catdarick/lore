@@ -33,7 +33,7 @@ import qualified GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
-import Lore.Internal.Lookup.NameToInstances (getNameToInstancesIndex)
+import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
 import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolVisibility (..), SymbolsMap)
@@ -62,11 +62,11 @@ data SymbolCategory
 
 findMatchingSymbols :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
 findMatchingSymbols targetName = do
-  findMatchingSymbolsInMap targetName <$> SymbolsMap.getSymbolsMap
+  findMatchingSymbolsInMap targetName <$> SymbolsMap.getCachedSymbolsMap
 
 findMatchingSymbolsRoots :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
 findMatchingSymbolsRoots targetName = do
-  symbolsMap <- SymbolsMap.getSymbolsMap
+  symbolsMap <- SymbolsMap.getCachedSymbolsMap
   let matchingSymbols = findMatchingSymbolsInMap targetName symbolsMap
   pathsToRoot <- forM (Set.toList matchingSymbols) $ \symbol -> do
     resolvePathToRoot symbol.name
@@ -74,7 +74,7 @@ findMatchingSymbolsRoots targetName = do
 
 lookupSymbolInfo :: (MonadLore m) => GHC.Name -> m (Maybe SymbolInfo)
 lookupSymbolInfo name = do
-  symbolsMap <- SymbolsMap.getSymbolsMap
+  symbolsMap <- SymbolsMap.getCachedSymbolsMap
   case GHC.nameModule_maybe name of
     Nothing -> do
       pure Nothing
@@ -141,7 +141,7 @@ listIntersectingInstances targetNames = do
 
 listAssociatedInstances :: (MonadLore m) => GHC.Name -> m Instances
 listAssociatedInstances name = do
-  NameToInstancesIndex nameToInstancesIndex <- getNameToInstancesIndex
+  NameToInstancesIndex nameToInstancesIndex <- getCachedNameToInstancesIndex
   case GHC.lookupUFM nameToInstancesIndex name of
     Nothing -> pure (Instances [] [])
     Just (clsInsts, famInsts) -> pure $ Instances clsInsts famInsts

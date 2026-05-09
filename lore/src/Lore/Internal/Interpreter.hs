@@ -1,6 +1,8 @@
 module Lore.Internal.Interpreter
   ( interpreterContextIsReady,
-    invalidateInterpreterContext,
+    lookupInterpreterContextCache,
+    storeInterpreterContextCache,
+    invalidateInterpreterContextCache,
     refreshInterpreterContext,
     executeStatementRaw,
     getTypeOfExpressionRaw,
@@ -19,9 +21,10 @@ import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Types.SourceError as GHC.SourceError
 import Lore.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (..), ghcMessagesToDiagnostics)
-import Lore.Internal.Lookup.ModSummaries (getModSummaries)
+import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Session (SessionContext (..))
+import Lore.Internal.Session.Cache.Types (InterpreterContextCache (..))
 import Lore.Monad (MonadLore)
 import System.Directory (removeFile)
 import System.IO (hClose, openTempFile)
@@ -33,20 +36,30 @@ data RedirectedExecution = RedirectedExecution
     redirectedOutput :: String
   }
 
-interpreterContextIsReady :: (MonadLore m) => m Bool
-interpreterContextIsReady = do
-  cacheVar <- asks interpreterContextCache
-  maybe False (const True) <$> readMVar cacheVar
+lookupInterpreterContextCache :: (MonadLore m) => m (Maybe [GHC.ModuleName])
+lookupInterpreterContextCache = do
+  cacheVar <- asks interpreterContextCacheVar
+  InterpreterContextCache maybeLoadedModuleNames <- readMVar cacheVar
+  pure maybeLoadedModuleNames
 
-invalidateInterpreterContext :: (MonadLore m) => m ()
-invalidateInterpreterContext = do
-  cacheVar <- asks interpreterContextCache
-  modifyMVar cacheVar $ \_ -> pure (Nothing, ())
+storeInterpreterContextCache :: (MonadLore m) => [GHC.ModuleName] -> m ()
+storeInterpreterContextCache loadedModuleNames = do
+  cacheVar <- asks interpreterContextCacheVar
+  modifyMVar cacheVar $ \_ -> pure (InterpreterContextCache (Just loadedModuleNames), ())
+
+invalidateInterpreterContextCache :: (MonadLore m) => m ()
+invalidateInterpreterContextCache = do
+  cacheVar <- asks interpreterContextCacheVar
+  modifyMVar cacheVar $ \_ -> pure (InterpreterContextCache Nothing, ())
+
+interpreterContextIsReady :: (MonadLore m) => m Bool
+interpreterContextIsReady =
+  maybe False (const True) <$> lookupInterpreterContextCache
 
 refreshInterpreterContext :: (MonadLore m) => m ()
 refreshInterpreterContext = do
   maybeCustomPrelude <- asks customPrelude
-  ModSummaries modSummaries <- getModSummaries
+  ModSummaries modSummaries <- getCachedModSummaries
   loadedModuleNames <- Set.toAscList . Set.fromList <$> mapMMaybe loadedHomeModuleName (Map.elems modSummaries)
 
   let preludeName = maybe "Prelude" T.unpack maybeCustomPrelude
@@ -62,8 +75,7 @@ refreshInterpreterContext = do
     (GHC.setContext (preludeContext <> map importModule loadedModuleNames))
     [Handler \(_ :: GHC.SourceError.SourceError) -> pure ()]
 
-  cacheVar <- asks interpreterContextCache
-  modifyMVar cacheVar $ \_ -> pure (Just loadedModuleNames, ())
+  storeInterpreterContextCache loadedModuleNames
   where
     importModule =
       GHC.IIDecl . GHC.simpleImportDecl

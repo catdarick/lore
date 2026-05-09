@@ -15,9 +15,9 @@ import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified GHC.Plugins as GHC
-import Lore.Internal.Definition.Cache (getParsedOccurrenceModuleIndex)
+import Lore.Internal.Definition.Cache.DefinitionModuleIndex (getCachedDefinitionModuleIndex, getCachedDefinitionModuleIndexes)
+import Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex (getCachedParsedOccurrenceModuleIndex, lookupModulesForOccurrenceKeys)
 import qualified Lore.Internal.Definition.Index as DefinitionIndex
-import Lore.Internal.Definition.ModuleIndex (buildParsedOccurrenceModuleIndex, getDefinitionModuleIndex, lookupModulesForOccurrenceKeys, prepareCandidateModuleIndexes)
 import Lore.Internal.Definition.Timing (withTimedSection)
 import Lore.Internal.Definition.Types (DefinitionDependencies (..), DefinitionId, DefinitionModuleIndex, DefinitionSource (..), NamedDefinitionSource (..), ParsedOccurrenceModuleIndex (..), ReferenceMatch (..), RequiredImport, nameOccKey)
 import qualified Lore.Logger as Log
@@ -34,7 +34,7 @@ resolveDefinitionSourceWithSummaries modSummaries inputName =
     Nothing ->
       pure Nothing
     Just definingModule -> do
-      maybeModuleIndex <- getDefinitionModuleIndex modSummaries definingModule
+      maybeModuleIndex <- getCachedDefinitionModuleIndex modSummaries definingModule
       pure $
         maybeModuleIndex >>= DefinitionIndex.lookupDefinitionSourceByName inputName
 
@@ -44,7 +44,7 @@ resolveDefinitionDependencyNames ::
   DefinitionSource ->
   m [GHC.Name]
 resolveDefinitionDependencyNames modSummaries source = do
-  maybeModuleIndex <- getDefinitionModuleIndex modSummaries source.definitionSourceModule
+  maybeModuleIndex <- getCachedDefinitionModuleIndex modSummaries source.definitionSourceModule
   pure $
     maybe
       []
@@ -124,7 +124,7 @@ getMinifiedImportsForDefinitionWithSummaries ::
   DefinitionSource ->
   m [RequiredImport]
 getMinifiedImportsForDefinitionWithSummaries modSummaries source = do
-  maybeModuleIndex <- getDefinitionModuleIndex modSummaries source.definitionSourceModule
+  maybeModuleIndex <- getCachedDefinitionModuleIndex modSummaries source.definitionSourceModule
   pure $
     maybe
       []
@@ -141,12 +141,12 @@ resolveReferenceMatchesForNamesWithSummaries modSummaries targetNames = do
       targetOccKeys = Set.fromList (map nameOccKey targetNames)
   ParsedOccurrenceModuleIndex occurrenceIndex <-
     withTimedSection "findReferences:getParsedOccurrenceModuleIndex" $
-      getParsedOccurrenceModuleIndex (buildParsedOccurrenceModuleIndex modSummaries)
+      getCachedParsedOccurrenceModuleIndex modSummaries
   let candidateModules = lookupModulesForOccurrenceKeys targetOccKeys occurrenceIndex
   Log.debug $ "Resolved " <> show (Set.size targetOccKeys) <> " target occurrence names to " <> show (length candidateModules) <> " candidate modules."
   preparedModules <-
     withTimedSection "findReferences:prepareCandidateModules" $
-      prepareCandidateModuleIndexes modSummaries candidateModules
+      getCachedDefinitionModuleIndexes modSummaries candidateModules
   resolvedMatches <-
     withTimedSection "findReferences:analyzePreparedModules" $
       concat <$> pooledForConcurrently preparedModules (liftIO . Exception.evaluate . matchingReferenceMatches targetSet)

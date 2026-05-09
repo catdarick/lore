@@ -48,11 +48,17 @@ library
       Lore.Internal.AutoRefactor.MissingImports
       Lore.Internal.AutoRefactor.MissingImports.Diagnostic
       Lore.Internal.AutoRefactor.RedundantImports
+      Lore.Internal.Cache.Types
       Lore.Internal.Definition.Analysis
-      Lore.Internal.Definition.Cache
+      Lore.Internal.Definition.Cache.CoreModuleFacts
+      Lore.Internal.Definition.Cache.DefinitionModuleIndex
+      Lore.Internal.Definition.Cache.ModuleArtifacts
+      Lore.Internal.Definition.Cache.ParsedModuleFacts
+      Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex
+      Lore.Internal.Definition.Cache.TypedModuleFacts
+      Lore.Internal.Definition.Cache.Types
       Lore.Internal.Definition.Callbacks
       Lore.Internal.Definition.Index
-      Lore.Internal.Definition.ModuleIndex
       Lore.Internal.Definition.Query
       Lore.Internal.Definition.RequiredImports
       Lore.Internal.Definition.SourceTree
@@ -63,6 +69,7 @@ library
       Lore.Internal.Ghc.TyThing
       Lore.Internal.Interpreter
       Lore.Internal.List
+      Lore.Internal.Lookup.Cache.Types
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.Name
       Lore.Internal.Lookup.NameToInstances
@@ -72,6 +79,8 @@ library
       Lore.Internal.Package
       Lore.Internal.PackageDB
       Lore.Internal.Session
+      Lore.Internal.Session.Cache.Types
+      Lore.Internal.Session.CacheInvalidation
       Lore.Internal.SourceSpan
       Lore.Internal.SourceText
       Lore.Internal.Targets
@@ -254,11 +263,17 @@ benchmark lore-bench
       Lore.Internal.AutoRefactor.MissingImports
       Lore.Internal.AutoRefactor.MissingImports.Diagnostic
       Lore.Internal.AutoRefactor.RedundantImports
+      Lore.Internal.Cache.Types
       Lore.Internal.Definition.Analysis
-      Lore.Internal.Definition.Cache
+      Lore.Internal.Definition.Cache.CoreModuleFacts
+      Lore.Internal.Definition.Cache.DefinitionModuleIndex
+      Lore.Internal.Definition.Cache.ModuleArtifacts
+      Lore.Internal.Definition.Cache.ParsedModuleFacts
+      Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex
+      Lore.Internal.Definition.Cache.TypedModuleFacts
+      Lore.Internal.Definition.Cache.Types
       Lore.Internal.Definition.Callbacks
       Lore.Internal.Definition.Index
-      Lore.Internal.Definition.ModuleIndex
       Lore.Internal.Definition.Query
       Lore.Internal.Definition.RequiredImports
       Lore.Internal.Definition.SourceTree
@@ -269,6 +284,7 @@ benchmark lore-bench
       Lore.Internal.Ghc.TyThing
       Lore.Internal.Interpreter
       Lore.Internal.List
+      Lore.Internal.Lookup.Cache.Types
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.Name
       Lore.Internal.Lookup.NameToInstances
@@ -278,6 +294,8 @@ benchmark lore-bench
       Lore.Internal.Package
       Lore.Internal.PackageDB
       Lore.Internal.Session
+      Lore.Internal.Session.Cache.Types
+      Lore.Internal.Session.CacheInvalidation
       Lore.Internal.SourceSpan
       Lore.Internal.SourceText
       Lore.Internal.Targets
@@ -394,11 +412,17 @@ benchmark lore-memory-bench
       Lore.Internal.AutoRefactor.MissingImports
       Lore.Internal.AutoRefactor.MissingImports.Diagnostic
       Lore.Internal.AutoRefactor.RedundantImports
+      Lore.Internal.Cache.Types
       Lore.Internal.Definition.Analysis
-      Lore.Internal.Definition.Cache
+      Lore.Internal.Definition.Cache.CoreModuleFacts
+      Lore.Internal.Definition.Cache.DefinitionModuleIndex
+      Lore.Internal.Definition.Cache.ModuleArtifacts
+      Lore.Internal.Definition.Cache.ParsedModuleFacts
+      Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex
+      Lore.Internal.Definition.Cache.TypedModuleFacts
+      Lore.Internal.Definition.Cache.Types
       Lore.Internal.Definition.Callbacks
       Lore.Internal.Definition.Index
-      Lore.Internal.Definition.ModuleIndex
       Lore.Internal.Definition.Query
       Lore.Internal.Definition.RequiredImports
       Lore.Internal.Definition.SourceTree
@@ -409,6 +433,7 @@ benchmark lore-memory-bench
       Lore.Internal.Ghc.TyThing
       Lore.Internal.Interpreter
       Lore.Internal.List
+      Lore.Internal.Lookup.Cache.Types
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.Name
       Lore.Internal.Lookup.NameToInstances
@@ -418,6 +443,8 @@ benchmark lore-memory-bench
       Lore.Internal.Package
       Lore.Internal.PackageDB
       Lore.Internal.Session
+      Lore.Internal.Session.Cache.Types
+      Lore.Internal.Session.CacheInvalidation
       Lore.Internal.SourceSpan
       Lore.Internal.SourceText
       Lore.Internal.Targets

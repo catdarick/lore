@@ -18,8 +18,8 @@ import Lore
     SymbolCategory (..),
     classifySymbolCategory,
     filterExportedSymbolNodesByTypeHint,
-    getLastLoadTargetsResult,
     listSymbolsExportedByModule,
+    lookupLastLoadTargetsResult,
     mkNormalizedModuleName,
     occName,
     parseAndNormalizeName,
@@ -72,7 +72,7 @@ listExportedSymbolsTool =
 
 listExportedSymbolsHandler :: (MonadLore m) => ListExportedSymbolsArgs 'ValueType -> m Text
 listExportedSymbolsHandler ListExportedSymbolsArgs {moduleName, packageName, typeHint, skip} = do
-  maybeLoadResult <- getLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."

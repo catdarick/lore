@@ -21,8 +21,8 @@ import Lore
     PathToRoot (..),
     Symbol (..),
     findMatchingSymbols,
-    getLastLoadTargetsResult,
     listIntersectingInstances,
+    lookupLastLoadTargetsResult,
     mergePathsToRootOn,
     parseAndNormalizeName,
     resolvePathToRoot,
@@ -78,7 +78,7 @@ lookupInstancesTool =
 
 lookupInstancesHandler :: (MonadLore m) => LookupInstancesArgs 'ValueType -> m Text
 lookupInstancesHandler LookupInstancesArgs {names, skip} = do
-  maybeLoadResult <- getLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
