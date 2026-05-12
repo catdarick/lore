@@ -8,6 +8,7 @@ import qualified ImportNormalizeSpec
 import qualified InterpreterSpec
 import qualified LoggerSpec
 import qualified LookupSpec
+import qualified RedundantImportsSpec
 import qualified TargetsSpec
 import Test.Hspec
 
@@ -19,4 +20,5 @@ main =
     InterpreterSpec.spec
     LoggerSpec.spec
     LookupSpec.spec
+    RedundantImportsSpec.spec
     TargetsSpec.spec

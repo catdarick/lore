@@ -24,6 +24,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
 import GHC.Hs (GhcPs, HsModule (..), IE, ImportDecl (..), LImportDecl)
+import qualified GHC.Types.PkgQual as PkgQual
 import qualified GHC.Utils.Outputable as Outputable
 import Lore.Diagnostics (Span (..))
 import Lore.Internal.List (mapMaybeToList, maybeToList)
@@ -100,7 +101,10 @@ parseImport importIndex locatedImport = do
           GHC.QualifiedPost -> ImportQualifiedPostfix
       parsedImportSource = parsedImportDecl.ideclSource == GHC.IsBoot
       parsedImportSafe = parsedImportDecl.ideclSafe
-      parsedImportPackageQualifier = Nothing
+      parsedImportPackageQualifier =
+        case parsedImportDecl.ideclPkgQual of
+          PkgQual.NoRawPkgQual -> Nothing
+          PkgQual.RawPkgQual rawPkgQual -> Just (rawPkgQualText rawPkgQual)
       parsedImportListSpan =
         parsedImportDecl.ideclImportList >>= \(importListKind, GHC.L locatedItems _) ->
           case importListKind of
@@ -143,7 +147,7 @@ renderNormalizedImport NormalizedImport {..} =
     ["import"]
       <> ["{-# SOURCE #-}" | normalizedImportSource]
       <> ["safe" | normalizedImportSafe]
-      <> maybeToList normalizedImportPackageQualifier
+      <> maybeToList (quoteText <$> normalizedImportPackageQualifier)
       <> ["qualified" | normalizedImportQualifiedStyle == ImportQualifiedPrefix]
       <> [modulePart]
       <> maybe [] (\alias -> ["as", alias]) normalizedImportAlias
@@ -154,6 +158,21 @@ renderNormalizedImport NormalizedImport {..} =
         <> case normalizedImportQualifiedStyle of
           ImportQualifiedPostfix -> " qualified"
           _ -> ""
+
+rawPkgQualText :: (Outputable.Outputable a) => a -> Text
+rawPkgQualText rawPkgQual =
+  let renderedPkgQual = T.strip (renderOutputable rawPkgQual)
+   in case T.stripPrefix "\"" renderedPkgQual of
+        Just withoutLeadingQuote ->
+          case T.stripSuffix "\"" withoutLeadingQuote of
+            Just unquotedPkgQual -> unquotedPkgQual
+            Nothing -> renderedPkgQual
+        Nothing ->
+          renderedPkgQual
+
+quoteText :: Text -> Text
+quoteText value =
+  "\"" <> value <> "\""
 
 renderImportList :: ImportList -> [Text]
 renderImportList = \case

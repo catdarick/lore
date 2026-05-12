@@ -10,7 +10,7 @@ module Lore.Refactor.Imports
     normalizedImportFromParsed,
     renderNormalizedImport,
     applyImportOperations,
-    normalizeImports,
+    redundantImportRequestFromDiagnostic,
   )
 where
 
@@ -27,8 +27,10 @@ import Lore.Internal.AutoRefactor.ImportDecl
   )
 import Lore.Internal.AutoRefactor.ImportNormalize
   ( applyImportOperations,
-    normalizeImports,
   )
 import Lore.Internal.AutoRefactor.ImportOps
   ( ImportOperation (..),
+  )
+import Lore.Internal.AutoRefactor.RedundantImports
+  ( redundantImportRequestFromDiagnostic,
   )

@@ -8,9 +8,10 @@ module Lore.Internal.AutoRefactor.RedundantImports
 where
 
 import Control.Applicative ((<|>))
-import Data.List (find, nub)
+import Data.List (find, foldl', nub)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..))
 import Lore.Internal.AutoRefactor.ImportDecl (ImportItem (..), ImportList (..), ParsedImport (..), parsedImportContainsSpan)
@@ -48,7 +49,7 @@ suggestRedundantImportOperations parsedImports requests =
   concatMap suggestForImport groupedRequests
   where
     groupedRequests =
-      groupAdjacentByImportId
+      groupRequestsByImportId
         [ (findParsedImport request, request)
         | request <- NE.toList requests
         ]
@@ -80,20 +81,21 @@ suggestRedundantImportOperations parsedImports requests =
         Nothing -> True
         Just _ -> False
 
-groupAdjacentByImportId :: [(Maybe ParsedImport, RedundantImportRequest)] -> [(Maybe ParsedImport, [RedundantImportRequest])]
-groupAdjacentByImportId =
-  foldr step []
+groupRequestsByImportId :: [(Maybe ParsedImport, RedundantImportRequest)] -> [(Maybe ParsedImport, [RedundantImportRequest])]
+groupRequestsByImportId =
+  map (\(maybeParsedImport, grouped) -> (maybeParsedImport, reverse grouped))
+    . Map.elems
+    . foldl' step Map.empty
   where
-    step (maybeParsedImport, request) [] =
-      [(maybeParsedImport, [request])]
-    step (maybeParsedImport, request) ((existingImport, existingRequests) : rest)
-      | sameParsedImport maybeParsedImport existingImport =
-          (existingImport, request : existingRequests) : rest
-      | otherwise =
-          (maybeParsedImport, [request]) : (existingImport, existingRequests) : rest
+    step groupedRequestsByImport (maybeParsedImport, request) =
+      Map.insertWith
+        mergeRequests
+        (fmap (.parsedImportId) maybeParsedImport)
+        (maybeParsedImport, [request])
+        groupedRequestsByImport
 
-    sameParsedImport left right =
-      fmap (.parsedImportId) left == fmap (.parsedImportId) right
+    mergeRequests (newImport, newRequests) (existingImport, existingRequests) =
+      (existingImport <|> newImport, newRequests <> existingRequests)
 
 findImportItemBySpan :: Span -> ParsedImport -> Maybe ImportItem
 findImportItemBySpan diagnosticSpan parsedImport =
@@ -137,6 +139,7 @@ parseSpecificRedundantImport message = do
 
 parseWholeImport :: T.Text -> Maybe ParsedRedundantImportDiagnostic
 parseWholeImport message
+  | " from module " `T.isInfixOf` message = Nothing
   | "The import of " `T.isInfixOf` message = Just RemoveWholeImportDiagnostic
   | "The qualified import of " `T.isInfixOf` message = Just RemoveWholeImportDiagnostic
   | otherwise = Nothing

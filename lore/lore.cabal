@@ -40,13 +40,13 @@ library
   other-modules:
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
+      Lore.Internal.AutoRefactor.ImportCleanupEdit
       Lore.Internal.AutoRefactor.ImportDecl
+      Lore.Internal.AutoRefactor.ImportItemRemoval
       Lore.Internal.AutoRefactor.ImportNormalize
       Lore.Internal.AutoRefactor.ImportOps
       Lore.Internal.AutoRefactor.ImportRewrite
       Lore.Internal.AutoRefactor.Issue
-      Lore.Internal.AutoRefactor.MissingImports
-      Lore.Internal.AutoRefactor.MissingImports.Diagnostic
       Lore.Internal.AutoRefactor.RedundantImports
       Lore.Internal.Cache.Types
       Lore.Internal.Definition.Analysis
@@ -165,6 +165,7 @@ test-suite lore-test
       ImportNormalizeSpec
       LookupSpec
       LoggerSpec
+      RedundantImportsSpec
       TargetsSpec
       TestSupport
       SomeModule
@@ -255,13 +256,13 @@ benchmark lore-bench
       Lore.Diagnostics
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
+      Lore.Internal.AutoRefactor.ImportCleanupEdit
       Lore.Internal.AutoRefactor.ImportDecl
+      Lore.Internal.AutoRefactor.ImportItemRemoval
       Lore.Internal.AutoRefactor.ImportNormalize
       Lore.Internal.AutoRefactor.ImportOps
       Lore.Internal.AutoRefactor.ImportRewrite
       Lore.Internal.AutoRefactor.Issue
-      Lore.Internal.AutoRefactor.MissingImports
-      Lore.Internal.AutoRefactor.MissingImports.Diagnostic
       Lore.Internal.AutoRefactor.RedundantImports
       Lore.Internal.Cache.Types
       Lore.Internal.Definition.Analysis
@@ -404,13 +405,13 @@ benchmark lore-memory-bench
       Lore.Diagnostics
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
+      Lore.Internal.AutoRefactor.ImportCleanupEdit
       Lore.Internal.AutoRefactor.ImportDecl
+      Lore.Internal.AutoRefactor.ImportItemRemoval
       Lore.Internal.AutoRefactor.ImportNormalize
       Lore.Internal.AutoRefactor.ImportOps
       Lore.Internal.AutoRefactor.ImportRewrite
       Lore.Internal.AutoRefactor.Issue
-      Lore.Internal.AutoRefactor.MissingImports
-      Lore.Internal.AutoRefactor.MissingImports.Diagnostic
       Lore.Internal.AutoRefactor.RedundantImports
       Lore.Internal.Cache.Types
       Lore.Internal.Definition.Analysis

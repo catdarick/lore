@@ -5,17 +5,17 @@ module Lore.Internal.AutoRefactor.Edit
   ( FileEdit (..),
     AppliedFileEdits (..),
     applyFileEdits,
-    restoreFileContents,
     applyReplacementEdits,
     spanToOffsets,
     positionToOffset,
   )
 where
 
-import Control.Monad (forM, forM_)
+import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
 import Data.List (nubBy, sortBy)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -30,30 +30,22 @@ data FileEdit
   deriving (Eq, Show)
 
 data AppliedFileEdits = AppliedFileEdits
-  { appliedChangedFiles :: [FilePath],
-    appliedOriginalContents :: Map.Map FilePath Text
+  { appliedChangedFiles :: [FilePath]
   }
 
 applyFileEdits :: (MonadLore m) => [FileEdit] -> m AppliedFileEdits
 applyFileEdits edits = do
-  results <- forM (Map.toList groupedEdits) \(filePath, fileEdits) -> do
-    source <- liftIO $ TIO.readFile filePath
-    let updatedSource = applyReplacementEdits source fileEdits
-    if updatedSource == source
-      then pure Nothing
-      else do
-        Log.info $ "Auto-refact: applying edits to " <> filePath
-        liftIO $ TIO.writeFile filePath updatedSource
-        pure (Just source)
-  let changedEntries =
-        [ (filePath, originalContents)
-        | ((filePath, _), Just originalContents) <- zip (Map.toList groupedEdits) results
-        ]
-  pure
-    AppliedFileEdits
-      { appliedChangedFiles = map fst changedEntries,
-        appliedOriginalContents = Map.fromList changedEntries
-      }
+  changedFiles <- fmap catMaybes $
+    forM (Map.toList groupedEdits) \(filePath, fileEdits) -> do
+      source <- liftIO $ TIO.readFile filePath
+      let updatedSource = applyReplacementEdits source fileEdits
+      if updatedSource == source
+        then pure Nothing
+        else do
+          Log.info $ "Auto-refact: applying edits to " <> filePath
+          liftIO $ TIO.writeFile filePath updatedSource
+          pure (Just filePath)
+  pure AppliedFileEdits {appliedChangedFiles = changedFiles}
   where
     groupedEdits =
       Map.fromListWith
@@ -61,12 +53,6 @@ applyFileEdits edits = do
         [ (editFilePath edit, [edit])
         | edit <- edits
         ]
-
-restoreFileContents :: (MonadLore m) => Map.Map FilePath Text -> m ()
-restoreFileContents originals =
-  forM_ (Map.toList originals) \(filePath, originalContents) -> do
-    Log.info $ "Auto-refact: restoring " <> filePath
-    liftIO $ TIO.writeFile filePath originalContents
 
 applyReplacementEdits :: Text -> [FileEdit] -> Text
 applyReplacementEdits source =

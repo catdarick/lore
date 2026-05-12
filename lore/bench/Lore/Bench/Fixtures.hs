@@ -425,12 +425,15 @@ mkImportNormalizeFixture importCount operationCount =
   ImportNormalizeFixture
     { normalizeFixtureImports =
         [ mkNormalizedImport importIndex
-        | importIndex <- [1 .. importCount]
+        | importIndex <- [1 .. max 0 importCount]
         ],
       normalizeFixtureOperations =
-        [ mkOperation operationIndex
-        | operationIndex <- [1 .. operationCount]
-        ]
+        if importCount <= 0
+          then []
+          else
+            [ mkOperation operationIndex
+            | operationIndex <- [1 .. operationCount]
+            ]
     }
   where
     mkNormalizedImport importIndex =
@@ -457,12 +460,13 @@ mkImportNormalizeFixture importCount operationCount =
         }
 
     mkOperation operationIndex =
-      case operationIndex `mod` 5 of
-        0 -> Ref.AddUnqualifiedItem "Fixture.Module1" (T.pack ("added" <> show operationIndex))
-        1 -> Ref.EnsureUnqualifiedOpenImport "Fixture.Module2"
-        2 -> Ref.EnsureQualifiedImport "Fixture.Module3" "Fx"
-        3 -> Ref.RemoveImportItem (Ref.ImportId ((operationIndex `mod` importCount) + 1)) (T.pack ("item" <> show ((operationIndex `mod` importCount) + 1)))
-        _ -> Ref.AddUnqualifiedItemToExistingImport "Fixture.Module4" (T.pack ("existing" <> show operationIndex))
+      case operationIndex `mod` 2 of
+        0 ->
+          Ref.RemoveImportItem
+            (Ref.ImportId ((operationIndex `mod` importCount) + 1))
+            (T.pack ("item" <> show ((operationIndex `mod` importCount) + 1)))
+        _ ->
+          Ref.RemoveWholeImport (Ref.ImportId ((operationIndex `mod` importCount) + 1))
 
 mkSourceTextFixture :: Int -> Int -> SourceTextFixture
 mkSourceTextFixture lineCount editCount =

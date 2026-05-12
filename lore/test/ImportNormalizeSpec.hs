@@ -9,74 +9,30 @@ import Lore.Refactor.Imports
     NormalizedImport (..),
     QualifiedImportStyle (..),
     applyImportOperations,
-    normalizeImports,
+    renderNormalizedImport,
   )
 import Test.Hspec
 
 spec :: Spec
 spec =
   describe "import normalization" do
-    it "merges duplicate explicit imports and deduplicates items" do
-      let (normalized, _) =
-            normalizeImports
-              ( [ explicitImport 1 0 "Data.List" [item "find", item "nubBy"],
-                  explicitImport 2 1 "Data.List" [item "find", item "sortOn"]
-                ],
-                []
-              )
-
-      normalized `shouldBe` [explicitImport 1 0 "Data.List" [item "find", item "nubBy", item "sortOn"]]
-
-    it "prefers an open import over explicit imports from the same module" do
-      let (normalized, _) =
-            normalizeImports
-              ( [ explicitImport 1 0 "Data.Text" [item "Text"],
-                  openQualifiedImport 2 1 ImportUnqualified "Data.Text" Nothing
-                ],
-                []
-              )
-
-      normalized `shouldBe` [openQualifiedImport 1 0 ImportUnqualified "Data.Text" Nothing]
-
-    it "preserves alias distinctions when normalizing" do
-      let (normalized, _) =
-            normalizeImports
-              ( [ openQualifiedImport 1 0 ImportQualifiedPrefix "Data.Text" (Just "T"),
-                  openQualifiedImport 2 1 ImportQualifiedPrefix "Data.Text" (Just "Text")
-                ],
-                []
-              )
-
-      length normalized `shouldBe` 2
-
-    it "preserves prefix and postfix qualified styles separately" do
-      let (normalized, _) =
-            normalizeImports
-              ( [ openQualifiedImport 1 0 ImportQualifiedPrefix "Data.Text" (Just "T"),
-                  openQualifiedImport 2 1 ImportQualifiedPostfix "Data.Text" (Just "T")
-                ],
-                []
-              )
-
-      map normalizedImportQualifiedStyle normalized `shouldBe` [ImportQualifiedPrefix, ImportQualifiedPostfix]
-
-    it "opens an existing explicit qualified import instead of inserting another one" do
+    it "removes a whole import" do
       let (normalized, _) =
             applyImportOperations
-              [qualifiedExplicitImport 1 0 "Data.Set" "Set" [item "Set"]]
-              [EnsureQualifiedImport "Data.Set" "Set"]
+              [openImport 1 0 "Data.List"]
+              [RemoveWholeImport (ImportId 1)]
 
-      normalized `shouldBe` [openQualifiedImport 1 0 ImportQualifiedPrefix "Data.Set" (Just "Set")]
+      normalized `shouldBe` []
 
-    it "opens an existing explicit unqualified import when requested" do
+    it "removes an item from an explicit import list" do
       let (normalized, _) =
             applyImportOperations
-              [explicitImport 1 0 "CustomPrelude" [item "preludePreferred"]]
-              [EnsureUnqualifiedOpenImport "CustomPrelude"]
+              [explicitImport 1 0 "Data.List" [item "find", item "nub"]]
+              [RemoveImportItem (ImportId 1) "nub"]
 
-      normalized `shouldBe` [openQualifiedImport 1 0 ImportUnqualified "CustomPrelude" Nothing]
+      normalized `shouldBe` [explicitImport 1 0 "Data.List" [item "find"]]
 
-    it "removes an import when its last explicit binding becomes redundant" do
+    it "removes an import when its last explicit binding is removed" do
       let (normalized, _) =
             applyImportOperations
               [explicitImport 1 0 "Data.List" [item "find"]]
@@ -84,13 +40,47 @@ spec =
 
       normalized `shouldBe` []
 
-    it "lets parent all-constructors imports subsume bare parent items" do
+    it "removes a child from a parent import item" do
       let (normalized, _) =
             applyImportOperations
-              [explicitImport 1 0 "Lore" [item "LoadTargetsResult"]]
-              [AddUnqualifiedItem "Lore" "LoadTargetsResult(..)"]
+              [explicitImport 1 0 "Demo.Types" [item "Foo(A, B)"]]
+              [RemoveImportItem (ImportId 1) "B"]
 
-      normalized `shouldBe` [explicitImport 1 0 "Lore" [item "LoadTargetsResult(..)"]]
+      normalized `shouldBe` [explicitImport 1 0 "Demo.Types" [item "Foo(A)"]]
+
+    it "removes a parent import item when all children are removed" do
+      let (normalized, _) =
+            applyImportOperations
+              [explicitImport 1 0 "Demo.Types" [item "Foo(A)"]]
+              [RemoveImportItem (ImportId 1) "A"]
+
+      normalized `shouldBe` []
+
+    it "normalizes operator names when removing items" do
+      let (normalized, _) =
+            applyImportOperations
+              [explicitImport 1 0 "Data.List" [item "(+)"]]
+              [RemoveImportItem (ImportId 1) "+"]
+
+      normalized `shouldBe` []
+
+    it "normalizes pattern imports when removing items" do
+      let (normalized, _) =
+            applyImportOperations
+              [explicitImport 1 0 "Demo.Patterns" [item "pattern Foo"]]
+              [RemoveImportItem (ImportId 1) "Foo"]
+
+      normalized `shouldBe` []
+
+    it "renders package-qualified imports with quotes" do
+      renderNormalizedImport
+        ( (baseImport 1 0 "Data.Map.Strict")
+            { normalizedImportQualifiedStyle = ImportQualifiedPrefix,
+              normalizedImportAlias = Just (fromString "Map"),
+              normalizedImportPackageQualifier = Just (fromString "containers")
+            }
+        )
+        `shouldBe` "import \"containers\" qualified Data.Map.Strict as Map"
 
 item :: String -> ImportItem
 item text =
@@ -105,19 +95,10 @@ explicitImport importId order moduleName items =
     { normalizedImportList = ExplicitImport items
     }
 
-qualifiedExplicitImport :: Int -> Int -> String -> String -> [ImportItem] -> NormalizedImport
-qualifiedExplicitImport importId order moduleName qualifier items =
-  (explicitImport importId order moduleName items)
-    { normalizedImportQualifiedStyle = ImportQualifiedPrefix,
-      normalizedImportAlias = Just (fromString qualifier)
-    }
-
-openQualifiedImport :: Int -> Int -> QualifiedImportStyle -> String -> Maybe String -> NormalizedImport
-openQualifiedImport importId order qualifiedStyle moduleName qualifier =
+openImport :: Int -> Int -> String -> NormalizedImport
+openImport importId order moduleName =
   (baseImport importId order moduleName)
-    { normalizedImportQualifiedStyle = qualifiedStyle,
-      normalizedImportAlias = fromString <$> qualifier,
-      normalizedImportList = OpenImport
+    { normalizedImportList = OpenImport
     }
 
 baseImport :: Int -> Int -> String -> NormalizedImport

@@ -4,7 +4,6 @@ module Lore.Targets
     defaultLoadTargetsOptions,
     lookupLastLoadTargetsResult,
     loadTargets,
-    retainUnresolvedRollback,
   )
 where
 
@@ -14,7 +13,6 @@ import Lore.Internal.Targets
     defaultLoadTargetsOptions,
     loadTargets,
     lookupLastLoadTargetsResultCache,
-    retainUnresolvedRollback,
   )
 import Lore.Monad (MonadLore)
 

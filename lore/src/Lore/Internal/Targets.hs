@@ -8,7 +8,6 @@ module Lore.Internal.Targets
     lookupLastLoadTargetsResultCache,
     storeLastLoadTargetsResultCache,
     loadTargets,
-    retainUnresolvedRollback,
   )
 where
 
@@ -20,7 +19,6 @@ import Data.List (intercalate)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
-import Data.Text (Text)
 import qualified GHC
 import qualified GHC.Data.StringBuffer as GHC
 import qualified GHC.Driver.Config.Parser as GHC
@@ -30,8 +28,8 @@ import qualified GHC.Parser.Header as GHC
 import qualified GHC.Plugins as GHC
 import qualified GHC.Unit.Module.Graph as GHC
 import GHC.Utils.Monad (mapMaybeM)
-import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
-import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor, rollbackAutoRefactorEdits)
+import Lore.Diagnostics (Diagnostic (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
+import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor)
 import Lore.Internal.AutoRefactor.Issue (classifyAutoRefactorIssues)
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
 import Lore.Internal.Interpreter (refreshInterpreterContext)
@@ -45,7 +43,6 @@ import Lore.Internal.Session.CacheInvalidation (invalidateCachesAfterSourceEdits
 import Lore.Internal.Targets.Result (LoadTargetsResult (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
-import System.FilePath (normalise)
 
 data TargetsPlan = TargetsPlan
   { commonLanguage :: Maybe Language,
@@ -202,83 +199,67 @@ data LoadAttempt = LoadAttempt
 
 loadTargets' :: (MonadLore m) => LoadTargetsOptions -> TargetsPlan -> m LoadAttempt
 loadTargets' options targetsPlan =
-  go 0 Map.empty Map.empty Set.empty Map.empty
+  go 0 Set.empty Map.empty
   where
-    maxAutoRefactorAttempts = 3 :: Int
+    maxImportCleanupAttempts = 3 :: Int
 
-    go attemptNo pendingRollback pendingAutoRefactSummaryByFile committedAutoRefactFiles committedAutoRefactSummaryByFile = do
-      currentAttempt@LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <- loadTargetsOnce targetsPlan
-      let unresolvedRollback =
-            retainUnresolvedRollback pendingRollback loadAttemptDiagnostics
-          unresolvedRollbackFiles = rollbackStateFiles unresolvedRollback
-          pendingRollbackFiles = rollbackStateFiles pendingRollback
-          unresolvedAutoRefactSummaryByFile =
-            Map.filterWithKey (\filePath _ -> normalise filePath `Set.member` unresolvedRollbackFiles) pendingAutoRefactSummaryByFile
-          committedAutoRefactFiles' =
-            committedAutoRefactFiles
-              `Set.union` (pendingRollbackFiles Set.\\ unresolvedRollbackFiles)
-          committedAutoRefactSummaryByFile' =
-            Map.union
-              committedAutoRefactSummaryByFile
-              (Map.filterWithKey (\filePath _ -> normalise filePath `Set.notMember` unresolvedRollbackFiles) pendingAutoRefactSummaryByFile)
+    go attemptNo cleanedFiles cleanedSummaryByFile = do
+      attempt@LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <-
+        loadTargetsOnce targetsPlan
       case loadAttemptResult of
         GHC.Succeeded ->
-          pure
-            currentAttempt
-              { loadAttemptAutoRefactFiles =
-                  committedAutoRefactFiles
-                    `Set.union` pendingRollbackFiles,
-                loadAttemptAutoRefactSummaryByFile =
-                  Map.toAscList (Map.union committedAutoRefactSummaryByFile pendingAutoRefactSummaryByFile)
-              }
+          pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
         GHC.Failed
-          | options.enableAutoRefactor && attemptNo < maxAutoRefactorAttempts -> do
-              case classifyAutoRefactorIssues loadAttemptDiagnostics of
-                Just autoRefactorIssues -> do
-                  AutoRefactorResult {autoRefactorApplied, autoRefactorOriginalContents, autoRefactorSummaryByFile} <- applyAutoRefactor autoRefactorIssues
-                  if autoRefactorApplied
-                    then do
-                      Log.info "Auto-refact applied import fixes. Retrying target load."
-                      invalidateCachesAfterSourceEdits
-                      go
-                        (attemptNo + 1)
-                        (Map.union unresolvedRollback autoRefactorOriginalContents)
-                        (Map.union unresolvedAutoRefactSummaryByFile autoRefactorSummaryByFile)
-                        committedAutoRefactFiles'
-                        committedAutoRefactSummaryByFile'
-                    else
-                      withAutoRefactFiles committedAutoRefactFiles' committedAutoRefactSummaryByFile' <$> rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
-                Nothing -> do
-                  Log.debug "Auto-refact: no fixable import diagnostics found; skipping."
-                  withAutoRefactFiles committedAutoRefactFiles' committedAutoRefactSummaryByFile' <$> rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
-        GHC.Failed ->
-          withAutoRefactFiles committedAutoRefactFiles' committedAutoRefactSummaryByFile' <$> rollbackUnresolvedAutoRefact targetsPlan unresolvedRollback currentAttempt
+          | not options.enableAutoRefactor ->
+              pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
+          | attemptNo >= maxImportCleanupAttempts -> do
+              Log.info "Auto-refact: reached max redundant import cleanup attempts."
+              pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
+          | otherwise -> do
+              cleanupResult <- applyAutoRefactorFromDiagnostics loadAttemptDiagnostics
+              if cleanupResult.autoRefactorApplied
+                then do
+                  Log.info "Auto-refact: redundant import cleanup was applied. Retrying target load."
+                  invalidateCachesAfterSourceEdits
+                  go
+                    (attemptNo + 1)
+                    (cleanedFiles `Set.union` Set.fromList cleanupResult.autoRefactorChangedFiles)
+                    (mergeAutoRefactSummaries cleanedSummaryByFile cleanupResult.autoRefactorSummaryByFile)
+                else
+                  pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
 
-    withAutoRefactFiles autoRefactFiles autoRefactSummaryByFile loadAttempt =
-      loadAttempt
-        { loadAttemptAutoRefactFiles = autoRefactFiles,
-          loadAttemptAutoRefactSummaryByFile = Map.toAscList autoRefactSummaryByFile
+    withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt =
+      attempt
+        { loadAttemptAutoRefactFiles = cleanedFiles,
+          loadAttemptAutoRefactSummaryByFile = Map.toAscList cleanedSummaryByFile
         }
 
-retainUnresolvedRollback :: Map.Map FilePath a -> [Diagnostic] -> Map.Map FilePath a
-retainUnresolvedRollback rollbackState diagnostics =
-  Map.filterWithKey (\filePath _ -> normalise filePath `Set.member` failingFiles) rollbackState
-  where
-    failingFiles =
-      Set.fromList
-        [ normalise spanFile
-        | Diagnostic {diagnosticSpan = RealDiagnosticSpan Span {spanFile}} <- diagnostics
-        ]
+mergeAutoRefactSummaries ::
+  Map.Map FilePath [String] ->
+  Map.Map FilePath [String] ->
+  Map.Map FilePath [String]
+mergeAutoRefactSummaries =
+  Map.unionWith (<>)
 
-rollbackUnresolvedAutoRefact :: (MonadLore m) => TargetsPlan -> Map.Map FilePath Text -> LoadAttempt -> m LoadAttempt
-rollbackUnresolvedAutoRefact targetsPlan rollbackState failedAttempt
-  | Map.null rollbackState =
-      pure failedAttempt
-  | otherwise = do
-      Log.info "Auto-refact: rolling back unresolved edits."
-      rollbackAutoRefactorEdits rollbackState
-      invalidateCachesAfterSourceEdits
-      loadTargetsOnce targetsPlan
+applyAutoRefactorFromDiagnostics ::
+  (MonadLore m) =>
+  [Diagnostic] ->
+  m AutoRefactorResult
+applyAutoRefactorFromDiagnostics diagnostics =
+  case classifyAutoRefactorIssues diagnostics of
+    Nothing -> do
+      Log.debug "Auto-refact: no redundant import diagnostics found; skipping."
+      pure emptyAutoRefactorResult
+    Just issues ->
+      applyAutoRefactor issues
+
+emptyAutoRefactorResult :: AutoRefactorResult
+emptyAutoRefactorResult =
+  AutoRefactorResult
+    { autoRefactorApplied = False,
+      autoRefactorChangedFiles = [],
+      autoRefactorSummaryByFile = Map.empty
+    }
 
 loadTargetsOnce :: (MonadLore m) => TargetsPlan -> m LoadAttempt
 loadTargetsOnce targetsPlan = do
@@ -325,10 +306,6 @@ countLoadedModules targetModules = do
           GHC.moduleName mod' `Set.member` targetModules
         ]
   length <$> mapMaybeM GHC.getModuleInfo targetMods
-
-rollbackStateFiles :: Map.Map FilePath a -> Set.Set FilePath
-rollbackStateFiles =
-  Set.fromList . Map.keys
 
 applyModuleScopedArgs ::
   (MonadLore m) =>

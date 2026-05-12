@@ -78,6 +78,7 @@ tests:
     - ImportNormalizeSpec
     - LookupSpec
     - LoggerSpec
+    - RedundantImportsSpec
     - TargetsSpec
     - TestSupport
     - SomeModule
