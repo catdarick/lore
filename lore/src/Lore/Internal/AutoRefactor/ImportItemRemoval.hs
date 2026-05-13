@@ -42,7 +42,7 @@ removeTargetFromImportItem target item =
             Nothing ->
               keepUnchangedFlatImportItem target item
     RemoveWholeImportItem targetItem ->
-      if targetItem == normalizeImportItemText item.importItemText
+      if wholeItemMatches targetItem item.importItemText
         then Nothing
         else Just item
     RemoveParentChild targetParent targetBinding ->
@@ -129,6 +129,15 @@ removeMatchingChild targetBinding item itemParent itemChildren =
             then Nothing
             else Just (renderParentImportItem itemParent (ParentChildren remainingChildren) item.importItemSpan)
         else Just item
+
+wholeItemMatches :: NormalizedImportItem -> Text -> Bool
+wholeItemMatches targetItem importItemText =
+  targetItem == normalizeImportItemText importItemText
+    || case parseParentImportItem importItemText of
+      Just (ParentImportItem parentName _coverage) ->
+        targetItem == normalizeImportItemText parentName
+      Nothing ->
+        False
 
 normalizedFlatBindingText :: Text -> Text
 normalizedFlatBindingText =

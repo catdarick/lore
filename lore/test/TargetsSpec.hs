@@ -232,9 +232,184 @@ spec =
           T.isInfixOf "keep-comment" demoSource `shouldBe` True
           T.isInfixOf "listToMaybe" demoSource `shouldBe` True
 
+      it "removes an unused value-operator import item from a multiline qualified import list" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+          enableWarningErrors fixtureRoot
+          rewriteDemo demoFile $
+            replaceSupportImport
+              ( T.unlines
+                  [ "import qualified Demo.Support as Support",
+                    "  ( SupportRecord,",
+                    "    mkSupportRecord,",
+                    "    supportSeed,",
+                    "    supportStep,",
+                    "    (.+.)",
+                    "  )"
+                  ]
+              )
+
+          loadResult <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+
+          demoSource <- TIO.readFile demoFile
+          loadResult.loadTargetsSucceeded `shouldBe` True
+          loadResult.loadTargetsModulesAutofixed `shouldBe` 1
+          T.isInfixOf "(.+.)" demoSource `shouldBe` False
+          T.isInfixOf "supportStep" demoSource `shouldBe` True
+
+      it "removes an unused constructor import item while preserving needed imports from the same module" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+              supportFile = fixtureRoot </> "src" </> "Demo" </> "Support.hs"
+          enableWarningErrors fixtureRoot
+          rewriteSupport supportFile $
+            appendSupportDefinition
+              "data CtorOnly = CtorOnly\n"
+              . addSupportExportItem "CtorOnly(CtorOnly)"
+          rewriteDemo demoFile $
+            replaceSupportImport
+              "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep, CtorOnly(CtorOnly))\n"
+
+          loadResult <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+
+          demoSource <- TIO.readFile demoFile
+          loadResult.loadTargetsSucceeded `shouldBe` True
+          loadResult.loadTargetsModulesAutofixed `shouldBe` 1
+          T.isInfixOf "CtorOnly(CtorOnly)" demoSource `shouldBe` False
+          T.isInfixOf "supportStep" demoSource `shouldBe` True
+
+      it "removes an unused operator-constructor import item from a parent import" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+              supportFile = fixtureRoot </> "src" </> "Demo" </> "Support.hs"
+          enableWarningErrors fixtureRoot
+          rewriteSupport supportFile $
+            appendSupportDefinition
+              "data Op a = a :| a\n"
+              . addSupportExportItem "Op((:|))"
+          rewriteDemo demoFile $
+            addModulePragma "{-# LANGUAGE TypeOperators #-}\n"
+              . replaceSupportImport
+                "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep, Op((:|)))\n"
+
+          loadResult <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+
+          demoSource <- TIO.readFile demoFile
+          loadResult.loadTargetsSucceeded `shouldBe` True
+          loadResult.loadTargetsModulesAutofixed `shouldBe` 1
+          T.isInfixOf "Op((:|))" demoSource `shouldBe` False
+          T.isInfixOf "supportStep" demoSource `shouldBe` True
+
+      it "removes an unused pattern import item from an explicit qualified import list" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+              supportFile = fixtureRoot </> "src" </> "Demo" </> "Support.hs"
+          enableWarningErrors fixtureRoot
+          rewriteSupport supportFile $
+            addModulePragma "{-# LANGUAGE PatternSynonyms #-}\n"
+              . appendSupportDefinition
+                ( T.unlines
+                    [ "pattern SeedPattern :: Int",
+                      "pattern SeedPattern = 5"
+                    ]
+                )
+              . addSupportExportItem "pattern SeedPattern"
+          rewriteDemo demoFile $
+            addModulePragma "{-# LANGUAGE PatternSynonyms #-}\n"
+              . replaceSupportImport
+                "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep, pattern SeedPattern)\n"
+
+          loadResult <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+
+          demoSource <- TIO.readFile demoFile
+          loadResult.loadTargetsSucceeded `shouldBe` True
+          loadResult.loadTargetsModulesAutofixed `shouldBe` 1
+          T.isInfixOf "pattern SeedPattern" demoSource `shouldBe` False
+          T.isInfixOf "supportSeed" demoSource `shouldBe` True
+
+      it "removes an unused type import item declared with explicit namespace" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+          enableWarningErrors fixtureRoot
+          rewriteDemo demoFile $
+            T.replace
+              "import Data.Kind (Type)\n"
+              ( T.unlines
+                  [ "import Data.Kind (Type)",
+                    "import Data.Proxy (type Proxy)"
+                  ]
+              )
+
+          loadResult <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+
+          demoSource <- TIO.readFile demoFile
+          loadResult.loadTargetsSucceeded `shouldBe` True
+          loadResult.loadTargetsModulesAutofixed `shouldBe` 1
+          T.isInfixOf "import Data.Proxy" demoSource `shouldBe` False
+
+      it "removes an unused type-operator import item declared with explicit namespace" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+          enableWarningErrors fixtureRoot
+          rewriteDemo demoFile $
+            T.replace
+              "import Data.Kind (Type)\n"
+              ( T.unlines
+                  [ "import Data.Kind (Type)",
+                    "import GHC.TypeNats (type (+))"
+                  ]
+              )
+
+          loadResult <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions {enableAutoRefactor = True}
+
+          demoSource <- TIO.readFile demoFile
+          loadResult.loadTargetsSucceeded `shouldBe` True
+          loadResult.loadTargetsModulesAutofixed `shouldBe` 1
+          T.isInfixOf "import GHC.TypeNats" demoSource `shouldBe` False
+
 rewriteDemo :: FilePath -> (T.Text -> T.Text) -> IO ()
 rewriteDemo demoFile rewrite =
   TIO.readFile demoFile >>= TIO.writeFile demoFile . rewrite
+
+rewriteSupport :: FilePath -> (T.Text -> T.Text) -> IO ()
+rewriteSupport supportFile rewrite =
+  TIO.readFile supportFile >>= TIO.writeFile supportFile . rewrite
+
+replaceSupportImport :: T.Text -> T.Text -> T.Text
+replaceSupportImport replacement =
+  T.replace
+    "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep)\n"
+    replacement
+
+addSupportExportItem :: T.Text -> T.Text -> T.Text
+addSupportExportItem exportItem =
+  T.replace
+    "    (.+.),\n  )"
+    ("    " <> exportItem <> ",\n    (.+.),\n  )")
+
+appendSupportDefinition :: T.Text -> T.Text -> T.Text
+appendSupportDefinition definition source =
+  if T.isInfixOf definition source
+    then source
+    else source <> "\n" <> definition
+
+addModulePragma :: T.Text -> T.Text -> T.Text
+addModulePragma pragma source =
+  if T.isPrefixOf pragma source
+    then source
+    else pragma <> source
 
 enableWarningErrors :: FilePath -> IO ()
 enableWarningErrors fixtureRoot = do
