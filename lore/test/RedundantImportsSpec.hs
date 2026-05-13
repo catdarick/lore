@@ -1,5 +1,6 @@
 module RedundantImportsSpec (spec) where
 
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (isJust)
 import qualified Data.Text as T
 import Lore.Diagnostics
@@ -9,7 +10,8 @@ import Lore.Diagnostics
     Span (..),
   )
 import Lore.Refactor.Imports
-  ( redundantImportRequestFromDiagnostic,
+  ( RedundantImportRequest (..),
+    redundantImportRequestFromDiagnostic,
   )
 import Test.Hspec
 
@@ -27,6 +29,16 @@ spec =
             mkDiagnostic "The qualified import of `Data.Sequence' is redundant"
       redundantImportRequestFromDiagnostic diagnostic
         `shouldSatisfy` isJust
+
+    it "keeps parent imports with nested commas as one binding" do
+      let diagnostic =
+            mkDiagnostic "The import of ‘Foo(A, B)’ from module Demo.Types is redundant"
+      redundantImportRequestFromDiagnostic diagnostic
+        `shouldBe` Just
+          RedundantImportRequest
+            { redundantImportDiagnosticSpan = mkSpan,
+              redundantImportBindings = Just ("Foo(A, B)" :| [])
+            }
 
 mkDiagnostic :: T.Text -> Diagnostic
 mkDiagnostic diagnosticMessage =

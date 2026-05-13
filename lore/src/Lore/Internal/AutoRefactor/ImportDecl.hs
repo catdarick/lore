@@ -26,9 +26,9 @@ import qualified GHC
 import GHC.Hs (GhcPs, HsModule (..), IE, ImportDecl (..), LImportDecl)
 import qualified GHC.Types.PkgQual as PkgQual
 import qualified GHC.Utils.Outputable as Outputable
-import Lore.Diagnostics (Span (..))
 import Lore.Internal.List (mapMaybeToList, maybeToList)
 import Lore.Internal.SourceSpan (spanContains, srcSpanToSpan)
+import Lore.Internal.SourceSpan.Types (Span (..))
 
 newtype ImportId = ImportId Int
   deriving (Eq, Ord, Show)

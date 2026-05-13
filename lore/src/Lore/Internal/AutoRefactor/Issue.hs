@@ -6,8 +6,9 @@ where
 
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
-import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..))
+import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..))
 import Lore.Internal.AutoRefactor.RedundantImports (RedundantImportRequest, redundantImportRequestFromDiagnostic)
+import Lore.Internal.SourceSpan.Types (Span (..))
 import System.FilePath (normalise)
 
 data AutoRefactorIssue = AutoRefactorIssue

@@ -5,7 +5,7 @@ import qualified Data.Text.IO as TIO
 import Lore.Diagnostics (Diagnostic (..))
 import Lore.Targets (LoadTargetsOptions (..), LoadTargetsResult (..), defaultLoadTargetsOptions)
 import qualified Lore.Targets as Targets
-import System.Directory (makeAbsolute)
+import System.Directory (doesFileExist, makeAbsolute, removeFile)
 import System.FilePath ((</>))
 import Test.Hspec
 import TestSupport (fixtureLoreAt, withFixtureCopy)
@@ -14,6 +14,31 @@ spec :: Spec
 spec =
   do
     describe "loadTargets diagnostics" do
+      it "handles package definitions with no loadable components" do
+        withFixtureCopy \fixtureRoot -> do
+          let packageFile = fixtureRoot </> "package.yaml"
+              fixtureCabalFile = fixtureRoot </> "demo-fixture.cabal"
+          fixtureCabalExists <- doesFileExist fixtureCabalFile
+          if fixtureCabalExists
+            then removeFile fixtureCabalFile
+            else pure ()
+          TIO.writeFile packageFile $
+            T.unlines
+              [ "name: demo",
+                "version: 0.1.0.0",
+                "dependencies:",
+                "- base >= 4.7 && < 5"
+              ]
+
+          loadResult <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions
+
+          loadResult.loadTargetsSucceeded `shouldBe` True
+          loadResult.loadTargetsModulesTotal `shouldBe` 0
+          loadResult.loadTargetsModulesLoaded `shouldBe` 0
+          loadResult.loadTargetsModulesFailed `shouldBe` 0
+
       it "returns diagnostics when loading fails" do
         withFixtureCopy \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
@@ -46,6 +71,27 @@ spec =
         loadResult.loadTargetsModulesAutofixed `shouldBe` 0
 
     describe "loadTargets auto-refact (redundant imports only)" do
+      it "does not retry cleanup when auto-refactor is disabled" do
+        withFixtureCopy \fixtureRoot -> do
+          let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+          enableWarningErrors fixtureRoot
+          rewriteDemo demoFile $
+            T.replace
+              "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep)\n"
+              ( "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep)\n"
+                  <> "import qualified Data.Sequence as Seq\n"
+              )
+          sourceBefore <- TIO.readFile demoFile
+
+          loadResult <-
+            fixtureLoreAt fixtureRoot $
+              Targets.loadTargets defaultLoadTargetsOptions
+
+          sourceAfter <- TIO.readFile demoFile
+          loadResult.loadTargetsSucceeded `shouldBe` False
+          loadResult.loadTargetsModulesAutofixed `shouldBe` 0
+          sourceAfter `shouldBe` sourceBefore
+
       it "does not fix missing imports" do
         withFixtureCopy \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"

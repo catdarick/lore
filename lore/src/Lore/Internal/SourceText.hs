@@ -3,6 +3,7 @@ module Lore.Internal.SourceText
     offsetToPosition,
     spanToOffsets,
     splitAtSpanEnd,
+    spanTextMaybe,
     spanText,
     readSpanText,
     readSpanLines,
@@ -15,8 +16,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC.Plugins as GHC
-import Lore.Diagnostics (Span (..))
 import Lore.Internal.SourceSpan (realSrcSpanFromSrcSpan)
+import Lore.Internal.SourceSpan.Types (Span (..))
 import System.FilePath (isRelative, makeRelative, normalise)
 
 positionToOffset :: Text -> (Int, Int) -> Maybe Int
@@ -59,13 +60,14 @@ splitAtSpanEnd source span' = do
   (_, endOffset) <- spanToOffsets source span'
   pure (T.take endOffset source, T.drop endOffset source)
 
+spanTextMaybe :: Text -> Span -> Maybe Text
+spanTextMaybe source span' = do
+  (startOffset, endOffset) <- spanToOffsets source span'
+  pure (T.take (endOffset - startOffset) (T.drop startOffset source))
+
 spanText :: Text -> Span -> Text
 spanText source span' =
-  case spanToOffsets source span' of
-    Just (startOffset, endOffset) ->
-      T.take (endOffset - startOffset) (T.drop startOffset source)
-    Nothing ->
-      ""
+  maybe "" id (spanTextMaybe source span')
 
 readSpanText :: GHC.SrcSpan -> IO Text
 readSpanText span' =

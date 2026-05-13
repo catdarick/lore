@@ -1,15 +1,22 @@
 module ImportNormalizeSpec (spec) where
 
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Text
 import Lore.Refactor.Imports
   ( ImportId (..),
     ImportItem (..),
     ImportList (..),
     ImportOperation (..),
+    ImportRemovalTarget (..),
     NormalizedImport (..),
     QualifiedImportStyle (..),
     applyImportOperations,
+    mkFlatRemovalTarget,
+    mkNormalizedImportItem,
+    mkScopedRemovalTarget,
+    mkWholeImportItemTarget,
     renderNormalizedImport,
+    unNormalizedImportItem,
   )
 import Test.Hspec
 
@@ -28,7 +35,7 @@ spec =
       let (normalized, _) =
             applyImportOperations
               [explicitImport 1 0 "Data.List" [item "find", item "nub"]]
-              [RemoveImportItem (ImportId 1) "nub"]
+              [removeItems 1 [flatTarget "nub"]]
 
       normalized `shouldBe` [explicitImport 1 0 "Data.List" [item "find"]]
 
@@ -36,7 +43,7 @@ spec =
       let (normalized, _) =
             applyImportOperations
               [explicitImport 1 0 "Data.List" [item "find"]]
-              [RemoveImportItem (ImportId 1) "find"]
+              [removeItems 1 [flatTarget "find"]]
 
       normalized `shouldBe` []
 
@@ -44,7 +51,7 @@ spec =
       let (normalized, _) =
             applyImportOperations
               [explicitImport 1 0 "Demo.Types" [item "Foo(A, B)"]]
-              [RemoveImportItem (ImportId 1) "B"]
+              [removeItems 1 [flatTarget "B"]]
 
       normalized `shouldBe` [explicitImport 1 0 "Demo.Types" [item "Foo(A)"]]
 
@@ -52,15 +59,31 @@ spec =
       let (normalized, _) =
             applyImportOperations
               [explicitImport 1 0 "Demo.Types" [item "Foo(A)"]]
-              [RemoveImportItem (ImportId 1) "A"]
+              [removeItems 1 [flatTarget "A"]]
 
       normalized `shouldBe` []
+
+    it "removes a whole parent import item via explicit whole-item target" do
+      let (normalized, _) =
+            applyImportOperations
+              [explicitImport 1 0 "Demo.Types" [item "Foo(A, B)", item "Bar(C)"]]
+              [removeItems 1 [wholeItemTarget "Foo(A, B)"]]
+
+      normalized `shouldBe` [explicitImport 1 0 "Demo.Types" [item "Bar(C)"]]
+
+    it "removes a child from parent-scoped target T(A)" do
+      let (normalized, _) =
+            applyImportOperations
+              [explicitImport 1 0 "Demo.Types" [item "Foo(A, B)"]]
+              [removeItems 1 [scopedTarget "Foo" "A"]]
+
+      normalized `shouldBe` [explicitImport 1 0 "Demo.Types" [item "Foo(B)"]]
 
     it "normalizes operator names when removing items" do
       let (normalized, _) =
             applyImportOperations
               [explicitImport 1 0 "Data.List" [item "(+)"]]
-              [RemoveImportItem (ImportId 1) "+"]
+              [removeItems 1 [flatTarget "+"]]
 
       normalized `shouldBe` []
 
@@ -68,9 +91,17 @@ spec =
       let (normalized, _) =
             applyImportOperations
               [explicitImport 1 0 "Demo.Patterns" [item "pattern Foo"]]
-              [RemoveImportItem (ImportId 1) "Foo"]
+              [removeItems 1 [flatTarget "Foo"]]
 
       normalized `shouldBe` []
+
+    it "normalizes operator text through public constructors" do
+      unNormalizedImportItem (mkNormalizedImportItem "(+)")
+        `shouldBe` "+"
+
+    it "normalizes pattern text through public constructors" do
+      unNormalizedImportItem (mkNormalizedImportItem "pattern Foo")
+        `shouldBe` "Foo"
 
     it "renders package-qualified imports with quotes" do
       renderNormalizedImport
@@ -119,3 +150,23 @@ baseImport importId order moduleName =
 fromString :: String -> Data.Text.Text
 fromString =
   Data.Text.pack
+
+removeItems :: Int -> [ImportRemovalTarget] -> ImportOperation
+removeItems importId targets =
+  case targets of
+    firstTarget : remainingTargets ->
+      RemoveImportItems (ImportId importId) (firstTarget :| remainingTargets)
+    [] ->
+      error "removeItems requires at least one target"
+
+flatTarget :: String -> ImportRemovalTarget
+flatTarget binding =
+  mkFlatRemovalTarget (fromString binding)
+
+scopedTarget :: String -> String -> ImportRemovalTarget
+scopedTarget parent binding =
+  mkScopedRemovalTarget (fromString parent) (fromString binding)
+
+wholeItemTarget :: String -> ImportRemovalTarget
+wholeItemTarget importItemText =
+  mkWholeImportItemTarget (fromString importItemText)

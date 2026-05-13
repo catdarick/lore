@@ -36,6 +36,7 @@ library
       Lore.Monad
       Lore.Refactor.Imports
       Lore.Session
+      Lore.SourceEdit
       Lore.Targets
   other-modules:
       Lore.Internal.AutoRefactor
@@ -81,9 +82,15 @@ library
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
+      Lore.Internal.SourceEdit
       Lore.Internal.SourceSpan
+      Lore.Internal.SourceSpan.Types
       Lore.Internal.SourceText
       Lore.Internal.Targets
+      Lore.Internal.Targets.AutoRefactorLoop
+      Lore.Internal.Targets.LoadAttempt
+      Lore.Internal.Targets.ModuleGraphPatch
+      Lore.Internal.Targets.Plan
       Lore.Internal.Targets.Result
       Lore.Lib.Force
       Lore.Lib.Text
@@ -166,6 +173,7 @@ test-suite lore-test
       LookupSpec
       LoggerSpec
       RedundantImportsSpec
+      SourceEditSpec
       TargetsSpec
       TestSupport
       SomeModule
@@ -297,9 +305,15 @@ benchmark lore-bench
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
+      Lore.Internal.SourceEdit
       Lore.Internal.SourceSpan
+      Lore.Internal.SourceSpan.Types
       Lore.Internal.SourceText
       Lore.Internal.Targets
+      Lore.Internal.Targets.AutoRefactorLoop
+      Lore.Internal.Targets.LoadAttempt
+      Lore.Internal.Targets.ModuleGraphPatch
+      Lore.Internal.Targets.Plan
       Lore.Internal.Targets.Result
       Lore.Interpreter
       Lore.Lib.Force
@@ -310,6 +324,7 @@ benchmark lore-bench
       Lore.Monad
       Lore.Refactor.Imports
       Lore.Session
+      Lore.SourceEdit
       Lore.Targets
       Paths_lore
   autogen-modules:
@@ -446,9 +461,15 @@ benchmark lore-memory-bench
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
+      Lore.Internal.SourceEdit
       Lore.Internal.SourceSpan
+      Lore.Internal.SourceSpan.Types
       Lore.Internal.SourceText
       Lore.Internal.Targets
+      Lore.Internal.Targets.AutoRefactorLoop
+      Lore.Internal.Targets.LoadAttempt
+      Lore.Internal.Targets.ModuleGraphPatch
+      Lore.Internal.Targets.Plan
       Lore.Internal.Targets.Result
       Lore.Interpreter
       Lore.Lib.Force
@@ -459,6 +480,7 @@ benchmark lore-memory-bench
       Lore.Monad
       Lore.Refactor.Imports
       Lore.Session
+      Lore.SourceEdit
       Lore.Targets
       Paths_lore
   autogen-modules:

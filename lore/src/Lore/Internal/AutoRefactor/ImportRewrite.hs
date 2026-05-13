@@ -6,10 +6,10 @@ where
 
 import Data.Text (Text)
 import qualified GHC
-import Lore.Internal.AutoRefactor.Edit (FileEdit)
 import Lore.Internal.AutoRefactor.ImportCleanupEdit (planImportCleanupEdits)
 import Lore.Internal.AutoRefactor.ImportDecl (parseImports)
 import Lore.Internal.AutoRefactor.ImportOps (ImportOperation)
+import Lore.Internal.SourceEdit (FileEdit)
 
 data ImportRewriteResult = ImportRewriteResult
   { rewriteEdits :: [FileEdit],

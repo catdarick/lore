@@ -15,12 +15,12 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (maybeToList)
 import qualified Data.Text.IO as TIO
 import qualified GHC
-import Lore.Internal.AutoRefactor.Edit (AppliedFileEdits (..), applyFileEdits)
 import Lore.Internal.AutoRefactor.ImportDecl (parseImports)
 import Lore.Internal.AutoRefactor.ImportRewrite (ImportRewriteResult (..), rewriteImportsInFile)
 import Lore.Internal.AutoRefactor.Issue (AutoRefactorIssue (..))
 import Lore.Internal.AutoRefactor.RedundantImports (suggestRedundantImportOperations)
 import Lore.Internal.Lookup.ModSummaries (prepareFreshModSummariesByFile)
+import Lore.Internal.SourceEdit (AppliedFileEdits (..), applyFileEdits)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 

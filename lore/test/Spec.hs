@@ -9,6 +9,7 @@ import qualified InterpreterSpec
 import qualified LoggerSpec
 import qualified LookupSpec
 import qualified RedundantImportsSpec
+import qualified SourceEditSpec
 import qualified TargetsSpec
 import Test.Hspec
 
@@ -21,4 +22,5 @@ main =
     LoggerSpec.spec
     LookupSpec.spec
     RedundantImportsSpec.spec
+    SourceEditSpec.spec
     TargetsSpec.spec

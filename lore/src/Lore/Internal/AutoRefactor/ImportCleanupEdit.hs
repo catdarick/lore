@@ -9,15 +9,16 @@ where
 
 import Control.Applicative ((<|>))
 import Data.List (foldl')
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Lore.Diagnostics (Span (..))
-import Lore.Internal.AutoRefactor.Edit (FileEdit (ReplaceSpanEdit))
 import Lore.Internal.AutoRefactor.ImportDecl (ImportId, ImportItem (..), ImportList (..), ParsedImport (..))
 import Lore.Internal.AutoRefactor.ImportItemRemoval (applyRemovalTargets)
-import Lore.Internal.AutoRefactor.ImportOps (ImportOperation (..))
+import Lore.Internal.AutoRefactor.ImportOps (ImportOperation (..), ImportRemovalTarget)
+import Lore.Internal.SourceEdit (FileEdit (ReplaceSpanEdit))
+import Lore.Internal.SourceSpan.Types (Span (..))
 import Lore.Internal.SourceText (offsetToPosition, spanText, spanToOffsets)
 
 planImportCleanupEdits ::
@@ -43,8 +44,8 @@ groupOperationsByImportId =
   foldl' insertOperation Map.empty
   where
     insertOperation operationsByImport = \case
-      RemoveImportItem importId target ->
-        Map.insertWith (<>) importId [RemoveImportItem importId target] operationsByImport
+      RemoveImportItems importId targets ->
+        Map.insertWith (<>) importId [RemoveImportItems importId targets] operationsByImport
       RemoveWholeImport importId ->
         Map.insertWith (<>) importId [RemoveWholeImport importId] operationsByImport
 
@@ -62,21 +63,39 @@ planParsedImportCleanup filePath source parsedImport importOperations
   | otherwise =
       case parsedImport.parsedImportList of
         ExplicitImport originalItems ->
-          let removalTargets =
-                [ itemText
-                | RemoveImportItem _ itemText <- importOperations
-                ]
-              finalItems =
-                catMaybes (map (applyRemovalTargets removalTargets) originalItems)
-           in if finalItems == originalItems
-                then ([], [])
-                else case finalItems of
-                  [] ->
-                    removeWholeImportEdit filePath source parsedImport
-                  _ ->
-                    rewriteExplicitImportItems filePath source parsedImport originalItems finalItems
+          let removalTargets = collectRemovalTargets importOperations
+           in case removalTargets of
+                Nothing ->
+                  ([], [])
+                Just targets ->
+                  let finalItems =
+                        catMaybes (map (applyRemovalTargets targets) originalItems)
+                   in if finalItems == originalItems
+                        then ([], [])
+                        else case finalItems of
+                          [] ->
+                            removeWholeImportEdit filePath source parsedImport
+                          _ ->
+                            rewriteExplicitImportItems filePath source parsedImport originalItems finalItems
         _ ->
           ([], [])
+
+collectRemovalTargets :: [ImportOperation] -> Maybe (NonEmpty ImportRemovalTarget)
+collectRemovalTargets operations =
+  case concatMap operationTargets operations of
+    [] ->
+      Nothing
+    firstTarget : restTargets ->
+      Just (firstTarget :| restTargets)
+  where
+    operationTargets = \case
+      RemoveImportItems _ targets ->
+        toList targets
+      RemoveWholeImport {} ->
+        []
+
+    toList (target :| targets) =
+      target : targets
 
 hasRemoveWholeImport :: [ImportOperation] -> Bool
 hasRemoveWholeImport =
@@ -97,7 +116,7 @@ removeWholeImportEdit filePath source parsedImport =
           source
           parsedImport.parsedImportSpan {spanStartCol = 1}
    in ( [ReplaceSpanEdit filePath deleteSpan ""],
-        ["Auto-refact: removed redundant import " <> show parsedImport.parsedImportModuleName]
+        ["Auto-refactor: removed redundant import " <> show parsedImport.parsedImportModuleName]
       )
 
 rewriteExplicitImportItems ::
@@ -111,20 +130,20 @@ rewriteExplicitImportItems filePath source parsedImport originalItems finalItems
   if not (allImportItemsHaveSpans originalItems)
     then
       ( [],
-        [ "Auto-refact: skipped redundant import cleanup for "
+        [ "Auto-refactor: skipped redundant import cleanup for "
             <> show parsedImport.parsedImportModuleName
             <> " because not all import item spans were available."
         ]
       )
     else case importItemsPayloadSpan source originalItems of
       Nothing ->
-        ([], ["Auto-refact: skipped redundant import cleanup because import item span was unavailable."])
+        ([], ["Auto-refactor: skipped redundant import cleanup because import item span was unavailable."])
       Just payloadSpan ->
         let originalPayload = spanText source payloadSpan
          in if importPayloadHasComments originalPayload
               then
                 ( [],
-                  [ "Auto-refact: skipped redundant import cleanup for "
+                  [ "Auto-refactor: skipped redundant import cleanup for "
                       <> show parsedImport.parsedImportModuleName
                       <> " because the import list contains comments."
                   ]
@@ -135,7 +154,7 @@ rewriteExplicitImportItems filePath source parsedImport originalItems finalItems
                       then ([], [])
                       else
                         ( [ReplaceSpanEdit filePath payloadSpan replacementText],
-                          [ "Auto-refact: removed redundant bindings from "
+                          [ "Auto-refactor: removed redundant bindings from "
                               <> show parsedImport.parsedImportModuleName
                           ]
                         )

@@ -5,82 +5,138 @@
 module Lore.Internal.AutoRefactor.ImportItemRemoval
   ( removeTargetFromImportItem,
     applyRemovalTargets,
+    diagnosticBindingTextToRemovalTargets,
     parseParentImportItem,
+    normalizeImportItemText,
     normalizedFlatBindingText,
   )
 where
 
 import Data.List (foldl')
+import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import Lore.Diagnostics (Span)
 import Lore.Internal.AutoRefactor.ImportDecl (ImportItem (..))
+import Lore.Internal.AutoRefactor.ImportOps
+  ( ImportRemovalTarget (..),
+    NormalizedImportItem,
+    mkFlatRemovalTarget,
+    mkNormalizedImportItem,
+    mkWholeImportItemTarget,
+    unNormalizedImportItem,
+  )
+import Lore.Internal.SourceSpan.Types (Span)
 
-removeTargetFromImportItem :: Text -> ImportItem -> Maybe ImportItem
-removeTargetFromImportItem targetText item
-  | normalizedFlatBindingText targetText == normalizedFlatBindingText item.importItemText =
-      Nothing
-  | otherwise =
+removeTargetFromImportItem :: ImportRemovalTarget -> ImportItem -> Maybe ImportItem
+removeTargetFromImportItem target item =
+  case target of
+    RemoveFlatBinding targetBinding
+      | targetBinding == normalizeImportItemText item.importItemText ->
+          Nothing
+      | otherwise ->
+          case parseParentImportItem item.importItemText of
+            Just (ParentImportItem itemParent itemCoverage) ->
+              removeFromParentByFlatBinding targetBinding item itemParent itemCoverage
+            Nothing ->
+              keepUnchangedFlatImportItem target item
+    RemoveWholeImportItem targetItem ->
+      if targetItem == normalizeImportItemText item.importItemText
+        then Nothing
+        else Just item
+    RemoveParentChild targetParent targetBinding ->
       case parseParentImportItem item.importItemText of
         Just (ParentImportItem itemParent itemCoverage) ->
-          removeFromParentImportItem targetText item itemParent itemCoverage
+          removeFromParentByScopedTarget targetParent targetBinding item itemParent itemCoverage
         Nothing ->
-          removeTargetChildFromFlatImportItem targetText item
+          Just item
 
-applyRemovalTargets :: [Text] -> ImportItem -> Maybe ImportItem
+applyRemovalTargets :: NonEmpty ImportRemovalTarget -> ImportItem -> Maybe ImportItem
 applyRemovalTargets targets item =
-  foldl' applyTarget (Just item) targets
+  foldl' applyTarget (Just item) (NE.toList targets)
   where
     applyTarget maybeCurrentItem target =
       maybeCurrentItem >>= removeTargetFromImportItem target
 
-removeTargetChildFromFlatImportItem :: Text -> ImportItem -> Maybe ImportItem
-removeTargetChildFromFlatImportItem targetText item =
-  case parseParentImportItem targetText of
-    Just (ParentImportItem _ (ParentChildren targetChildren))
-      | normalizedFlatBindingText item.importItemText `Set.member` Set.map normalizedFlatBindingText targetChildren ->
-          Nothing
+diagnosticBindingTextToRemovalTargets :: Text -> NonEmpty ImportRemovalTarget
+diagnosticBindingTextToRemovalTargets bindingText =
+  case parseParentImportItem bindingText of
+    Just (ParentImportItem parent (ParentChildren children))
+      | not (Set.null children) ->
+          case Set.toAscList children of
+            [singleChild] ->
+              mkScopedTarget parent singleChild
+            _ ->
+              mkWholeImportItemTarget bindingText :| []
+    Just (ParentImportItem parent ParentAllChildren) ->
+      mkWholeImportItemTarget parent :| []
+    Just (ParentImportItem parent ParentOnly) ->
+      mkWholeImportItemTarget parent :| []
     _ ->
-      Just item
+      flatTarget bindingText
 
-removeFromParentImportItem :: Text -> ImportItem -> Text -> ParentImportCoverage -> Maybe ImportItem
-removeFromParentImportItem targetText item itemParent = \case
+flatTarget :: Text -> NonEmpty ImportRemovalTarget
+flatTarget bindingText =
+  mkFlatRemovalTarget bindingText :| []
+
+mkScopedTarget :: Text -> Text -> NonEmpty ImportRemovalTarget
+mkScopedTarget parent child =
+  RemoveParentChild
+    (normalizeImportItemText parent)
+    (normalizeImportItemText child)
+    :| []
+
+keepUnchangedFlatImportItem :: ImportRemovalTarget -> ImportItem -> Maybe ImportItem
+keepUnchangedFlatImportItem _target item =
+  Just item
+
+removeFromParentByFlatBinding :: NormalizedImportItem -> ImportItem -> Text -> ParentImportCoverage -> Maybe ImportItem
+removeFromParentByFlatBinding targetBinding item itemParent = \case
+  ParentOnly ->
+    if targetBinding == normalizeImportItemText itemParent
+      then Nothing
+      else Just item
+  ParentAllChildren ->
+    if targetBinding == normalizeImportItemText itemParent
+      then Nothing
+      else Just item
+  ParentChildren itemChildren ->
+    if targetBinding == normalizeImportItemText itemParent
+      then Nothing
+      else
+        removeMatchingChild targetBinding item itemParent itemChildren
+
+removeFromParentByScopedTarget :: NormalizedImportItem -> NormalizedImportItem -> ImportItem -> Text -> ParentImportCoverage -> Maybe ImportItem
+removeFromParentByScopedTarget targetParent targetBinding item itemParent = \case
   ParentOnly ->
     Just item
-  ParentAllChildren
-    | normalizedFlatBindingText targetText == normalizedFlatBindingText itemParent ->
-        Nothing
-    | otherwise ->
-        Just item
+  ParentAllChildren ->
+    Just item
   ParentChildren itemChildren ->
-    let normalizedTarget = normalizedFlatBindingText targetText
-        normalizedChildren = Set.map normalizedFlatBindingText itemChildren
-        remainingChildren = Set.filter ((/= normalizedTarget) . normalizedFlatBindingText) itemChildren
-     in if normalizedTarget `Set.member` normalizedChildren
-          then
-            if Set.null remainingChildren
-              then Nothing
-              else Just (renderParentImportItem itemParent (ParentChildren remainingChildren) item.importItemSpan)
-          else Just item
+    if targetParent == normalizeImportItemText itemParent
+      then removeMatchingChild targetBinding item itemParent itemChildren
+      else Just item
+
+removeMatchingChild :: NormalizedImportItem -> ImportItem -> Text -> Set.Set Text -> Maybe ImportItem
+removeMatchingChild targetBinding item itemParent itemChildren =
+  let normalizedChildren = Set.map normalizeImportItemText itemChildren
+      remainingChildren =
+        Set.filter ((/= targetBinding) . normalizeImportItemText) itemChildren
+   in if targetBinding `Set.member` normalizedChildren
+        then
+          if Set.null remainingChildren
+            then Nothing
+            else Just (renderParentImportItem itemParent (ParentChildren remainingChildren) item.importItemSpan)
+        else Just item
 
 normalizedFlatBindingText :: Text -> Text
-normalizedFlatBindingText rawText =
-  unwrapOperatorParens . stripPatternKeyword . T.strip $ rawText
-  where
-    stripPatternKeyword text =
-      maybe text T.strip (T.stripPrefix "pattern " text)
+normalizedFlatBindingText =
+  unNormalizedImportItem . mkNormalizedImportItem
 
-    unwrapOperatorParens text
-      | T.length text >= 2,
-        T.head text == '(',
-        T.last text == ')',
-        let inner = T.init (T.tail text),
-        not (T.null inner),
-        T.all (`notElem` [' ', '(', ')', ',']) inner =
-          inner
-      | otherwise =
-          text
+normalizeImportItemText :: Text -> NormalizedImportItem
+normalizeImportItemText =
+  mkNormalizedImportItem
 
 data ParentImportItem
   = ParentImportItem Text ParentImportCoverage

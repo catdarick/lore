@@ -10,20 +10,20 @@ module Lore.Diagnostics
   )
 where
 
+import qualified Control.Concurrent.MVar as MVar
 import Control.Monad.Catch (finally)
 import Control.Monad.IO.Class (MonadIO (..))
-import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Data.Bag as GHC
-import qualified GHC.Data.FastString as GHC
 import qualified GHC.Driver.Errors.Types as GHC.Driver
-import qualified GHC.Natural as GHC
 import GHC.Types.Error (MessageClass (..))
 import qualified GHC.Types.Error as GHC
 import GHC.Utils.Logger (LogAction)
 import qualified GHC.Utils.Outputable as GHC
+import Lore.Internal.SourceSpan (srcSpanToSpan)
+import Lore.Internal.SourceSpan.Types (Span (..))
 
 data Diagnostic = Diagnostic
   { diagnosticClass :: DiagnosticClass,
@@ -48,15 +48,6 @@ data DiagnosticClass
 data DiagnosticSpan
   = RealDiagnosticSpan Span
   | UnhelpfulDiagnosticSpan Text
-  deriving (Eq, Show)
-
-data Span = Span
-  { spanFile :: FilePath,
-    spanStartLine :: Int,
-    spanStartCol :: Int,
-    spanEndLine :: Int,
-    spanEndCol :: Int
-  }
   deriving (Eq, Show)
 
 data DiagnosticCodeInfo = DiagnosticCodeInfo
@@ -150,25 +141,21 @@ fromDiagnosticCode
     } =
     DiagnosticCodeInfo
       { diagnosticCodeNamespace = T.pack diagnosticCodeNameSpace,
-        diagnosticCodeNumber = naturalToInteger diagnosticCodeNumber
+        diagnosticCodeNumber = toInteger diagnosticCodeNumber
       }
 
-naturalToInteger :: GHC.Natural -> Integer
-naturalToInteger = toInteger
-
 toDiagnosticSpan :: GHC.SrcSpan -> DiagnosticSpan
-toDiagnosticSpan = \case
-  GHC.RealSrcSpan rss _ ->
-    RealDiagnosticSpan
-      Span
-        { spanFile = GHC.unpackFS (GHC.srcSpanFile rss),
-          spanStartLine = GHC.srcSpanStartLine rss,
-          spanStartCol = GHC.srcSpanStartCol rss,
-          spanEndLine = GHC.srcSpanEndLine rss,
-          spanEndCol = GHC.srcSpanEndCol rss
-        }
-  GHC.UnhelpfulSpan u ->
-    UnhelpfulDiagnosticSpan (T.pack (show u))
+toDiagnosticSpan srcSpan =
+  case srcSpanToSpan srcSpan of
+    Just span' ->
+      RealDiagnosticSpan span'
+    Nothing ->
+      UnhelpfulDiagnosticSpan $
+        case srcSpan of
+          GHC.UnhelpfulSpan unhelpful ->
+            T.pack (show unhelpful)
+          _ ->
+            T.pack (show srcSpan)
 
 renderDecorated :: GHC.DecoratedSDoc -> Text
 renderDecorated =
@@ -185,16 +172,19 @@ renderHint =
 
 withDiagnosticsCapturing :: (GHC.GhcMonad m) => m b -> m ([Diagnostic], b)
 withDiagnosticsCapturing action = do
-  diagsRef <- liftIO $ newIORef []
+  diagsVar <- liftIO $ MVar.newMVar []
 
   let customLogAction :: LogAction -> LogAction
-      customLogAction _oldLogAction _logFlags msgClass srcSpan sdoc = do
+      customLogAction oldLogAction logFlags msgClass srcSpan sdoc = do
         let diagnostic = ghcMessageToDiagnostic msgClass srcSpan sdoc
-        modifyIORef' diagsRef (diagnostic :)
+        liftIO $
+          MVar.modifyMVar_ diagsVar \diags ->
+            pure (diagnostic : diags)
+        oldLogAction logFlags msgClass srcSpan sdoc
 
   GHC.pushLogHookM customLogAction
   r <- action `finally` GHC.popLogHookM
 
-  capturedDiags <- liftIO $ readIORef diagsRef
+  capturedDiags <- reverse <$> liftIO (MVar.readMVar diagsVar)
 
   pure (capturedDiags, r)

@@ -13,10 +13,12 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
-import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..), Span (..))
+import Lore.Diagnostics (Diagnostic (..), DiagnosticSpan (..))
 import Lore.Internal.AutoRefactor.ImportDecl (ImportItem (..), ImportList (..), ParsedImport (..), parsedImportContainsSpan)
+import Lore.Internal.AutoRefactor.ImportItemRemoval (diagnosticBindingTextToRemovalTargets)
 import Lore.Internal.AutoRefactor.ImportOps (ImportOperation (..))
 import Lore.Internal.SourceSpan (spansOverlap)
+import Lore.Internal.SourceSpan.Types (Span (..))
 
 data RedundantImportRequest = RedundantImportRequest
   { redundantImportDiagnosticSpan :: Span,
@@ -62,18 +64,20 @@ suggestRedundantImportOperations parsedImports requests =
     suggestForImport (Just parsedImport, importRequests) =
       if any requestRemovesWholeImport importRequests
         then [RemoveWholeImport parsedImport.parsedImportId]
-        else
-          [ RemoveImportItem parsedImport.parsedImportId bindingText
-          | bindingText <- nub (concatMap (requestBindings parsedImport) importRequests)
-          ]
+        else case NE.nonEmpty (nub (concatMap (requestRemovalTargets parsedImport) importRequests)) of
+          Just targets ->
+            [RemoveImportItems parsedImport.parsedImportId targets]
+          Nothing ->
+            []
 
-    requestBindings parsedImport request =
+    requestRemovalTargets parsedImport request =
       case request.redundantImportBindings of
         Just bindings ->
-          NE.toList bindings
+          concatMap (NE.toList . diagnosticBindingTextToRemovalTargets) (NE.toList bindings)
         Nothing ->
           case findImportItemBySpan request.redundantImportDiagnosticSpan parsedImport of
-            Just importItem -> [importItem.importItemText]
+            Just importItem ->
+              NE.toList (diagnosticBindingTextToRemovalTargets importItem.importItemText)
             Nothing -> []
 
     requestRemovesWholeImport RedundantImportRequest {redundantImportBindings} =
@@ -171,4 +175,23 @@ unifySpaces =
 
 splitBindings :: T.Text -> Maybe (NonEmpty T.Text)
 splitBindings =
-  NE.nonEmpty . T.splitOn ", "
+  NE.nonEmpty . map T.strip . splitTopLevelCommaSeparated
+
+splitTopLevelCommaSeparated :: T.Text -> [T.Text]
+splitTopLevelCommaSeparated =
+  finalize . T.foldl' step ([], "", 0 :: Int)
+  where
+    step (chunks, currentChunk, depth) char =
+      case char of
+        '(' ->
+          (chunks, T.snoc currentChunk char, depth + 1)
+        ')' ->
+          (chunks, T.snoc currentChunk char, max 0 (depth - 1))
+        ','
+          | depth == 0 ->
+              (chunks <> [currentChunk], "", depth)
+        _ ->
+          (chunks, T.snoc currentChunk char, depth)
+
+    finalize (chunks, currentChunk, _) =
+      chunks <> [currentChunk]

@@ -65,6 +65,7 @@ library:
   - Lore.Monad
   - Lore.Refactor.Imports
   - Lore.Session
+  - Lore.SourceEdit
   - Lore.Targets
 
 
@@ -79,6 +80,7 @@ tests:
     - LookupSpec
     - LoggerSpec
     - RedundantImportsSpec
+    - SourceEditSpec
     - TargetsSpec
     - TestSupport
     - SomeModule

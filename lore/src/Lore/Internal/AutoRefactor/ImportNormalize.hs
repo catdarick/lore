@@ -11,11 +11,13 @@ module Lore.Internal.AutoRefactor.ImportNormalize
 where
 
 import Data.List (find, foldl')
+import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
+import qualified Data.Text as T
 import Lore.Internal.AutoRefactor.ImportDecl (ImportId, ImportList (..), NormalizedImport (..))
-import Lore.Internal.AutoRefactor.ImportItemRemoval (normalizedFlatBindingText, parseParentImportItem, removeTargetFromImportItem)
-import qualified Lore.Internal.AutoRefactor.ImportItemRemoval as ImportItemRemoval
-import Lore.Internal.AutoRefactor.ImportOps (ImportOperation (..))
+import Lore.Internal.AutoRefactor.ImportItemRemoval (applyRemovalTargets, normalizedFlatBindingText, parseParentImportItem, removeTargetFromImportItem)
+import Lore.Internal.AutoRefactor.ImportOps (ImportOperation (..), ImportRemovalTarget (..), mkFlatRemovalTarget, unNormalizedImportItem)
 
 applyImportOperations :: [NormalizedImport] -> [ImportOperation] -> ([NormalizedImport], [String])
 applyImportOperations imports =
@@ -27,13 +29,19 @@ applyImportOperations imports =
 
 applyOperation :: [NormalizedImport] -> ImportOperation -> ([NormalizedImport], [String])
 applyOperation imports = \case
-  RemoveImportItem importId itemText ->
-    removeImportItem importId itemText imports
+  RemoveImportItems importId targets ->
+    removeImportItemTargets importId targets imports
   RemoveWholeImport importId ->
     removeWholeImport importId imports
 
 removeImportItem :: ImportId -> Text -> [NormalizedImport] -> ([NormalizedImport], [String])
-removeImportItem importId itemText imports =
+removeImportItem importId itemText =
+  removeImportItemTargets
+    importId
+    (mkFlatRemovalTarget itemText :| [])
+
+removeImportItemTargets :: ImportId -> NonEmpty ImportRemovalTarget -> [NormalizedImport] -> ([NormalizedImport], [String])
+removeImportItemTargets importId targets imports =
   case find ((== Just importId) . normalizedImportId) imports of
     Nothing ->
       (imports, [])
@@ -42,7 +50,7 @@ removeImportItem importId itemText imports =
         ExplicitImport items ->
           let updatedItems =
                 foldr
-                  (\item acc -> maybe acc (: acc) (ImportItemRemoval.removeTargetFromImportItem itemText item))
+                  (\item acc -> maybe acc (: acc) (applyRemovalTargets targets item))
                   []
                   items
            in if updatedItems == items
@@ -50,18 +58,20 @@ removeImportItem importId itemText imports =
                 else case updatedItems of
                   [] ->
                     ( filter ((/= Just importId) . normalizedImportId) imports,
-                      [ "Auto-refact: removed redundant import "
+                      [ "Auto-refactor: removed redundant import "
                           <> show normalizedImport.normalizedImportModuleName
                       ]
                     )
                   _ ->
-                    ( replaceImport normalizedImport normalizedImport {normalizedImportList = ExplicitImport updatedItems} imports,
-                      [ "Auto-refact: removed redundant binding "
-                          <> show itemText
-                          <> " from "
-                          <> show normalizedImport.normalizedImportModuleName
-                      ]
-                    )
+                    let targetTextPreview =
+                          show (map renderRemovalTarget (NE.toList targets))
+                     in ( replaceImport normalizedImport normalizedImport {normalizedImportList = ExplicitImport updatedItems} imports,
+                          [ "Auto-refactor: removed redundant bindings "
+                              <> targetTextPreview
+                              <> " from "
+                              <> show normalizedImport.normalizedImportModuleName
+                          ]
+                        )
         _ ->
           (imports, [])
 
@@ -72,7 +82,7 @@ removeWholeImport importId imports =
       (imports, [])
     Just normalizedImport ->
       ( filter ((/= Just importId) . normalizedImportId) imports,
-        ["Auto-refact: removed redundant import " <> show normalizedImport.normalizedImportModuleName]
+        ["Auto-refactor: removed redundant import " <> show normalizedImport.normalizedImportModuleName]
       )
 
 replaceImport :: NormalizedImport -> NormalizedImport -> [NormalizedImport] -> [NormalizedImport]
@@ -81,3 +91,12 @@ replaceImport original updated =
     if normalizedImport.normalizedImportId == original.normalizedImportId
       then updated
       else normalizedImport
+
+renderRemovalTarget :: ImportRemovalTarget -> Text
+renderRemovalTarget = \case
+  RemoveFlatBinding binding ->
+    unNormalizedImportItem binding
+  RemoveWholeImportItem item ->
+    unNormalizedImportItem item
+  RemoveParentChild parent binding ->
+    T.concat [unNormalizedImportItem parent, "(", unNormalizedImportItem binding, ")"]

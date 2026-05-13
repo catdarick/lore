@@ -29,6 +29,7 @@ module Lore.Bench.Fixtures
 where
 
 import Data.Char (ord)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -462,9 +463,12 @@ mkImportNormalizeFixture importCount operationCount =
     mkOperation operationIndex =
       case operationIndex `mod` 2 of
         0 ->
-          Ref.RemoveImportItem
+          Ref.RemoveImportItems
             (Ref.ImportId ((operationIndex `mod` importCount) + 1))
-            (T.pack ("item" <> show ((operationIndex `mod` importCount) + 1)))
+            ( Ref.mkFlatRemovalTarget
+                (T.pack ("item" <> show ((operationIndex `mod` importCount) + 1)))
+                :| []
+            )
         _ ->
           Ref.RemoveWholeImport (Ref.ImportId ((operationIndex `mod` importCount) + 1))
 

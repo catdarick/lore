@@ -5,7 +5,15 @@ module Lore.Refactor.Imports
     ImportList (..),
     ParsedImport (..),
     NormalizedImport (..),
+    NormalizedImportItem,
+    unNormalizedImportItem,
+    mkNormalizedImportItem,
+    ImportRemovalTarget (..),
+    mkFlatRemovalTarget,
+    mkWholeImportItemTarget,
+    mkScopedRemovalTarget,
     ImportOperation (..),
+    RedundantImportRequest (..),
     parseImports,
     normalizedImportFromParsed,
     renderNormalizedImport,
@@ -30,7 +38,15 @@ import Lore.Internal.AutoRefactor.ImportNormalize
   )
 import Lore.Internal.AutoRefactor.ImportOps
   ( ImportOperation (..),
+    ImportRemovalTarget (..),
+    NormalizedImportItem,
+    mkFlatRemovalTarget,
+    mkNormalizedImportItem,
+    mkScopedRemovalTarget,
+    mkWholeImportItemTarget,
+    unNormalizedImportItem,
   )
 import Lore.Internal.AutoRefactor.RedundantImports
-  ( redundantImportRequestFromDiagnostic,
+  ( RedundantImportRequest (..),
+    redundantImportRequestFromDiagnostic,
   )

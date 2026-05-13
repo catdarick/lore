@@ -12,7 +12,7 @@ where
 
 import qualified GHC.Data.FastString as FastString
 import qualified GHC.Plugins as GHC
-import Lore.Diagnostics (Span (..))
+import Lore.Internal.SourceSpan.Types (Span (..))
 
 srcSpanToSpan :: GHC.SrcSpan -> Maybe Span
 srcSpanToSpan = \case
