@@ -12,11 +12,7 @@ import qualified GHC.Iface.Syntax as Iface
 import qualified GHC.Types.TyThing as TyThing
 import qualified GHC.Types.TyThing.Ppr as TyThing
 import Lore (Instances (..), SymbolInfo (..), SymbolVisibility (..))
-import Lore.Mcp.Internal.Render
-  ( Renderable (renderText),
-    indented,
-    (|>),
-  )
+import Lore.Mcp.Internal.Render (Renderable (renderText), indented, (|>))
 import Lore.Mcp.Tools.Shared.CompactClassInstance (CompactClassInstance (CompactClassInstance))
 import Lore.Mcp.Tools.Shared.DefinitionLocation (mkDefinitionLocation)
 import Lore.Mcp.Tools.Shared.Outputable (renderOutputable, renderOutputableWith)
@@ -85,9 +81,17 @@ classInstancesSection symbolInfo instancesInfo =
     classInstances ->
       Just
         ( "Class instances: "
-            <> T.intercalate
-              ", "
-              [ renderText (CompactClassInstance symbolInfo classInstance)
-              | classInstance <- classInstances
-              ]
+            <> T.intercalate ", " (map (renderText . CompactClassInstance symbolInfo) displayedInstances)
+            <> overflowSuffix overflowCount
         )
+      where
+        displayedInstances = take maxDisplayedClassInstances classInstances
+        overflowCount = length classInstances - length displayedInstances
+
+maxDisplayedClassInstances :: Int
+maxDisplayedClassInstances = 20
+
+overflowSuffix :: Int -> Text
+overflowSuffix overflowCount
+  | overflowCount <= 0 = ""
+  | otherwise = " ... and " <> T.pack (show overflowCount) <> " more"

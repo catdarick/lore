@@ -12,7 +12,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Lore (MonadLore, Symbol (..), SymbolInfo (..), findMatchingSymbolsRoots, listAssociatedInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName)
+import Lore (MonadLore, Symbol (..), SymbolInfo (..), findMatchingSymbolsRoots, listDirectInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Render
   ( ListMarker (..),
@@ -109,7 +109,7 @@ lookupRootSymbolInfos query = do
 
 mkDetailedSymbolInfo :: (MonadLore m) => SymbolInfo -> m DetailedSymbolInfo
 mkDetailedSymbolInfo symbolInfo = do
-  instancesInfo <- listAssociatedInstances symbolInfo.symbolName
+  instancesInfo <- listDirectInstances symbolInfo.symbolName
   pure
     DetailedSymbolInfo
       { symbolInfo,

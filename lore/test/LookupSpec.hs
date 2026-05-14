@@ -23,6 +23,7 @@ import Lore
     classifySymbolCategory,
     defaultLoadTargetsOptions,
     listAssociatedInstances,
+    listDirectInstances,
     loadTargets,
   )
 import System.Directory (createDirectoryIfMissing)
@@ -289,6 +290,24 @@ spec =
           queryMatchCounts `shouldSatisfy` all (> 0)
           renderedInstances `shouldSatisfy` matchesRenderedInstance "Elem (Indexed a) = a"
 
+    describe "listDirectInstances" do
+      it "filters out non-direct associated instances" do
+        withFixtureIndirectInstances \fixtureRoot -> do
+          (renderedAssociated, renderedDirect) <-
+            fixtureLoreAt fixtureRoot do
+              _ <- loadTargets defaultLoadTargetsOptions
+              indexedSymbolInfos <- lookupRootSymbolInfo "Indexed"
+              case indexedSymbolInfos of
+                [] -> pure ([], [])
+                indexedInfo : _ -> do
+                  associated <- listAssociatedInstances indexedInfo.symbolName
+                  direct <- listDirectInstances indexedInfo.symbolName
+                  pure (renderInstances associated, renderInstances direct)
+
+          renderedAssociated `shouldSatisfy` any (isInfixOf "HasIndex (Maybe (Indexed Int))")
+          renderedDirect `shouldSatisfy` any (isInfixOf "HasIndex (Indexed Int)")
+          renderedDirect `shouldSatisfy` not . any (isInfixOf "HasIndex (Maybe (Indexed Int))")
+
 exportedNodeOccNames :: [ExportedSymbolNode] -> [String]
 exportedNodeOccNames nodes =
   map (Plugins.getOccString . (.nodeName)) nodes
@@ -318,10 +337,23 @@ withFixtureInstances action =
     appendDemoInstances fixtureRoot
     action fixtureRoot
 
+withFixtureIndirectInstances :: (FilePath -> IO a) -> IO a
+withFixtureIndirectInstances action =
+  withFixtureCopy \fixtureRoot -> do
+    enableFlexibleInstances fixtureRoot
+    appendDemoInstances fixtureRoot
+    appendDemoIndirectInstances fixtureRoot
+    action fixtureRoot
+
 appendDemoInstances :: FilePath -> IO ()
 appendDemoInstances fixtureRoot = do
   let demoFile = fixtureRoot </> "src" </> "Demo.hs"
   TIO.appendFile demoFile instanceDefinitions
+
+appendDemoIndirectInstances :: FilePath -> IO ()
+appendDemoIndirectInstances fixtureRoot = do
+  let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+  TIO.appendFile demoFile indirectInstanceDefinitions
 
 enableFlexibleInstances :: FilePath -> IO ()
 enableFlexibleInstances fixtureRoot = do
@@ -343,6 +375,14 @@ instanceDefinitions =
       "  toIndex _ = Map.empty",
       "",
       "instance HasIndex Support.SupportRecord where",
+      "  toIndex _ = Map.empty"
+    ]
+
+indirectInstanceDefinitions :: T.Text
+indirectInstanceDefinitions =
+  T.unlines
+    [ "",
+      "instance HasIndex (Maybe (Indexed Int)) where",
       "  toIndex _ = Map.empty"
     ]
 

@@ -109,6 +109,9 @@ itemCandidates occurrence parentIndex item =
           []
         ExplicitChildren _ ->
           explicitChildMatches
+        WildcardChildren _
+          | headMatches ->
+              [RemoveTopLevelItem parentIndex]
         WildcardChildren _ ->
           []
 

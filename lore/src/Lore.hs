@@ -32,6 +32,7 @@ module Lore
     lookupSymbolInfo,
     listIntersectingInstances,
     listAssociatedInstances,
+    listDirectInstances,
     resolvePathToRoot,
     mergePathsToRootOn,
     -- Source-first definition API.

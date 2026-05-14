@@ -19,6 +19,7 @@ module Lore.Lookup
     lookupSymbolInfo,
     listIntersectingInstances,
     listAssociatedInstances,
+    listDirectInstances,
     resolvePathToRoot,
     mergePathsToRootOn,
   )
@@ -30,6 +31,9 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC
+import qualified GHC.Core.FamInstEnv as FamInstEnv
+import qualified GHC.Core.InstEnv as InstEnv
+import qualified GHC.Core.RoughMap as RoughMap
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
@@ -127,8 +131,8 @@ classifySymbolCategory = \case
     | otherwise -> SymbolUnknown
 
 data Instances = Instances
-  { classInstances :: [GHC.ClsInst],
-    familyInstances :: [GHC.FamInst]
+  { classInstances :: [InstEnv.ClsInst],
+    familyInstances :: [FamInstEnv.FamInst]
   }
 
 listIntersectingInstances :: (MonadLore m) => [GHC.Name] -> m Instances
@@ -144,7 +148,77 @@ listAssociatedInstances name = do
   NameToInstancesIndex nameToInstancesIndex <- getCachedNameToInstancesIndex
   case GHC.lookupUFM nameToInstancesIndex name of
     Nothing -> pure (Instances [] [])
-    Just (clsInsts, famInsts) -> pure $ Instances clsInsts famInsts
+    Just (clsInsts, famInsts) ->
+      pure $
+        Instances
+          { classInstances = dedupeInstancesByName clsInsts,
+            familyInstances = dedupeInstancesByName famInsts
+          }
+
+listDirectInstances :: (MonadLore m) => GHC.Name -> m Instances
+listDirectInstances name = do
+  associatedInstances <- listAssociatedInstances name
+  maybeTyThing <- GHC.lookupName name
+  pure $
+    case maybeTyThing of
+      Nothing -> Instances [] []
+      Just tyThing -> filterDirectInstances name tyThing associatedInstances
+
+filterDirectInstances :: GHC.Name -> GHC.TyThing -> Instances -> Instances
+filterDirectInstances targetName targetTyThing associatedInstances =
+  case targetTyThing of
+    GHC.ATyCon tyCon
+      | GHC.isClassTyCon tyCon ->
+          Instances
+            { classInstances = filter (isDirectClassInstance targetName) associatedInstances.classInstances,
+              familyInstances = []
+            }
+      | GHC.isTypeFamilyTyCon tyCon || GHC.isDataFamilyTyCon tyCon ->
+          Instances
+            { classInstances = filter (mentionsTyConDirectlyInClassHead targetName) associatedInstances.classInstances,
+              familyInstances = filter (isDirectFamilyInstance targetName) associatedInstances.familyInstances
+            }
+      | otherwise ->
+          Instances
+            { classInstances = filter (mentionsTyConDirectlyInClassHead targetName) associatedInstances.classInstances,
+              familyInstances = filter (mentionsTyConDirectlyInFamilyHead targetName) associatedInstances.familyInstances
+            }
+    _ ->
+      Instances [] []
+
+isDirectClassInstance :: GHC.Name -> InstEnv.ClsInst -> Bool
+isDirectClassInstance targetClassName classInstance =
+  GHC.getName classInstance.is_cls == targetClassName
+
+isDirectFamilyInstance :: GHC.Name -> FamInstEnv.FamInst -> Bool
+isDirectFamilyInstance targetFamilyName familyInstance =
+  familyInstance.fi_fam == targetFamilyName
+
+mentionsTyConDirectlyInClassHead :: GHC.Name -> InstEnv.ClsInst -> Bool
+mentionsTyConDirectlyInClassHead targetTyConName classInstance =
+  any (isDirectRoughMatchTc targetTyConName) classInstance.is_tcs
+
+mentionsTyConDirectlyInFamilyHead :: GHC.Name -> FamInstEnv.FamInst -> Bool
+mentionsTyConDirectlyInFamilyHead targetTyConName familyInstance =
+  any (isDirectRoughMatchTc targetTyConName) familyInstance.fi_tcs
+
+isDirectRoughMatchTc :: GHC.Name -> RoughMap.RoughMatchTc -> Bool
+isDirectRoughMatchTc targetTyConName roughMatchTc =
+  case roughMatchTc of
+    RoughMap.RM_KnownTc roughTyConName ->
+      roughTyConName == targetTyConName
+    RoughMap.RM_WildCard ->
+      False
+
+dedupeInstancesByName :: (GHC.NamedThing a) => [a] -> [a]
+dedupeInstancesByName =
+  reverse . snd . foldl' step (Set.empty, [])
+  where
+    step (seenNames, acc) instance_ =
+      let instanceName = GHC.getName instance_
+       in if Set.member instanceName seenNames
+            then (seenNames, acc)
+            else (Set.insert instanceName seenNames, instance_ : acc)
 
 intersectMatchingInstances :: Instances -> Instances -> Instances
 intersectMatchingInstances left right =
