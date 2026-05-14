@@ -20,6 +20,7 @@ import McpTestSupport
     loadFixtureTargets,
     withFixtureCopy,
   )
+import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import Test.Hspec
 import Text.Printf (printf)
@@ -95,6 +96,58 @@ spec = do
       secondCall `shouldContainText` "lookupOrZero"
       secondCall `shouldNotContainText` "already returned earlier in this MCP session"
 
+    it "follows constructor-specific recursive dependencies while still rendering root declarations" do
+      withFixtureCopy \fixtureRoot -> do
+        addConstructorScopedDependencyFixture fixtureRoot
+        definitionResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureTargets
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ConstructorDeps.someFunction"] 2 Nothing)
+
+        definitionResult `shouldContainText` "someFunction :: IO ()"
+        definitionResult `shouldContainText` "data EitherFooOrBar"
+        definitionResult `shouldContainText` "data Bar = Bar"
+        definitionResult `shouldNotContainText` "data Foo = Foo"
+
+    it "follows class-method-specific recursive dependencies while still rendering root declarations" do
+      withFixtureCopy \fixtureRoot -> do
+        addClassMethodScopedDependencyFixture fixtureRoot
+        definitionResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureTargets
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ClassDeps.runAlpha"] 2 Nothing)
+
+        definitionResult `shouldContainText` "runAlpha value = buildAlpha value"
+        definitionResult `shouldContainText` "class BuildResult a where"
+        definitionResult `shouldContainText` "data AlphaResult = AlphaResult"
+        definitionResult `shouldNotContainText` "data BetaResult = BetaResult"
+
+    it "follows cross-module constructor-specific recursive dependencies while still rendering root declarations" do
+      withFixtureCopy \fixtureRoot -> do
+        addCrossModuleConstructorScopedDependencyFixture fixtureRoot
+        definitionResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureTargets
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ConstructorUser.someFunction"] 3 Nothing)
+
+        definitionResult `shouldContainText` "someFunction :: IO ()"
+        definitionResult `shouldContainText` "data EitherFooOrBar"
+        definitionResult `shouldContainText` "data Bar = Bar"
+        definitionResult `shouldNotContainText` "data Foo = Foo"
+
+    it "follows dependencies from the second binder of a shared top-level declaration" do
+      withFixtureCopy \fixtureRoot -> do
+        addSharedTopLevelDependencyFixture fixtureRoot
+        definitionResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureTargets
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.SharedTopLevel.pairRight"] 2 Nothing)
+
+        definitionResult `shouldContainText` "pairLeft, pairRight :: Int"
+        definitionResult `shouldContainText` "mkLeft :: Int -> Int"
+        definitionResult `shouldContainText` "mkRight :: Int -> Int"
+        definitionResult `shouldContainText` "seedValue :: Int"
+
     it "returns all same-module matches for a duplicated qualified symbol name (regression for resolveRequestedSymbols)" do
       withFixtureCopy \fixtureRoot -> do
         addSameModuleDuplicateSymbolFixture fixtureRoot
@@ -158,6 +211,137 @@ addPaginatedDefinitionFixture fixtureRoot = do
   let sourceWithExports =
         T.replace paginationExportAnchor paginationExportReplacement source
   TIO.writeFile demoFile (sourceWithExports <> "\n\n" <> paginatedDefinitionsFixtureDeclarations)
+
+addConstructorScopedDependencyFixture :: FilePath -> IO ()
+addConstructorScopedDependencyFixture fixtureRoot = do
+  let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+      moduleFile = moduleDir </> "ConstructorDeps.hs"
+  createDirectoryIfMissing True moduleDir
+  TIO.writeFile moduleFile constructorScopedDependencyFixtureModuleSource
+
+addClassMethodScopedDependencyFixture :: FilePath -> IO ()
+addClassMethodScopedDependencyFixture fixtureRoot = do
+  let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+      moduleFile = moduleDir </> "ClassDeps.hs"
+  createDirectoryIfMissing True moduleDir
+  TIO.writeFile moduleFile classMethodScopedDependencyFixtureModuleSource
+
+addCrossModuleConstructorScopedDependencyFixture :: FilePath -> IO ()
+addCrossModuleConstructorScopedDependencyFixture fixtureRoot = do
+  let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+      supportFile = moduleDir </> "ConstructorSupport.hs"
+      userFile = moduleDir </> "ConstructorUser.hs"
+  createDirectoryIfMissing True moduleDir
+  TIO.writeFile supportFile constructorSupportFixtureModuleSource
+  TIO.writeFile userFile constructorUserFixtureModuleSource
+
+addSharedTopLevelDependencyFixture :: FilePath -> IO ()
+addSharedTopLevelDependencyFixture fixtureRoot = do
+  let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+      moduleFile = moduleDir </> "SharedTopLevel.hs"
+  createDirectoryIfMissing True moduleDir
+  TIO.writeFile moduleFile sharedTopLevelDependencyFixtureModuleSource
+
+constructorScopedDependencyFixtureModuleSource :: Text
+constructorScopedDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.ConstructorDeps",
+      "  ( someFunction",
+      "  ) where",
+      "",
+      "data Foo = Foo",
+      "",
+      "data Bar = Bar",
+      "",
+      "data EitherFooOrBar",
+      "  = EitherFoo",
+      "      Foo",
+      "  | EitherBar",
+      "      Bar",
+      "",
+      "someFunction :: IO ()",
+      "someFunction = do",
+      "  let someBind = EitherBar undefined",
+      "  print \"bar\""
+    ]
+
+classMethodScopedDependencyFixtureModuleSource :: Text
+classMethodScopedDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.ClassDeps",
+      "  ( runAlpha",
+      "  ) where",
+      "",
+      "data AlphaResult = AlphaResult",
+      "",
+      "data BetaResult = BetaResult",
+      "",
+      "class BuildResult a where",
+      "  buildAlpha ::",
+      "    a ->",
+      "    AlphaResult",
+      "  buildBeta ::",
+      "    a ->",
+      "    BetaResult",
+      "",
+      "runAlpha value = buildAlpha value"
+    ]
+
+constructorSupportFixtureModuleSource :: Text
+constructorSupportFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.ConstructorSupport",
+      "  ( Foo (..),",
+      "    Bar (..),",
+      "    EitherFooOrBar (..)",
+      "  ) where",
+      "",
+      "data Foo = Foo",
+      "",
+      "data Bar = Bar",
+      "",
+      "data EitherFooOrBar",
+      "  = EitherFoo",
+      "      Foo",
+      "  | EitherBar",
+      "      Bar"
+    ]
+
+constructorUserFixtureModuleSource :: Text
+constructorUserFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.ConstructorUser",
+      "  ( someFunction",
+      "  ) where",
+      "",
+      "import qualified TestClosure.ConstructorSupport as Support",
+      "",
+      "someFunction :: IO ()",
+      "someFunction = do",
+      "  let someBind = Support.EitherBar undefined",
+      "  print \"bar\""
+    ]
+
+sharedTopLevelDependencyFixtureModuleSource :: Text
+sharedTopLevelDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.SharedTopLevel",
+      "  ( pairRight",
+      "  ) where",
+      "",
+      "seedValue :: Int",
+      "seedValue = 40",
+      "",
+      "mkLeft :: Int -> Int",
+      "mkLeft value = value + seedValue",
+      "",
+      "mkRight :: Int -> Int",
+      "mkRight value = value * seedValue",
+      "",
+      "pairLeft, pairRight :: Int",
+      "(pairLeft, pairRight) =",
+      "  (mkLeft seedValue, mkRight seedValue)"
+    ]
 
 paginationExportAnchor :: Text
 paginationExportAnchor =

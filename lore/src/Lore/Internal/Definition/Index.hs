@@ -34,7 +34,9 @@ emptyDefinitionDependencies :: DefinitionDependencies
 emptyDefinitionDependencies =
   DefinitionDependencies
     { dependencyDirectReferenceNames = Set.empty,
-      dependencyUsedInstanceNames = Set.empty
+      dependencyUsedInstanceNames = Set.empty,
+      dependencyDirectReferenceNamesByReferenceName = Map.empty,
+      dependencyUsedInstanceNamesByReferenceName = Map.empty
     }
 
 lookupDefinitionSourceByName ::

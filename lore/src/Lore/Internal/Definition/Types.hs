@@ -23,6 +23,9 @@ module Lore.Internal.Definition.Types
     MinimalCoreModuleFacts (..),
     ParsedModuleFacts (..),
     ParsedOccurrenceSyntax (..),
+    ParsedDefinitionMember (..),
+    DefinitionMember (..),
+    DefinitionMemberIndex (..),
     SourceRegionCandidate (..),
     DefinitionSourceTree (..),
     SourceRegion (..),
@@ -149,9 +152,31 @@ data ParsedOccurrenceSyntax = ParsedOccurrenceSyntax
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
 
+data ParsedDefinitionMember = ParsedDefinitionMember
+  { parsedMemberOccKey :: !OccKey,
+    parsedMemberSpan :: !GHC.SrcSpan
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data DefinitionMember = DefinitionMember
+  { memberName :: !GHC.Name,
+    memberSpan :: !GHC.SrcSpan
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
+data DefinitionMemberIndex = DefinitionMemberIndex
+  { rootMemberNames :: !(Set.Set GHC.Name),
+    scopedMembers :: ![DefinitionMember]
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
 data ParsedModuleFacts = ParsedModuleFacts
   { parsedOccKeys :: !(Set.Set OccKey),
     parsedDeclarationsById :: !(Map.Map DefinitionId DeclarationSpans),
+    parsedDefinitionMembersById :: !(Map.Map DefinitionId [ParsedDefinitionMember]),
     parsedOccurrenceSyntaxBySpan :: !(Map.Map SpanKey ParsedOccurrenceSyntax),
     parsedRegionCandidates :: ![SourceRegionCandidate]
   }
@@ -269,8 +294,14 @@ data DefinitionSource = DefinitionSource
   deriving anyclass (NFData)
 
 data DefinitionDependencies = DefinitionDependencies
-  { dependencyDirectReferenceNames :: !(Set.Set GHC.Name),
-    dependencyUsedInstanceNames :: !(Set.Set GHC.Name)
+  { -- | Compatibility aggregate derived from scoped map values.
+    -- Query-time recursion should use scoped maps directly.
+    dependencyDirectReferenceNames :: !(Set.Set GHC.Name),
+    -- | Compatibility aggregate derived from scoped map values.
+    -- Query-time recursion should use scoped maps directly.
+    dependencyUsedInstanceNames :: !(Set.Set GHC.Name),
+    dependencyDirectReferenceNamesByReferenceName :: !(Map.Map GHC.Name (Set.Set GHC.Name)),
+    dependencyUsedInstanceNamesByReferenceName :: !(Map.Map GHC.Name (Set.Set GHC.Name))
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
@@ -293,6 +324,7 @@ data ReferenceHit = ReferenceHit
 data DefinitionOccurrenceFact = DefinitionOccurrenceFact
   { occurrenceFactName :: !GHC.Name,
     occurrenceFactSpan :: !GHC.SrcSpan,
+    occurrenceFactOwners :: !(Set.Set GHC.Name),
     occurrenceFactParent :: !(Maybe GHC.Name),
     occurrenceFactImportCandidates :: ![ImportId]
   }

@@ -11,6 +11,7 @@ import qualified Data.Map.Strict as Map
 import Lore.Bench.Fixtures
 import Lore.Internal.Definition.Analysis
   ( buildDefinitionBindings,
+    buildDefinitionMemberIndexes,
     buildDefinitionModuleIndex,
     buildDefinitionOccurrences,
     buildDependencies,
@@ -55,8 +56,10 @@ buildBindings DefinitionIndexFixture {..} =
 
 buildOccurrences :: DefinitionIndexFixture -> Map.Map Def.DefinitionId [Def.DefinitionOccurrenceFact]
 buildOccurrences fixture@DefinitionIndexFixture {..} =
-  buildDefinitionOccurrences fixtureModule fixtureParsedFacts fixtureTypedFacts (buildBindings fixture) importCandidatesById
+  buildDefinitionOccurrences fixtureModule fixtureParsedFacts fixtureTypedFacts bindings memberIndexesById importCandidatesById
   where
+    bindings = buildBindings fixture
+    memberIndexesById = buildDefinitionMemberIndexes fixtureParsedFacts bindings
     importCandidates = map minimalImportToImportCandidate (Def.typedSourceImports fixtureTypedFacts)
     importCandidatesById =
       Map.fromList
@@ -66,7 +69,10 @@ buildOccurrences fixture@DefinitionIndexFixture {..} =
 
 buildDeps :: DefinitionIndexFixture -> Map.Map Def.DefinitionId Def.DefinitionDependencies
 buildDeps fixture@DefinitionIndexFixture {..} =
-  buildDependencies (buildBindings fixture) (buildOccurrences fixture) fixtureCoreFacts
+  buildDependencies bindings memberIndexesById (buildOccurrences fixture) fixtureCoreFacts
+  where
+    bindings = buildBindings fixture
+    memberIndexesById = buildDefinitionMemberIndexes fixtureParsedFacts bindings
 
 buildImports :: DefinitionIndexFixture -> Map.Map Def.DefinitionId [Def.RequiredImport]
 buildImports fixture@DefinitionIndexFixture {..} =

@@ -388,6 +388,187 @@ spec = do
                                         )
                                       ]
 
+    it "recurses through dependencies of the directly referenced constructor, not all constructors on the root declaration" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "ConstructorDeps.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile constructorScopedDependencyFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.ConstructorDeps.someFunction"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.ConstructorDeps.someFunction")
+                pure
+                (findFixtureSymbolInModule "TestClosure.ConstructorDeps" "someFunction" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.ConstructorDeps",
+                                            [ "someFunction :: IO ()\nsomeFunction = do\n  let someBind = EitherBar undefined\n  print \"bar\"",
+                                              "data EitherFooOrBar\n  = EitherFoo\n      Foo\n  | EitherBar\n      Bar",
+                                              "data Bar = Bar"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
+    it "recurses through dependencies of the referenced class method, not sibling methods on the same class" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "ClassDeps.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile classMethodScopedDependencyFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.ClassDeps.runAlpha"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.ClassDeps.runAlpha")
+                pure
+                (findFixtureSymbolInModule "TestClosure.ClassDeps" "runAlpha" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.ClassDeps",
+                                            [ "runAlpha value = buildAlpha value",
+                                              "class BuildResult a where\n  buildAlpha ::\n    a ->\n    AlphaResult\n  buildBeta ::\n    a ->\n    BetaResult",
+                                              "data AlphaResult = AlphaResult"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
+    it "recurses through dependencies of referenced constructors across module boundaries, not sibling constructors" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            supportFile = moduleDir </> "ConstructorSupport.hs"
+            userFile = moduleDir </> "ConstructorUser.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile supportFile constructorSupportFixtureModuleSource
+        TIO.writeFile userFile constructorUserFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.ConstructorUser.someFunction"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.ConstructorUser.someFunction")
+                pure
+                (findFixtureSymbolInModule "TestClosure.ConstructorUser" "someFunction" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 3 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.ConstructorSupport",
+                                            [ "data EitherFooOrBar\n  = EitherFoo\n      Foo\n  | EitherBar\n      Bar",
+                                              "data Bar = Bar"
+                                            ],
+                                            []
+                                          ),
+                                          ( "TestClosure.ConstructorUser",
+                                            [ "someFunction :: IO ()\nsomeFunction = do\n  let someBind = Support.EitherBar undefined\n  print \"bar\""
+                                            ],
+                                            ["TestClosure.ConstructorSupport"]
+                                          )
+                                        ]
+
+    it "recurses from the second binder of a shared top-level declaration through root-scoped dependencies" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "SharedTopLevel.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile sharedTopLevelDependencyFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.SharedTopLevel.pairRight"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.SharedTopLevel.pairRight")
+                pure
+                (findFixtureSymbolInModule "TestClosure.SharedTopLevel" "pairRight" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.SharedTopLevel",
+                                            [ "seedValue :: Int\nseedValue = 40",
+                                              "mkLeft :: Int -> Int\nmkLeft value = value + seedValue",
+                                              "mkRight :: Int -> Int\nmkRight value = value * seedValue",
+                                              "pairLeft, pairRight :: Int\n(pairLeft, pairRight) =\n  (mkLeft seedValue, mkRight seedValue)"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
+    it "recurses through dependencies of constructors declared in one shared GADT signature" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "SharedGadtConstructors.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile sharedGadtConstructorDependencyFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.SharedGadtConstructors.useB"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.SharedGadtConstructors.useB")
+                pure
+                (findFixtureSymbolInModule "TestClosure.SharedGadtConstructors" "useB" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.SharedGadtConstructors",
+                                            [ "useB :: T\nuseB = B Foo",
+                                              "data T where\n  A, B :: Foo -> T",
+                                              "data Foo = Foo"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
+    it "recurses through dependencies of class methods declared in one shared signature" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "SharedClassSignature.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile sharedClassMethodDependencyFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.SharedClassSignature.runG"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.SharedClassSignature.runG")
+                pure
+                (findFixtureSymbolInModule "TestClosure.SharedClassSignature" "runG" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.SharedClassSignature",
+                                            [ "runG value = g value",
+                                              "class BuildResult a where\n  f, g :: a -> Result",
+                                              "data Result = Result"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
     it "stops on already visited definitions when recursion encounters a cycle" do
       closure <- fixtureDefinitionClosure 4 "mutualLeft"
 
@@ -993,6 +1174,140 @@ usedInstanceClosureFixtureModuleSource =
       "",
       "renderInt :: Int -> String",
       "renderInt = render"
+    ]
+
+constructorScopedDependencyFixtureModuleSource :: T.Text
+constructorScopedDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.ConstructorDeps",
+      "  ( someFunction",
+      "  ) where",
+      "",
+      "data Foo = Foo",
+      "",
+      "data Bar = Bar",
+      "",
+      "data EitherFooOrBar",
+      "  = EitherFoo",
+      "      Foo",
+      "  | EitherBar",
+      "      Bar",
+      "",
+      "someFunction :: IO ()",
+      "someFunction = do",
+      "  let someBind = EitherBar undefined",
+      "  print \"bar\""
+    ]
+
+classMethodScopedDependencyFixtureModuleSource :: T.Text
+classMethodScopedDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.ClassDeps",
+      "  ( runAlpha",
+      "  ) where",
+      "",
+      "data AlphaResult = AlphaResult",
+      "",
+      "data BetaResult = BetaResult",
+      "",
+      "class BuildResult a where",
+      "  buildAlpha ::",
+      "    a ->",
+      "    AlphaResult",
+      "  buildBeta ::",
+      "    a ->",
+      "    BetaResult",
+      "",
+      "runAlpha value = buildAlpha value"
+    ]
+
+constructorSupportFixtureModuleSource :: T.Text
+constructorSupportFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.ConstructorSupport",
+      "  ( Foo (..),",
+      "    Bar (..),",
+      "    EitherFooOrBar (..)",
+      "  ) where",
+      "",
+      "data Foo = Foo",
+      "",
+      "data Bar = Bar",
+      "",
+      "data EitherFooOrBar",
+      "  = EitherFoo",
+      "      Foo",
+      "  | EitherBar",
+      "      Bar"
+    ]
+
+constructorUserFixtureModuleSource :: T.Text
+constructorUserFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.ConstructorUser",
+      "  ( someFunction",
+      "  ) where",
+      "",
+      "import qualified TestClosure.ConstructorSupport as Support",
+      "",
+      "someFunction :: IO ()",
+      "someFunction = do",
+      "  let someBind = Support.EitherBar undefined",
+      "  print \"bar\""
+    ]
+
+sharedTopLevelDependencyFixtureModuleSource :: T.Text
+sharedTopLevelDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.SharedTopLevel",
+      "  ( pairRight",
+      "  ) where",
+      "",
+      "seedValue :: Int",
+      "seedValue = 40",
+      "",
+      "mkLeft :: Int -> Int",
+      "mkLeft value = value + seedValue",
+      "",
+      "mkRight :: Int -> Int",
+      "mkRight value = value * seedValue",
+      "",
+      "pairLeft, pairRight :: Int",
+      "(pairLeft, pairRight) =",
+      "  (mkLeft seedValue, mkRight seedValue)"
+    ]
+
+sharedGadtConstructorDependencyFixtureModuleSource :: T.Text
+sharedGadtConstructorDependencyFixtureModuleSource =
+  T.unlines
+    [ "{-# LANGUAGE GADTs #-}",
+      "",
+      "module TestClosure.SharedGadtConstructors",
+      "  ( useB",
+      "  ) where",
+      "",
+      "data Foo = Foo",
+      "",
+      "data T where",
+      "  A, B :: Foo -> T",
+      "",
+      "useB :: T",
+      "useB = B Foo"
+    ]
+
+sharedClassMethodDependencyFixtureModuleSource :: T.Text
+sharedClassMethodDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.SharedClassSignature",
+      "  ( runG",
+      "  ) where",
+      "",
+      "data Result = Result",
+      "",
+      "class BuildResult a where",
+      "  f, g :: a -> Result",
+      "",
+      "runG value = g value"
     ]
 
 preciseReferenceMatchesFixtureModuleSource :: T.Text

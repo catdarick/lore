@@ -3,6 +3,7 @@ module Lore.Internal.Definition.Analysis
     buildParsedModuleFacts,
     buildMinimalTypedModuleFacts,
     buildDefinitionBindings,
+    buildDefinitionMemberIndexes,
     buildDefinitionOccurrences,
     buildReferenceHitsByOccKey,
     buildDependencies,
@@ -13,12 +14,15 @@ where
 
 import Data.Containers.ListUtils (nubOrd)
 import Data.Data (Data, Typeable, cast, gmapQ)
+import Data.Foldable (foldl')
 import qualified Data.List as List
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
 import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Data.Bag as Bag
+import qualified GHC.Data.Strict as Strict
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
 import qualified GHC.Types.TypeEnv as GHC.TypeEnv
@@ -39,6 +43,7 @@ buildParsedModuleFacts definingModule parsedSource =
           | locatedName <- locatedRdrNames
           ],
       parsedDeclarationsById = Map.fromList declarationEntries,
+      parsedDefinitionMembersById = Map.fromListWith (<>) definitionMemberEntries,
       parsedOccurrenceSyntaxBySpan =
         Map.fromListWith keepOldOccurrenceSyntax occurrenceSyntaxEntries,
       parsedRegionCandidates = collectModuleSourceRegionCandidates parsedSource
@@ -49,6 +54,17 @@ buildParsedModuleFacts definingModule parsedSource =
 
     declarationEntries =
       [ (definitionIdFromSpans definingModule declarationSpans, declarationSpans)
+      | decl <- decls,
+        name <- take 1 (collectTyped decl :: [GHC.LocatedN GHC.RdrName]),
+        let declarationSpans =
+              DeclarationSpans
+                { declarationSpan = GHC.getLocA decl,
+                  signatureSpan = GHC.getLocA <$> findSignatureDeclaration (GHC.rdrNameOcc (GHC.unLoc name)) decls
+                }
+      ]
+
+    definitionMemberEntries =
+      [ (definitionIdFromSpans definingModule declarationSpans, collectParsedDefinitionMembers decl)
       | decl <- decls,
         name <- take 1 (collectTyped decl :: [GHC.LocatedN GHC.RdrName]),
         let declarationSpans =
@@ -143,18 +159,34 @@ buildDefinitionOccurrences ::
   ParsedModuleFacts ->
   MinimalTypedModuleFacts ->
   DefinitionBindings ->
+  Map.Map DefinitionId DefinitionMemberIndex ->
   Map.Map ImportId ImportCandidate ->
   Map.Map DefinitionId [DefinitionOccurrenceFact]
-buildDefinitionOccurrences definingModule parsedFacts typedModuleFacts bindings importCandidatesById =
+buildDefinitionOccurrences definingModule parsedFacts typedModuleFacts bindings memberIndexesById importCandidatesById =
   Map.map mkOccurrences bindings.bindingDefinitionsById
   where
     mkOccurrences source =
-      collectDefinitionOccurrenceFacts
-        definingModule
-        source.definitionSourceSpans
-        parsedFacts.parsedOccurrenceSyntaxBySpan
-        importCandidatesById
-        typedModuleFacts.typedOccurrences
+      let memberIndex =
+            Map.findWithDefault
+              (resolveDefinitionMemberIndex source parsedFacts.parsedDefinitionMembersById)
+              source.definitionSourceId
+              memberIndexesById
+       in collectDefinitionOccurrenceFacts
+            definingModule
+            source.definitionSourceSpans
+            memberIndex
+            parsedFacts.parsedOccurrenceSyntaxBySpan
+            importCandidatesById
+            typedModuleFacts.typedOccurrences
+
+buildDefinitionMemberIndexes ::
+  ParsedModuleFacts ->
+  DefinitionBindings ->
+  Map.Map DefinitionId DefinitionMemberIndex
+buildDefinitionMemberIndexes parsedFacts bindings =
+  Map.map
+    (\source -> resolveDefinitionMemberIndex source parsedFacts.parsedDefinitionMembersById)
+    bindings.bindingDefinitionsById
 
 buildReferenceHitsByOccKey ::
   Map.Map DefinitionId [DefinitionOccurrenceFact] ->
@@ -175,30 +207,83 @@ buildReferenceHitsByOccKey occurrencesById =
 
 buildDependencies ::
   DefinitionBindings ->
+  Map.Map DefinitionId DefinitionMemberIndex ->
   Map.Map DefinitionId [DefinitionOccurrenceFact] ->
   Maybe MinimalCoreModuleFacts ->
   Map.Map DefinitionId DefinitionDependencies
-buildDependencies bindings occurrencesById maybeCoreFacts =
+buildDependencies bindings memberIndexesById occurrencesById maybeCoreFacts =
   Map.mapWithKey mkDependencies bindings.bindingDefinitionsById
   where
     coreUsedInstancesByBinder =
       maybe Map.empty (.coreUsedInstancesByBinder) maybeCoreFacts
 
     mkDependencies definitionId source =
-      DefinitionDependencies
-        { dependencyDirectReferenceNames =
-            Set.fromList
-              [ occurrence.occurrenceFactName
-              | occurrence <- Map.findWithDefault [] definitionId occurrencesById,
-                isFollowableReference source.definitionSourceNames source.definitionSourceSpans occurrence.occurrenceFactName
-              ],
-          dependencyUsedInstanceNames =
-            Set.fromList
-              [ instanceName
-              | binderName <- Set.toList source.definitionSourceNames,
+      let memberIndex =
+            Map.findWithDefault
+              (DefinitionMemberIndex source.definitionSourceNames [])
+              definitionId
+              memberIndexesById
+          definitionNames = source.definitionSourceNames
+          rootNames =
+            memberIndex.rootMemberNames
+          followableOccurrences =
+            [ occurrence
+            | occurrence <- Map.findWithDefault [] definitionId occurrencesById,
+              isFollowableReference definitionNames source.definitionSourceSpans occurrence.occurrenceFactName
+            ]
+          directReferencesByReferenceNameRaw =
+            Map.fromListWith
+              Set.union
+              [ (ownerName, Set.singleton occurrence.occurrenceFactName)
+              | occurrence <- followableOccurrences,
+                ownerName <- ownerNamesForOccurrence definitionNames occurrence
+              ]
+          usedInstancesByReferenceNameRaw =
+            Map.fromListWith
+              Set.union
+              [ (binderName, Set.singleton instanceName)
+              | binderName <- Set.toList definitionNames,
                 instanceName <- Map.findWithDefault [] binderName coreUsedInstancesByBinder
               ]
-        }
+          directReferencesByReferenceName =
+            completeDependencyMap
+              definitionNames
+              rootNames
+              directReferencesByReferenceNameRaw
+          usedInstancesByReferenceName =
+            completeDependencyMap
+              definitionNames
+              rootNames
+              usedInstancesByReferenceNameRaw
+       in DefinitionDependencies
+            { dependencyDirectReferenceNames =
+                Set.unions (Map.elems directReferencesByReferenceName),
+              dependencyUsedInstanceNames =
+                Set.unions (Map.elems usedInstancesByReferenceName),
+              dependencyDirectReferenceNamesByReferenceName = directReferencesByReferenceName,
+              dependencyUsedInstanceNamesByReferenceName = usedInstancesByReferenceName
+            }
+
+    ownerNamesForOccurrence definitionNames occurrence =
+      Set.toList (Set.intersection definitionNames occurrence.occurrenceFactOwners)
+
+    completeDependencyMap definitionNames rootNames rawDependenciesByName =
+      augmentRootEntries
+        rootNames
+        (Set.unions (Map.elems rawDependenciesByName))
+        (withDefaultEntries definitionNames rawDependenciesByName)
+
+    withDefaultEntries definitionNames dependenciesByName =
+      foldl'
+        (\acc definitionName -> Map.insertWith (\_ old -> old) definitionName Set.empty acc)
+        dependenciesByName
+        (Set.toList definitionNames)
+
+    augmentRootEntries rootNames allDependencies dependenciesByName =
+      foldl'
+        (\acc rootName -> Map.insertWith Set.union rootName allDependencies acc)
+        dependenciesByName
+        (Set.toList rootNames)
 
 buildDefinitionModuleIndex ::
   GHC.Module ->
@@ -211,12 +296,15 @@ buildDefinitionModuleIndex definingModule parsedFacts typedModuleFacts maybeCore
     { definitionsById = bindings.bindingDefinitionsById,
       definitionIdByName = bindings.bindingDefinitionIdByName,
       referenceHitsByOccKey = buildReferenceHitsByOccKey occurrencesById,
-      dependenciesById = buildDependencies bindings occurrencesById maybeCoreFacts,
+      dependenciesById = buildDependencies bindings memberIndexesById occurrencesById maybeCoreFacts,
       requiredImportsById = buildRequiredImportsById importCandidates occurrencesById
     }
   where
     bindings =
       buildDefinitionBindings definingModule parsedFacts typedModuleFacts
+
+    memberIndexesById =
+      buildDefinitionMemberIndexes parsedFacts bindings
 
     importCandidates =
       buildImportCandidates typedModuleFacts.typedSourceImports
@@ -225,7 +313,7 @@ buildDefinitionModuleIndex definingModule parsedFacts typedModuleFacts maybeCore
       indexImportCandidates importCandidates
 
     occurrencesById =
-      buildDefinitionOccurrences definingModule parsedFacts typedModuleFacts bindings importCandidatesById
+      buildDefinitionOccurrences definingModule parsedFacts typedModuleFacts bindings memberIndexesById importCandidatesById
 
 buildUsedInstancesByBinder :: Set.Set GHC.Name -> [GHC.CoreBind] -> Map.Map GHC.Name [GHC.Name]
 buildUsedInstancesByBinder interestingBinders coreBinds =
@@ -385,14 +473,215 @@ signatureMatches targetOcc = \case
   _ ->
     False
 
+collectParsedDefinitionMembers :: GHC.LHsDecl GHC.GhcPs -> [ParsedDefinitionMember]
+collectParsedDefinitionMembers decl =
+  dedupeParsedDefinitionMembers (constructorMembers <> classMethodMembers)
+  where
+    declarationSpan =
+      GHC.getLocA decl
+
+    declBody =
+      GHC.unLoc decl
+
+    constructorDecls =
+      sortBySpanStart GHC.getLocA (declarationConstructors declBody)
+
+    constructorMemberSpans =
+      sequentialMemberSpans declarationSpan (map constructorDeclStartSpan constructorDecls)
+
+    constructorMembers =
+      [ ParsedDefinitionMember
+          { parsedMemberOccKey = rdrNameOccKey (GHC.unLoc constructorName),
+            parsedMemberSpan = constructorMemberSpan
+          }
+      | (constructorDecl, constructorMemberSpan) <- zip constructorDecls constructorMemberSpans,
+        constructorName <- constructorDeclaredNames (GHC.unLoc constructorDecl)
+      ]
+
+    signatureDecls =
+      sortBySpanStart GHC.getLocA (declarationClassSignatures declBody)
+
+    signatureMemberSpans =
+      sequentialMemberSpans declarationSpan (map GHC.getLocA signatureDecls)
+
+    classMethodMembers =
+      [ ParsedDefinitionMember
+          { parsedMemberOccKey = rdrNameOccKey (GHC.unLoc methodName),
+            parsedMemberSpan = signatureMemberSpan
+          }
+      | (signatureDecl, signatureMemberSpan) <- zip signatureDecls signatureMemberSpans,
+        methodName <- signatureDeclaredNames (GHC.unLoc signatureDecl)
+      ]
+
+declarationConstructors :: GHC.HsDecl GHC.GhcPs -> [GHC.LConDecl GHC.GhcPs]
+declarationConstructors = \case
+  GHC.TyClD _ tyClDecl ->
+    case tyClDecl of
+      GHC.DataDecl {tcdDataDefn} ->
+        dataDefnConstructors tcdDataDefn
+      _ ->
+        []
+  _ ->
+    []
+
+dataDefnConstructors :: GHC.HsDataDefn GHC.GhcPs -> [GHC.LConDecl GHC.GhcPs]
+dataDefnConstructors dataDefn =
+  case dataDefn.dd_cons of
+    GHC.NewTypeCon constructorDecl ->
+      [constructorDecl]
+    GHC.DataTypeCons _ constructorDecls ->
+      constructorDecls
+
+declarationClassSignatures :: GHC.HsDecl GHC.GhcPs -> [GHC.LSig GHC.GhcPs]
+declarationClassSignatures = \case
+  GHC.TyClD _ tyClDecl ->
+    case tyClDecl of
+      GHC.ClassDecl {tcdSigs} ->
+        tcdSigs
+      _ ->
+        []
+  _ ->
+    []
+
+constructorDeclaredNames :: GHC.ConDecl GHC.GhcPs -> [GHC.LocatedN GHC.RdrName]
+constructorDeclaredNames = \case
+  GHC.ConDeclH98 {con_name} ->
+    [con_name]
+  GHC.ConDeclGADT {con_names} ->
+    NE.toList con_names
+
+constructorDeclStartSpan :: GHC.LConDecl GHC.GhcPs -> GHC.SrcSpan
+constructorDeclStartSpan conDecl =
+  case constructorDeclaredNames (GHC.unLoc conDecl) of
+    firstName : _ ->
+      GHC.getLocA firstName
+    [] ->
+      GHC.getLocA conDecl
+
+signatureDeclaredNames :: GHC.Sig GHC.GhcPs -> [GHC.LocatedN GHC.RdrName]
+signatureDeclaredNames = \case
+  GHC.TypeSig _ names _ ->
+    names
+  GHC.ClassOpSig _ _ names _ ->
+    names
+  GHC.PatSynSig _ names _ ->
+    names
+  _ ->
+    []
+
+sequentialMemberSpans :: GHC.SrcSpan -> [GHC.SrcSpan] -> [GHC.SrcSpan]
+sequentialMemberSpans declarationSpan memberStartSpans =
+  zipWith spanFromStartToBound memberStartSpans memberBounds
+  where
+    memberBounds =
+      map nextBound (zip [0 :: Int ..] memberStartSpans)
+
+    nextBound (memberIndex, _) =
+      case drop (memberIndex + 1) memberStartSpans of
+        nextStartSpan : _ ->
+          MemberBoundStart nextStartSpan
+        [] ->
+          MemberBoundEnd declarationSpan
+
+data MemberSpanBound
+  = MemberBoundStart GHC.SrcSpan
+  | MemberBoundEnd GHC.SrcSpan
+
+spanFromStartToBound :: GHC.SrcSpan -> MemberSpanBound -> GHC.SrcSpan
+spanFromStartToBound startSpan endBound =
+  case (GHC.srcSpanToRealSrcSpan startSpan, endBoundLocation endBound) of
+    (Just startRealSpan, Just endBoundLocation')
+      | GHC.srcSpanFile startRealSpan == GHC.srcLocFile endBoundLocation' ->
+          GHC.RealSrcSpan
+            (GHC.mkRealSrcSpan (GHC.realSrcSpanStart startRealSpan) endBoundLocation')
+            Strict.Nothing
+    _ ->
+      startSpan
+
+endBoundLocation :: MemberSpanBound -> Maybe GHC.RealSrcLoc
+endBoundLocation = \case
+  MemberBoundStart boundSpan ->
+    GHC.realSrcSpanStart <$> GHC.srcSpanToRealSrcSpan boundSpan
+  MemberBoundEnd boundSpan ->
+    GHC.realSrcSpanEnd <$> GHC.srcSpanToRealSrcSpan boundSpan
+
+sortBySpanStart :: (a -> GHC.SrcSpan) -> [a] -> [a]
+sortBySpanStart getSpan =
+  List.sortOn (spanStartSortKey . getSpan)
+
+spanStartSortKey :: GHC.SrcSpan -> (String, Int, Int)
+spanStartSortKey = \case
+  GHC.RealSrcSpan realSpan _ ->
+    ( GHC.unpackFS (GHC.srcSpanFile realSpan),
+      GHC.srcSpanStartLine realSpan,
+      GHC.srcSpanStartCol realSpan
+    )
+  GHC.UnhelpfulSpan reason ->
+    (show reason, maxBound, maxBound)
+
+resolveDefinitionMemberIndex ::
+  DefinitionSource ->
+  Map.Map DefinitionId [ParsedDefinitionMember] ->
+  DefinitionMemberIndex
+resolveDefinitionMemberIndex source parsedMembersById =
+  DefinitionMemberIndex
+    { rootMemberNames = rootNames,
+      scopedMembers = scopedMembers
+    }
+  where
+    parsedMembers =
+      Map.findWithDefault [] source.definitionSourceId parsedMembersById
+
+    scopedMembers =
+      dedupeDefinitionMembersByNameSpan $ concatMap resolveParsedMember parsedMembers
+
+    scopedMemberNames =
+      Set.fromList (map memberName scopedMembers)
+
+    rootCandidates =
+      source.definitionSourceNames `Set.difference` scopedMemberNames
+
+    rootNames
+      | Set.null rootCandidates = source.definitionSourceNames
+      | otherwise = rootCandidates
+
+    namesByOccKey =
+      Map.fromListWith
+        (<>)
+        [ (nameOccKey definitionName, [definitionName])
+        | definitionName <- Set.toList source.definitionSourceNames
+        ]
+
+    resolveParsedMember parsedMember =
+      case Map.findWithDefault [] parsedMember.parsedMemberOccKey namesByOccKey of
+        [] ->
+          []
+        [definitionName] ->
+          [DefinitionMember definitionName parsedMember.parsedMemberSpan]
+        candidateNames ->
+          [ DefinitionMember definitionName parsedMember.parsedMemberSpan
+          | definitionName <-
+              dedupeExactNames
+                ( let namesWithinSpan = namesWithinMemberSpan candidateNames parsedMember.parsedMemberSpan
+                   in if null namesWithinSpan then candidateNames else namesWithinSpan
+                )
+          ]
+
+    namesWithinMemberSpan candidateNames memberSpan =
+      [ candidateName
+      | candidateName <- candidateNames,
+        GHC.nameSrcSpan candidateName `GHC.isSubspanOf` memberSpan
+      ]
+
 collectDefinitionOccurrenceFacts ::
   GHC.Module ->
   DeclarationSpans ->
+  DefinitionMemberIndex ->
   Map.Map SpanKey ParsedOccurrenceSyntax ->
   Map.Map ImportId ImportCandidate ->
   [MinimalTypedOccurrence] ->
   [DefinitionOccurrenceFact]
-collectDefinitionOccurrenceFacts definingModule spans parsedOccurrenceSyntaxBySpan importCandidatesById typedOccurrences =
+collectDefinitionOccurrenceFacts definingModule spans memberIndex parsedOccurrenceSyntaxBySpan importCandidatesById typedOccurrences =
   dedupeOccurrences $
     mapMaybe toReferencedOccurrence filteredOccurrences
   where
@@ -415,6 +704,11 @@ collectDefinitionOccurrenceFacts definingModule spans parsedOccurrenceSyntaxBySp
         DefinitionOccurrenceFact
           { occurrenceFactName = occurrenceName,
             occurrenceFactSpan = occurrence.typedOccurrenceSpan,
+            occurrenceFactOwners =
+              chooseOccurrenceOwners
+                memberIndex
+                occurrence.typedOccurrenceParent
+                occurrence.typedOccurrenceSpan,
             occurrenceFactParent = occurrence.typedOccurrenceParent,
             occurrenceFactImportCandidates =
               dedupeImportIds
@@ -428,6 +722,76 @@ collectDefinitionOccurrenceFacts definingModule spans parsedOccurrenceSyntaxBySp
       case Map.lookup importId importCandidatesById of
         Nothing -> False
         Just importCandidate -> supportsOccurrenceSyntax syntax importCandidate.importCandidateBaseImport
+
+chooseOccurrenceOwners ::
+  DefinitionMemberIndex ->
+  Maybe GHC.Name ->
+  GHC.SrcSpan ->
+  Set.Set GHC.Name
+chooseOccurrenceOwners memberIndex maybeParent occurrenceSpan
+  | not (Set.null narrowParentOwners) =
+      narrowParentOwners
+  | not (Set.null narrowestOwners) =
+      if not (Set.null narrowedParentOwners)
+        then narrowedParentOwners
+        else narrowestOwners
+  | not (Set.null parentOwners) =
+      parentOwners
+  | otherwise =
+      memberIndex.rootMemberNames
+  where
+    allDeclarationNames =
+      memberIndex.rootMemberNames
+        <> Set.fromList (map memberName memberIndex.scopedMembers)
+
+    parentOwners =
+      Set.fromList
+        [ parentName
+        | parentName <- maybeToList maybeParent,
+          parentName `Set.member` allDeclarationNames
+        ]
+
+    narrowParentOwners =
+      Set.difference parentOwners memberIndex.rootMemberNames
+
+    containingMembers =
+      [ member
+      | member <- memberIndex.scopedMembers,
+        occurrenceSpan `GHC.isSubspanOf` member.memberSpan
+      ]
+
+    narrowestSpanSize =
+      minimumMaybe (map (memberSpanSize . memberSpan) containingMembers)
+
+    narrowestOwners =
+      case narrowestSpanSize of
+        Nothing ->
+          Set.empty
+        Just minSize ->
+          Set.fromList
+            [ member.memberName
+            | member <- containingMembers,
+              memberSpanSize member.memberSpan == minSize
+            ]
+
+    narrowedParentOwners =
+      Set.intersection parentOwners narrowestOwners
+
+minimumMaybe :: (Ord a) => [a] -> Maybe a
+minimumMaybe [] = Nothing
+minimumMaybe values = Just (minimum values)
+
+memberSpanSize :: GHC.SrcSpan -> Int
+memberSpanSize = \case
+  GHC.RealSrcSpan realSpan _ ->
+    let lineSpan = GHC.srcSpanEndLine realSpan - GHC.srcSpanStartLine realSpan
+        colSpan =
+          if lineSpan == 0
+            then GHC.srcSpanEndCol realSpan - GHC.srcSpanStartCol realSpan
+            else GHC.srcSpanEndCol realSpan
+     in lineSpan * 10_000 + colSpan
+  GHC.UnhelpfulSpan {} ->
+    maxBound
 
 locatedSpan :: GHC.LocatedN a -> GHC.SrcSpan
 locatedSpan =
@@ -482,8 +846,25 @@ dedupeOccurrences =
     sameOccurrence left right =
       left.occurrenceFactName == right.occurrenceFactName
         && left.occurrenceFactSpan == right.occurrenceFactSpan
+        && left.occurrenceFactOwners == right.occurrenceFactOwners
         && left.occurrenceFactParent == right.occurrenceFactParent
         && left.occurrenceFactImportCandidates == right.occurrenceFactImportCandidates
+
+dedupeParsedDefinitionMembers :: [ParsedDefinitionMember] -> [ParsedDefinitionMember]
+dedupeParsedDefinitionMembers =
+  List.nubBy sameMember
+  where
+    sameMember left right =
+      left.parsedMemberOccKey == right.parsedMemberOccKey
+        && left.parsedMemberSpan == right.parsedMemberSpan
+
+dedupeDefinitionMembersByNameSpan :: [DefinitionMember] -> [DefinitionMember]
+dedupeDefinitionMembersByNameSpan =
+  List.nubBy sameMember
+  where
+    sameMember left right =
+      left.memberName == right.memberName
+        && left.memberSpan == right.memberSpan
 
 dedupeMinimalTypedOccurrences :: [MinimalTypedOccurrence] -> [MinimalTypedOccurrence]
 dedupeMinimalTypedOccurrences =

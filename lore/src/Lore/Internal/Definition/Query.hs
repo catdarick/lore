@@ -41,9 +41,10 @@ resolveDefinitionSourceWithSummaries modSummaries inputName =
 resolveDefinitionDependencyNames ::
   (MonadLore m) =>
   Map.Map GHC.Module GHC.ModSummary ->
+  GHC.Name ->
   DefinitionSource ->
   m [GHC.Name]
-resolveDefinitionDependencyNames modSummaries source = do
+resolveDefinitionDependencyNames modSummaries referenceName source = do
   maybeModuleIndex <- getCachedDefinitionModuleIndex modSummaries source.definitionSourceModule
   pure $
     maybe
@@ -51,9 +52,20 @@ resolveDefinitionDependencyNames modSummaries source = do
       ( \moduleIndex ->
           let dependencies =
                 DefinitionIndex.lookupDefinitionDependenciesOrEmpty source.definitionSourceId moduleIndex
-           in Set.toList (dependencies.dependencyDirectReferenceNames <> dependencies.dependencyUsedInstanceNames)
+              directReferenceNames =
+                selectDependencyNames
+                  referenceName
+                  dependencies.dependencyDirectReferenceNamesByReferenceName
+              usedInstanceNames =
+                selectDependencyNames
+                  referenceName
+                  dependencies.dependencyUsedInstanceNamesByReferenceName
+           in Set.toList (directReferenceNames <> usedInstanceNames)
       )
       maybeModuleIndex
+  where
+    selectDependencyNames queriedName dependencyNamesByReferenceName =
+      Map.findWithDefault Set.empty queriedName dependencyNamesByReferenceName
 
 resolveDefinitionClosureSourcesWithSummaries ::
   (MonadLore m) =>
@@ -88,7 +100,7 @@ resolveDefinitionClosureSourcesWithSummaries modSummaries maxDepth inputName = d
                     then pure (Set.insert definitionId seen, (namedSource name source :))
                     else do
                       let seen' = Set.insert definitionId seen
-                      dependencyNames <- resolveDefinitionDependencyNames modSummaries source
+                      dependencyNames <- resolveDefinitionDependencyNames modSummaries name source
                       (seenAfterDependencies, dependencySourceBuilder) <-
                         collectDependencies (go (depth - 1)) seen' dependencyNames
                       pure

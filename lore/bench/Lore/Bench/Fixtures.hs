@@ -208,6 +208,7 @@ mkDefinitionIndexFixture definitionCount occurrencesPerDefinition importCount =
               [ (definitionIdFor i, declarationSpansByIndex Map.! i)
               | i <- [1 .. definitionCount]
               ],
+          Def.parsedDefinitionMembersById = Map.empty,
           Def.parsedOccurrenceSyntaxBySpan = Map.empty,
           Def.parsedRegionCandidates =
             [ Def.SourceRegionCandidate
@@ -278,6 +279,7 @@ mkMinifiedImportsFixture importCount occurrenceCount ambiguous =
           { Def.occurrenceFactName =
               mkBenchName module_ ("value" <> show ((occurrenceIndex `mod` 200) + 1)),
             Def.occurrenceFactSpan = mkBenchSrcSpan "Fixture/Bench/Minified.hs" lineNo 5 lineNo 20,
+            Def.occurrenceFactOwners = Set.empty,
             Def.occurrenceFactParent =
               if occurrenceIndex `mod` 11 == 0
                 then Just (mkBenchTcName module_ ("Parent" <> show (occurrenceIndex `mod` 17)) (70_000 + occurrenceIndex))
@@ -345,7 +347,7 @@ mkReferenceSearchFixture definitionCount hitsPerDefinition commonOcc =
 
     dependenciesById =
       Map.fromList
-        [ (definitionId, Def.DefinitionDependencies Set.empty Set.empty)
+        [ (definitionId, Def.DefinitionDependencies Set.empty Set.empty Map.empty Map.empty)
         | (_, definitionId, _, _) <- definitionTriples
         ]
 
