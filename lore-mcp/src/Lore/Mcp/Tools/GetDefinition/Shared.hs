@@ -474,7 +474,7 @@ quoteText value =
   "\"" <> value <> "\""
 
 maxRenderedDefinitionResults :: Int
-maxRenderedDefinitionResults = 30
+maxRenderedDefinitionResults = 3000
 
 maxRenderedOmittedSymbolsPerModule :: Int
 maxRenderedOmittedSymbolsPerModule = 10

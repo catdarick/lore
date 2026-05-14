@@ -3,7 +3,7 @@ module Lore.Internal.Targets.AutoRefactorLoop
     loadTargetsWithAutoRefactorRetries,
     runAutoRefactorRetryLoop,
     mergeAutoRefactSummaries,
-    applyAutoRefactorFromDiagnostics,
+    applyAutoRefactorFromLoadAttempt,
     emptyAutoRefactorResult,
   )
 where
@@ -11,9 +11,7 @@ where
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC
-import Lore.Diagnostics (Diagnostic)
-import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactor)
-import Lore.Internal.AutoRefactor.Issue (classifyAutoRefactorIssues)
+import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactorFromDiagnostics)
 import Lore.Internal.Session.CacheInvalidation (invalidateCachesAfterSourceEdits)
 import Lore.Internal.Targets.LoadAttempt (LoadAttempt (..), loadTargetsOnce)
 import Lore.Internal.Targets.Plan (TargetsPlan)
@@ -34,7 +32,7 @@ loadTargetsWithAutoRefactorRetries enableAutoRefactor targetsPlan
       runAutoRefactorRetryLoop
         maxAutoRefactorApplications
         (loadTargetsOnce targetsPlan)
-        applyAutoRefactorFromDiagnostics
+        applyAutoRefactorFromLoadAttempt
         invalidateCachesAfterSourceEdits
   | otherwise =
       loadTargetsOnce targetsPlan
@@ -43,14 +41,14 @@ runAutoRefactorRetryLoop ::
   (MonadLogger m) =>
   Int ->
   m LoadAttempt ->
-  ([Diagnostic] -> m AutoRefactorResult) ->
+  (LoadAttempt -> m AutoRefactorResult) ->
   m () ->
   m LoadAttempt
-runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromDiags invalidateAfterSourceEdits =
-  go 0 Set.empty Map.empty
+runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromAttempt invalidateAfterSourceEdits =
+  go 0 Set.empty Map.empty Set.empty
   where
-    go applicationsCount cleanedFiles cleanedSummaryByFile = do
-      attempt@LoadAttempt {loadAttemptDiagnostics, loadAttemptResult} <- loadAttemptOnce
+    go applicationsCount cleanedFiles cleanedSummaryByFile seenSignatures = do
+      attempt@LoadAttempt {loadAttemptResult} <- loadAttemptOnce
       case loadAttemptResult of
         GHC.Succeeded ->
           pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
@@ -59,16 +57,28 @@ runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromDi
               Log.info "Auto-refactor: reached max redundant import cleanup attempts."
               pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
           | otherwise -> do
-              cleanupResult <- applyAutoRefactorFromDiags loadAttemptDiagnostics
+              cleanupResult <- applyAutoRefactorFromAttempt attempt
+              let mergedCleanedFiles =
+                    cleanedFiles `Set.union` Set.fromList cleanupResult.autoRefactorChangedFiles
+                  mergedSummaryByFile =
+                    mergeAutoRefactSummaries cleanedSummaryByFile cleanupResult.autoRefactorSummaryByFile
+                  cleanupSignature = show (Map.toAscList cleanupResult.autoRefactorCleanupSignature)
               if cleanupResult.autoRefactorApplied
                 then do
-                  Log.info "Auto-refactor: redundant import cleanup was applied. Retrying target load."
-                  invalidateAfterSourceEdits
-                  go
-                    (applicationsCount + 1)
-                    (cleanedFiles `Set.union` Set.fromList cleanupResult.autoRefactorChangedFiles)
-                    (mergeAutoRefactSummaries cleanedSummaryByFile cleanupResult.autoRefactorSummaryByFile)
-                else
+                  if cleanupSignature `Set.member` seenSignatures
+                    then do
+                      Log.info "Auto-refactor: stopping retry loop because cleanup signature repeated."
+                      pure (withAutoRefactInfo mergedCleanedFiles mergedSummaryByFile attempt)
+                    else do
+                      Log.info "Auto-refactor: redundant import cleanup was applied. Retrying target load."
+                      invalidateAfterSourceEdits
+                      go
+                        (applicationsCount + 1)
+                        mergedCleanedFiles
+                        mergedSummaryByFile
+                        (Set.insert cleanupSignature seenSignatures)
+                else do
+                  Log.info "Auto-refactor: skipped retry because cleanup produced no safe edits."
                   pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
 
     withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt =
@@ -84,22 +94,18 @@ mergeAutoRefactSummaries ::
 mergeAutoRefactSummaries =
   Map.unionWith (<>)
 
-applyAutoRefactorFromDiagnostics ::
+applyAutoRefactorFromLoadAttempt ::
   (MonadLore m) =>
-  [Diagnostic] ->
+  LoadAttempt ->
   m AutoRefactorResult
-applyAutoRefactorFromDiagnostics diagnostics =
-  case classifyAutoRefactorIssues diagnostics of
-    Nothing -> do
-      Log.debug "Auto-refactor: no redundant import diagnostics found; skipping."
-      pure emptyAutoRefactorResult
-    Just issues ->
-      applyAutoRefactor issues
+applyAutoRefactorFromLoadAttempt LoadAttempt {loadAttemptDiagnostics, loadAttemptModuleSummariesByFile} =
+  applyAutoRefactorFromDiagnostics loadAttemptModuleSummariesByFile loadAttemptDiagnostics
 
 emptyAutoRefactorResult :: AutoRefactorResult
 emptyAutoRefactorResult =
   AutoRefactorResult
     { autoRefactorApplied = False,
       autoRefactorChangedFiles = [],
-      autoRefactorSummaryByFile = Map.empty
+      autoRefactorSummaryByFile = Map.empty,
+      autoRefactorCleanupSignature = Map.empty
     }

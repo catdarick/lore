@@ -95,6 +95,7 @@ runtimeExceptionDiagnostic runtimeException =
     { diagnosticClass = DiagInteractive,
       diagnosticSeverity = Just GHC.SevError,
       diagnosticReason = Nothing,
+      diagnosticWarningFlag = Nothing,
       diagnosticCode = Nothing,
       diagnosticSpan = UnhelpfulDiagnosticSpan "getTypeOfExpression",
       diagnosticMessage = T.pack (show runtimeException),

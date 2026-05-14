@@ -29,6 +29,7 @@ import qualified GHC.Utils.Outputable as Outputable
 import Lore.Internal.List (mapMaybeToList, maybeToList)
 import Lore.Internal.SourceSpan (spanContains, srcSpanToSpan)
 import Lore.Internal.SourceSpan.Types (Span (..))
+import Lore.Internal.SourceText (spanTextMaybe)
 
 newtype ImportId = ImportId Int
   deriving (Eq, Ord, Show)
@@ -80,14 +81,14 @@ data NormalizedImport = NormalizedImport
   }
   deriving (Eq, Show)
 
-parseImports :: GHC.ParsedModule -> [ParsedImport]
-parseImports parsedModule =
-  mapMaybeToList (uncurry parseImport) (zip [0 ..] hsmodImports)
+parseImports :: Text -> GHC.ParsedModule -> [ParsedImport]
+parseImports source parsedModule =
+  mapMaybeToList (uncurry (parseImport source)) (zip [0 ..] hsmodImports)
   where
     GHC.L _ HsModule {hsmodImports} = GHC.pm_parsed_source parsedModule
 
-parseImport :: Int -> LImportDecl GhcPs -> Maybe ParsedImport
-parseImport importIndex locatedImport = do
+parseImport :: Text -> Int -> LImportDecl GhcPs -> Maybe ParsedImport
+parseImport source importIndex locatedImport = do
   parsedImportSpan <- srcSpanToSpan (GHC.locA (GHC.getLoc locatedImport))
   let parsedImportDecl = GHC.unLoc locatedImport
       parsedImportId = ImportId importIndex
@@ -114,17 +115,22 @@ parseImport importIndex locatedImport = do
         case parsedImportDecl.ideclImportList of
           Nothing -> OpenImport
           Just (GHC.Exactly, GHC.L _ lies) ->
-            ExplicitImport (map renderLocatedImportItem lies)
+            ExplicitImport (map (renderLocatedImportItem source) lies)
           Just (GHC.EverythingBut, GHC.L _ lies) ->
-            HidingImport (map renderLocatedImportItem lies)
+            HidingImport (map (renderLocatedImportItem source) lies)
   pure ParsedImport {..}
 
-renderLocatedImportItem :: GHC.LIE GhcPs -> ImportItem
-renderLocatedImportItem locatedItem =
-  ImportItem
-    { importItemText = renderImportItem (GHC.unLoc locatedItem),
-      importItemSpan = srcSpanToSpan (GHC.locA (GHC.getLoc locatedItem))
-    }
+renderLocatedImportItem :: Text -> GHC.LIE GhcPs -> ImportItem
+renderLocatedImportItem source locatedItem =
+  let maybeImportItemSpan = srcSpanToSpan (GHC.locA (GHC.getLoc locatedItem))
+      importItemText =
+        case maybeImportItemSpan >>= spanTextMaybe source of
+          Just sourceText -> sourceText
+          Nothing -> renderImportItem (GHC.unLoc locatedItem)
+   in ImportItem
+        { importItemText = importItemText,
+          importItemSpan = maybeImportItemSpan
+        }
 
 normalizedImportFromParsed :: ParsedImport -> NormalizedImport
 normalizedImportFromParsed ParsedImport {..} =

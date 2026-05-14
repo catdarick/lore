@@ -4,7 +4,11 @@ module Main
 where
 
 import qualified DefinitionSpec
-import qualified ImportNormalizeSpec
+import qualified ImportCleanupApplySpec
+import qualified ImportCleanupEditSpec
+import qualified ImportCleanupImportListParserSpec
+import qualified ImportCleanupResolveSpec
+import qualified ImportCleanupRewriteSpec
 import qualified InterpreterSpec
 import qualified LoggerSpec
 import qualified LookupSpec
@@ -17,7 +21,11 @@ main :: IO ()
 main =
   hspec do
     DefinitionSpec.spec
-    ImportNormalizeSpec.spec
+    ImportCleanupApplySpec.spec
+    ImportCleanupEditSpec.spec
+    ImportCleanupImportListParserSpec.spec
+    ImportCleanupResolveSpec.spec
+    ImportCleanupRewriteSpec.spec
     InterpreterSpec.spec
     LoggerSpec.spec
     LookupSpec.spec

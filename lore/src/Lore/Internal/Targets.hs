@@ -21,6 +21,7 @@ import Lore.Internal.Package (PackageData (..), extractDependencies, extractSour
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.Session.Cache.Types (LastLoadTargetsResultCache (..))
 import Lore.Internal.Session.CacheInvalidation (invalidateCachesForTargetConfigurationChange)
+import Lore.Internal.SourceText (relativeSourcePath)
 import Lore.Internal.Targets.AutoRefactorLoop (loadTargetsWithAutoRefactorRetries)
 import Lore.Internal.Targets.LoadAttempt (LoadAttempt (..), countLoadedModules, mkModuleTarget)
 import Lore.Internal.Targets.Plan (TargetsPlan (..), prepareTargetsPlan)
@@ -89,7 +90,14 @@ loadTargets options = do
 
   refreshInterpreterContext
   loadedModulesCount <- countLoadedModules targetModules
+  projectRootPath <- asks projectRoot
   let failedModulesCount = totalModulesCount - loadedModulesCount
+      displayPath = relativeSourcePath projectRootPath
+      autofixedFilesDisplay = map displayPath (Set.toAscList loadAttemptAutoRefactFiles)
+      autofixSummaryDisplay =
+        [ (displayPath filePath, summaryLines)
+        | (filePath, summaryLines) <- loadAttemptAutoRefactSummaryByFile
+        ]
   case loadAttemptResult of
     GHC.Succeeded ->
       Log.debug "Successfully updated GHC targets based on package.yaml configurations"
@@ -106,8 +114,8 @@ loadTargets options = do
             loadTargetsModulesLoaded = loadedModulesCount,
             loadTargetsModulesFailed = failedModulesCount,
             loadTargetsModulesAutofixed = Set.size loadAttemptAutoRefactFiles,
-            loadTargetsAutofixedFiles = Set.toAscList loadAttemptAutoRefactFiles,
-            loadTargetsAutofixSummaryByFile = loadAttemptAutoRefactSummaryByFile,
+            loadTargetsAutofixedFiles = autofixedFilesDisplay,
+            loadTargetsAutofixSummaryByFile = autofixSummaryDisplay,
             loadTargetsModulesTotal = totalModulesCount
           }
   storeLastLoadTargetsResultCache loadTargetsResult

@@ -39,6 +39,7 @@ dependencies:
 - text
 - transformers
 - unliftio
+- megaparsec
 
 ghc-options:
 - -Werror
@@ -64,6 +65,7 @@ library:
   - Lore.Lookup
   - Lore.Monad
   - Lore.Refactor.Imports
+  - Lore.Refactor.ImportCleanup.Internal
   - Lore.Session
   - Lore.SourceEdit
   - Lore.Targets
@@ -75,8 +77,12 @@ tests:
     source-dirs:         test
     other-modules:
     - DefinitionSpec
+    - ImportCleanupApplySpec
+    - ImportCleanupEditSpec
+    - ImportCleanupImportListParserSpec
+    - ImportCleanupResolveSpec
+    - ImportCleanupRewriteSpec
     - InterpreterSpec
-    - ImportNormalizeSpec
     - LookupSpec
     - LoggerSpec
     - RedundantImportsSpec

@@ -18,6 +18,7 @@ import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Data.Bag as GHC
 import qualified GHC.Driver.Errors.Types as GHC.Driver
+import qualified GHC.Driver.Flags as DriverFlags
 import GHC.Types.Error (MessageClass (..))
 import qualified GHC.Types.Error as GHC
 import GHC.Utils.Logger (LogAction)
@@ -29,6 +30,7 @@ data Diagnostic = Diagnostic
   { diagnosticClass :: DiagnosticClass,
     diagnosticSeverity :: Maybe GHC.Severity,
     diagnosticReason :: Maybe Text,
+    diagnosticWarningFlag :: Maybe DriverFlags.WarningFlag,
     diagnosticCode :: Maybe DiagnosticCodeInfo,
     diagnosticSpan :: DiagnosticSpan,
     diagnosticMessage :: Text,
@@ -62,6 +64,7 @@ ghcMessageToDiagnostic msgClass srcSpan sdoc =
     { diagnosticClass = toDiagnosticClass msgClass,
       diagnosticSeverity = toSeverity msgClass,
       diagnosticReason = toReasonText msgClass,
+      diagnosticWarningFlag = toWarningFlag msgClass,
       diagnosticCode = toCodeInfo msgClass,
       diagnosticSpan = toDiagnosticSpan srcSpan,
       diagnosticMessage = T.pack (GHC.showSDocUnsafe sdoc),
@@ -87,6 +90,7 @@ driverMessageEnvelopeToDiagnostic env =
         { diagnosticClass = DiagCompiler,
           diagnosticSeverity = Just (GHC.errMsgSeverity env),
           diagnosticReason = Just (reasonToText (GHC.diagnosticReason msg)),
+          diagnosticWarningFlag = reasonToWarningFlag (GHC.diagnosticReason msg),
           diagnosticCode = fmap fromDiagnosticCode (GHC.diagnosticCode msg),
           diagnosticSpan = toDiagnosticSpan (GHC.errMsgSpan env),
           diagnosticMessage = renderDecorated (GHC.diagnosticMessage (GHC.defaultDiagnosticOpts @GHC.Driver.DriverMessage) msg),
@@ -100,6 +104,7 @@ ghcMessageEnvelopeToDiagnostic env =
         { diagnosticClass = DiagCompiler,
           diagnosticSeverity = Just (GHC.errMsgSeverity env),
           diagnosticReason = Just (reasonToText (GHC.diagnosticReason msg)),
+          diagnosticWarningFlag = reasonToWarningFlag (GHC.diagnosticReason msg),
           diagnosticCode = fmap fromDiagnosticCode (GHC.diagnosticCode msg),
           diagnosticSpan = toDiagnosticSpan (GHC.errMsgSpan env),
           diagnosticMessage = renderDecorated (GHC.diagnosticMessage (GHC.defaultDiagnosticOpts @GHC.Driver.GhcMessage) msg),
@@ -125,6 +130,11 @@ toReasonText = \case
   MCDiagnostic _ reason _ -> Just (reasonToText reason)
   _ -> Nothing
 
+toWarningFlag :: MessageClass -> Maybe DriverFlags.WarningFlag
+toWarningFlag = \case
+  MCDiagnostic _ reason _ -> reasonToWarningFlag reason
+  _ -> Nothing
+
 toCodeInfo :: MessageClass -> Maybe DiagnosticCodeInfo
 toCodeInfo = \case
   MCDiagnostic _ _ mCode -> fmap fromDiagnosticCode mCode
@@ -132,6 +142,11 @@ toCodeInfo = \case
 
 reasonToText :: GHC.DiagnosticReason -> Text
 reasonToText = T.pack . show
+
+reasonToWarningFlag :: GHC.DiagnosticReason -> Maybe DriverFlags.WarningFlag
+reasonToWarningFlag = \case
+  GHC.WarningWithFlag flag -> Just flag
+  _ -> Nothing
 
 fromDiagnosticCode :: GHC.DiagnosticCode -> DiagnosticCodeInfo
 fromDiagnosticCode

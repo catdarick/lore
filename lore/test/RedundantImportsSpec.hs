@@ -1,8 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module RedundantImportsSpec (spec) where
 
-import Data.List.NonEmpty (NonEmpty (..))
-import Data.Maybe (isJust)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
+import qualified GHC.Driver.Flags as DriverFlags
 import Lore.Diagnostics
   ( Diagnostic (..),
     DiagnosticClass (..),
@@ -10,35 +12,83 @@ import Lore.Diagnostics
     Span (..),
   )
 import Lore.Refactor.Imports
-  ( RedundantImportRequest (..),
-    redundantImportRequestFromDiagnostic,
+  ( ImportNamespace (..),
+    RedundantImportIssue (..),
+    RedundantImportedOccurrence (..),
+    redundantImportIssueFromDiagnostic,
   )
 import Test.Hspec
 
 spec :: Spec
 spec =
-  describe "redundant import diagnostic parser" do
-    it "does not downgrade specific-binding diagnostics to whole-import removals" do
+  describe "redundant import issue classifier" do
+    it "classifies whole-import diagnostics" do
       let diagnostic =
-            mkDiagnostic "The import of foo from module Data.Maybe is redundant"
-      redundantImportRequestFromDiagnostic diagnostic
-        `shouldBe` Nothing
+            mkDiagnostic "The import of `Data.List' is redundant"
+      redundantImportIssueFromDiagnostic diagnostic
+        `shouldBe` Just (RedundantWholeImportIssue mkSpan)
 
-    it "still parses whole-import redundant diagnostics" do
+    it "classifies qualified whole-import diagnostics" do
       let diagnostic =
             mkDiagnostic "The qualified import of `Data.Sequence' is redundant"
-      redundantImportRequestFromDiagnostic diagnostic
-        `shouldSatisfy` isJust
+      redundantImportIssueFromDiagnostic diagnostic
+        `shouldBe` Just (RedundantWholeImportIssue mkSpan)
 
-    it "keeps parent imports with nested commas as one binding" do
+    it "classifies specific-binding diagnostics" do
       let diagnostic =
-            mkDiagnostic "The import of ‘Foo(A, B)’ from module Demo.Types is redundant"
-      redundantImportRequestFromDiagnostic diagnostic
+            mkDiagnostic "The import of ‘foo’ from module ‘Data.Maybe’ is redundant"
+      redundantImportIssueFromDiagnostic diagnostic
         `shouldBe` Just
-          RedundantImportRequest
-            { redundantImportDiagnosticSpan = mkSpan,
-              redundantImportBindings = Just ("Foo(A, B)" :| [])
-            }
+          ( RedundantImportOccurrencesIssue
+              mkSpan
+              (RedundantImportedOccurrence "foo" Nothing NE.:| [])
+          )
+
+    it "classifies comma-separated occurrence diagnostics as flat occurrences" do
+      let diagnostic =
+            mkDiagnostic "The import of ‘foo, bar’ from module ‘Foo’ is redundant"
+      redundantImportIssueFromDiagnostic diagnostic
+        `shouldBe` Just
+          ( RedundantImportOccurrencesIssue
+              mkSpan
+              ( RedundantImportedOccurrence "foo" Nothing
+                  NE.:| [RedundantImportedOccurrence "bar" Nothing]
+              )
+          )
+
+    it "classifies type namespace occurrence diagnostics" do
+      let diagnostic =
+            mkDiagnostic "The import of ‘type T’ from module ‘Foo’ is redundant"
+      redundantImportIssueFromDiagnostic diagnostic
+        `shouldBe` Just
+          ( RedundantImportOccurrencesIssue
+              mkSpan
+              (RedundantImportedOccurrence "T" (Just TypeNamespace) NE.:| [])
+          )
+
+    it "classifies pattern namespace occurrence diagnostics" do
+      let diagnostic =
+            mkDiagnostic "The import of ‘pattern P’ from module ‘Foo’ is redundant"
+      redundantImportIssueFromDiagnostic diagnostic
+        `shouldBe` Just
+          ( RedundantImportOccurrencesIssue
+              mkSpan
+              (RedundantImportedOccurrence "P" (Just PatternNamespace) NE.:| [])
+          )
+
+    it "does not classify diagnostics without the unused-imports warning flag" do
+      let diagnostic =
+            (mkDiagnostic "The import of `Data.List' is redundant")
+              { diagnosticWarningFlag = Nothing
+              }
+      redundantImportIssueFromDiagnostic diagnostic
+        `shouldBe` Nothing
+
+    it "does not classify malformed specific-binding diagnostics" do
+      let diagnostic =
+            mkDiagnostic "The import of foo from module Data.Maybe is redundant"
+      redundantImportIssueFromDiagnostic diagnostic
+        `shouldBe` Nothing
 
 mkDiagnostic :: T.Text -> Diagnostic
 mkDiagnostic diagnosticMessage =
@@ -46,6 +96,7 @@ mkDiagnostic diagnosticMessage =
     { diagnosticClass = DiagCompiler,
       diagnosticSeverity = Nothing,
       diagnosticReason = Nothing,
+      diagnosticWarningFlag = Just DriverFlags.Opt_WarnUnusedImports,
       diagnosticCode = Nothing,
       diagnosticSpan = RealDiagnosticSpan mkSpan,
       diagnosticMessage,

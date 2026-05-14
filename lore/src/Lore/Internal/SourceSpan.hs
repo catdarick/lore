@@ -52,8 +52,8 @@ spanContains outer inner =
 spansOverlap :: Span -> Span -> Bool
 spansOverlap left right =
   left.spanFile == right.spanFile
-    && spanStartKey left <= spanEndKey right
-    && spanStartKey right <= spanEndKey left
+    && spanStartKey left < spanEndKey right
+    && spanStartKey right < spanEndKey left
 
 srcSpanSortKey :: GHC.SrcSpan -> (String, Int, Int, Int, Int)
 srcSpanSortKey span' =

@@ -35,18 +35,14 @@ library
       Lore.Lookup
       Lore.Monad
       Lore.Refactor.Imports
+      Lore.Refactor.ImportCleanup.Internal
       Lore.Session
       Lore.SourceEdit
       Lore.Targets
   other-modules:
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
-      Lore.Internal.AutoRefactor.ImportCleanupEdit
       Lore.Internal.AutoRefactor.ImportDecl
-      Lore.Internal.AutoRefactor.ImportItemRemoval
-      Lore.Internal.AutoRefactor.ImportNormalize
-      Lore.Internal.AutoRefactor.ImportOps
-      Lore.Internal.AutoRefactor.ImportRewrite
       Lore.Internal.AutoRefactor.Issue
       Lore.Internal.AutoRefactor.RedundantImports
       Lore.Internal.Cache.Types
@@ -68,6 +64,15 @@ library
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
+      Lore.Internal.ImportCleanup.Apply
+      Lore.Internal.ImportCleanup.Diagnostics
+      Lore.Internal.ImportCleanup.Edit
+      Lore.Internal.ImportCleanup.ImportListParser
+      Lore.Internal.ImportCleanup.Parse
+      Lore.Internal.ImportCleanup.Resolve
+      Lore.Internal.ImportCleanup.Rewrite
+      Lore.Internal.ImportCleanup.SourceSlice
+      Lore.Internal.ImportCleanup.Types
       Lore.Internal.Interpreter
       Lore.Internal.List
       Lore.Internal.Lookup.Cache.Types
@@ -83,6 +88,7 @@ library
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
       Lore.Internal.SourceEdit
+      Lore.Internal.SourcePath
       Lore.Internal.SourceSpan
       Lore.Internal.SourceSpan.Types
       Lore.Internal.SourceText
@@ -155,6 +161,7 @@ library
     , ghc-boot
     , ghc-paths
     , hpack
+    , megaparsec
     , mtl
     , process
     , text
@@ -168,8 +175,12 @@ test-suite lore-test
   main-is: Spec.hs
   other-modules:
       DefinitionSpec
+      ImportCleanupApplySpec
+      ImportCleanupEditSpec
+      ImportCleanupImportListParserSpec
+      ImportCleanupResolveSpec
+      ImportCleanupRewriteSpec
       InterpreterSpec
-      ImportNormalizeSpec
       LookupSpec
       LoggerSpec
       RedundantImportsSpec
@@ -236,6 +247,7 @@ test-suite lore-test
     , hpack
     , hspec
     , lore
+    , megaparsec
     , mtl
     , process
     , text
@@ -264,12 +276,7 @@ benchmark lore-bench
       Lore.Diagnostics
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
-      Lore.Internal.AutoRefactor.ImportCleanupEdit
       Lore.Internal.AutoRefactor.ImportDecl
-      Lore.Internal.AutoRefactor.ImportItemRemoval
-      Lore.Internal.AutoRefactor.ImportNormalize
-      Lore.Internal.AutoRefactor.ImportOps
-      Lore.Internal.AutoRefactor.ImportRewrite
       Lore.Internal.AutoRefactor.Issue
       Lore.Internal.AutoRefactor.RedundantImports
       Lore.Internal.Cache.Types
@@ -291,6 +298,15 @@ benchmark lore-bench
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
+      Lore.Internal.ImportCleanup.Apply
+      Lore.Internal.ImportCleanup.Diagnostics
+      Lore.Internal.ImportCleanup.Edit
+      Lore.Internal.ImportCleanup.ImportListParser
+      Lore.Internal.ImportCleanup.Parse
+      Lore.Internal.ImportCleanup.Resolve
+      Lore.Internal.ImportCleanup.Rewrite
+      Lore.Internal.ImportCleanup.SourceSlice
+      Lore.Internal.ImportCleanup.Types
       Lore.Internal.Interpreter
       Lore.Internal.List
       Lore.Internal.Lookup.Cache.Types
@@ -306,6 +322,7 @@ benchmark lore-bench
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
       Lore.Internal.SourceEdit
+      Lore.Internal.SourcePath
       Lore.Internal.SourceSpan
       Lore.Internal.SourceSpan.Types
       Lore.Internal.SourceText
@@ -322,6 +339,7 @@ benchmark lore-bench
       Lore.Lookup
       Lore.Module
       Lore.Monad
+      Lore.Refactor.ImportCleanup.Internal
       Lore.Refactor.Imports
       Lore.Session
       Lore.SourceEdit
@@ -390,6 +408,7 @@ benchmark lore-bench
     , ghc-paths
     , hpack
     , lore
+    , megaparsec
     , mtl
     , process
     , text
@@ -420,12 +439,7 @@ benchmark lore-memory-bench
       Lore.Diagnostics
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
-      Lore.Internal.AutoRefactor.ImportCleanupEdit
       Lore.Internal.AutoRefactor.ImportDecl
-      Lore.Internal.AutoRefactor.ImportItemRemoval
-      Lore.Internal.AutoRefactor.ImportNormalize
-      Lore.Internal.AutoRefactor.ImportOps
-      Lore.Internal.AutoRefactor.ImportRewrite
       Lore.Internal.AutoRefactor.Issue
       Lore.Internal.AutoRefactor.RedundantImports
       Lore.Internal.Cache.Types
@@ -447,6 +461,15 @@ benchmark lore-memory-bench
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
+      Lore.Internal.ImportCleanup.Apply
+      Lore.Internal.ImportCleanup.Diagnostics
+      Lore.Internal.ImportCleanup.Edit
+      Lore.Internal.ImportCleanup.ImportListParser
+      Lore.Internal.ImportCleanup.Parse
+      Lore.Internal.ImportCleanup.Resolve
+      Lore.Internal.ImportCleanup.Rewrite
+      Lore.Internal.ImportCleanup.SourceSlice
+      Lore.Internal.ImportCleanup.Types
       Lore.Internal.Interpreter
       Lore.Internal.List
       Lore.Internal.Lookup.Cache.Types
@@ -462,6 +485,7 @@ benchmark lore-memory-bench
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
       Lore.Internal.SourceEdit
+      Lore.Internal.SourcePath
       Lore.Internal.SourceSpan
       Lore.Internal.SourceSpan.Types
       Lore.Internal.SourceText
@@ -478,6 +502,7 @@ benchmark lore-memory-bench
       Lore.Lookup
       Lore.Module
       Lore.Monad
+      Lore.Refactor.ImportCleanup.Internal
       Lore.Refactor.Imports
       Lore.Session
       Lore.SourceEdit
@@ -546,6 +571,7 @@ benchmark lore-memory-bench
     , ghc-paths
     , hpack
     , lore
+    , megaparsec
     , mtl
     , process
     , text

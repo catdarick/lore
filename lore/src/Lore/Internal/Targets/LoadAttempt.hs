@@ -22,6 +22,7 @@ import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.Session.CacheInvalidation (retainCachesForLoadedModules)
+import Lore.Internal.SourcePath (normalizeSourceFilePathM)
 import Lore.Internal.Targets.ModuleGraphPatch (applyModuleScopedArgs)
 import Lore.Internal.Targets.Plan (TargetsPlan)
 import qualified Lore.Logger as Log
@@ -30,6 +31,7 @@ import Lore.Monad (MonadLore)
 data LoadAttempt = LoadAttempt
   { loadAttemptDiagnostics :: [Diagnostic],
     loadAttemptResult :: GHC.SuccessFlag,
+    loadAttemptModuleSummariesByFile :: Map.Map FilePath GHC.ModSummary,
     loadAttemptAutoRefactFiles :: Set.Set FilePath,
     loadAttemptAutoRefactSummaryByFile :: [(FilePath, [String])]
   }
@@ -45,6 +47,7 @@ loadTargetsOnce targetsPlan = do
         <> intercalate "\n" (map show dependencyDiagnostics)
   Log.debug "Patching module graph with component-specific GHC options..."
   patchedModGraph <- applyModuleScopedArgs targetsPlan modGraph
+  moduleSummariesByFile <- buildModuleSummariesByFile patchedModGraph
   ifaceCache <- asks ifaceCache
   Log.debug "Loading targets with GHC..."
   (diagnostics, r) <- withDiagnosticsCapturing do
@@ -56,9 +59,23 @@ loadTargetsOnce targetsPlan = do
     LoadAttempt
       { loadAttemptDiagnostics = dependencyDiagnostics <> diagnostics,
         loadAttemptResult = r,
+        loadAttemptModuleSummariesByFile = moduleSummariesByFile,
         loadAttemptAutoRefactFiles = Set.empty,
         loadAttemptAutoRefactSummaryByFile = []
       }
+
+buildModuleSummariesByFile :: (MonadLore m) => GHC.ModuleGraph -> m (Map.Map FilePath GHC.ModSummary)
+buildModuleSummariesByFile moduleGraph = do
+  pairs <- mapMaybeM summaryPair (GHC.mgModSummaries moduleGraph)
+  pure (Map.fromList pairs)
+  where
+    summaryPair summary =
+      case GHC.ml_hs_file (GHC.ms_location summary) of
+        Nothing ->
+          pure Nothing
+        Just sourceFile -> do
+          normalizedFilePath <- normalizeSourceFilePathM sourceFile
+          pure (Just (normalizedFilePath, summary))
 
 collectLoadedModules :: (MonadLore m) => GHC.ModuleGraph -> m (Set.Set GHC.Module)
 collectLoadedModules moduleGraph = do

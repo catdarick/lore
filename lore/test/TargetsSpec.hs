@@ -118,7 +118,7 @@ spec =
             T.replace
               "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep)\n"
               ( "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep)\n"
-                  <> "import qualified Data.Sequence as Seq -- remove-seq-import\n"
+                  <> "import qualified Data.Sequence as Seq\n"
               )
 
           loadResult <-
@@ -128,8 +128,9 @@ spec =
           demoSource <- TIO.readFile demoFile
           loadResult.loadTargetsSucceeded `shouldBe` True
           loadResult.loadTargetsModulesAutofixed `shouldBe` 1
+          loadResult.loadTargetsAutofixedFiles `shouldBe` ["src/Demo.hs"]
+          map fst loadResult.loadTargetsAutofixSummaryByFile `shouldBe` ["src/Demo.hs"]
           T.isInfixOf "import qualified Data.Sequence as Seq" demoSource `shouldBe` False
-          T.isInfixOf "remove-seq-import" demoSource `shouldBe` False
 
       it "succeeds on a second explicit load after in-loop cleanup" do
         withFixtureCopy \fixtureRoot -> do

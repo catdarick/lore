@@ -31,15 +31,18 @@ import Lore.Monad (MonadLore)
 
 data FileEdit
   = ReplaceSpanEdit FilePath Span Text
+  | ReplaceSpanEditExpected FilePath Span Text Text
   deriving (Eq, Show)
 
 data EditValidationWarning
   = ConflictingFileEdits FilePath FileEdit FileEdit
   | InvalidFileEditSpan FilePath FileEdit
+  | StaleFileEditSpan FilePath FileEdit
   deriving (Eq, Show)
 
 data AppliedFileEdits = AppliedFileEdits
   { appliedChangedFiles :: [FilePath],
+    appliedEditsByFile :: Map.Map FilePath [FileEdit],
     appliedWarnings :: [EditValidationWarning]
   }
   deriving (Eq, Show)
@@ -56,20 +59,33 @@ applyFileEdits edits = do
   fileResults <- forM (Map.toList groupedEdits) \(filePath, fileEdits) -> do
     source <- liftIO $ TIO.readFile filePath
     let (validatedEdits, validationWarnings) = validateReplacementEdits source filePath fileEdits
-        updatedSource = applyValidatedReplacementEdits source validatedEdits
-    if updatedSource == source
-      then pure (Nothing, validationWarnings)
+    if not (null validationWarnings)
+      then do
+        Log.info $ "Auto-refactor: skipping all edits for " <> filePath <> " because some edits were unsafe."
+        pure (Nothing, [], validationWarnings)
       else do
-        Log.info $ "Auto-refactor: applying edits to " <> filePath
-        liftIO $ TIO.writeFile filePath updatedSource
-        pure (Just filePath, validationWarnings)
+        let effectiveEdits = filter (offsetEditChangesSource source) validatedEdits
+            updatedSource = applyValidatedReplacementEdits source effectiveEdits
+            fileAppliedEdits = map (.offsetFileEdit) effectiveEdits
+        if updatedSource == source
+          then pure (Nothing, [], validationWarnings)
+          else do
+            Log.info $ "Auto-refactor: applying edits to " <> filePath
+            liftIO $ TIO.writeFile filePath updatedSource
+            pure (Just filePath, fileAppliedEdits, validationWarnings)
 
-  let changedFiles = catMaybes (map fst fileResults)
-      warnings = concatMap snd fileResults
+  let changedFiles = catMaybes (map (\(maybeFilePath, _, _) -> maybeFilePath) fileResults)
+      appliedEditsByFile =
+        Map.fromList
+          [ (filePath, fileAppliedEdits)
+          | (Just filePath, fileAppliedEdits, _) <- fileResults
+          ]
+      warnings = concatMap (\(_, _, fileWarnings) -> fileWarnings) fileResults
   forM_ warnings (Log.warn . renderEditValidationWarning)
   pure
     AppliedFileEdits
       { appliedChangedFiles = changedFiles,
+        appliedEditsByFile = appliedEditsByFile,
         appliedWarnings = warnings
       }
   where
@@ -99,8 +115,22 @@ applyValidatedReplacementEdits source =
     compareDescendingOffsets left right =
       compare (offsetStart right, offsetEnd right) (offsetStart left, offsetEnd left)
 
-    applyOne contents OffsetFileEdit {offsetStart, offsetEnd, offsetFileEdit = ReplaceSpanEdit _ _ replacement} =
-      T.take offsetStart contents <> replacement <> T.drop offsetEnd contents
+    applyOne contents OffsetFileEdit {offsetStart, offsetEnd, offsetFileEdit} =
+      case offsetFileEdit of
+        ReplaceSpanEdit _ _ replacement ->
+          T.take offsetStart contents <> replacement <> T.drop offsetEnd contents
+        ReplaceSpanEditExpected _ _ _expected replacement ->
+          T.take offsetStart contents <> replacement <> T.drop offsetEnd contents
+
+offsetEditChangesSource :: Text -> OffsetFileEdit -> Bool
+offsetEditChangesSource source OffsetFileEdit {offsetStart, offsetEnd, offsetFileEdit} =
+  case offsetFileEdit of
+    ReplaceSpanEdit _ _ replacement ->
+      let existingSlice = T.take (offsetEnd - offsetStart) (T.drop offsetStart source)
+       in existingSlice /= replacement
+    ReplaceSpanEditExpected _ _ _expected replacement ->
+      let existingSlice = T.take (offsetEnd - offsetStart) (T.drop offsetStart source)
+       in existingSlice /= replacement
 
 validateReplacementEdits :: Text -> FilePath -> [FileEdit] -> ([OffsetFileEdit], [EditValidationWarning])
 validateReplacementEdits source filePath edits =
@@ -114,13 +144,25 @@ validateReplacementEdits source filePath edits =
         (\left right -> compare (offsetStart left, offsetEnd left) (offsetStart right, offsetEnd right))
         offsetCandidates
 
-    collectOffset edit@(ReplaceSpanEdit editSourcePath editSpan _replacement) (warningsAcc, candidatesAcc) =
-      case spanToOffsets source editSpan of
-        Just (startOffset, endOffset)
-          | startOffset <= endOffset ->
-              (warningsAcc, OffsetFileEdit edit startOffset endOffset : candidatesAcc)
-        _ ->
-          (InvalidFileEditSpan editSourcePath edit : warningsAcc, candidatesAcc)
+    collectOffset edit (warningsAcc, candidatesAcc) =
+      case edit of
+        ReplaceSpanEdit editSourcePath editSpan _replacement ->
+          case spanToOffsets source editSpan of
+            Just (startOffset, endOffset)
+              | startOffset <= endOffset ->
+                  (warningsAcc, OffsetFileEdit edit startOffset endOffset : candidatesAcc)
+            _ ->
+              (InvalidFileEditSpan editSourcePath edit : warningsAcc, candidatesAcc)
+        ReplaceSpanEditExpected editSourcePath editSpan expected _replacement ->
+          case spanToOffsets source editSpan of
+            Just (startOffset, endOffset)
+              | startOffset <= endOffset ->
+                  let existingSlice = T.take (endOffset - startOffset) (T.drop startOffset source)
+                   in if existingSlice == expected
+                        then (warningsAcc, OffsetFileEdit edit startOffset endOffset : candidatesAcc)
+                        else (StaleFileEditSpan filePath edit : warningsAcc, candidatesAcc)
+            _ ->
+              (InvalidFileEditSpan editSourcePath edit : warningsAcc, candidatesAcc)
     (validatedEdits, _conflictedEdits, conflictWarnings) =
       foldl' classifyCandidate ([], [], []) sortedCandidates
 
@@ -186,11 +228,18 @@ renderEditValidationWarning = \case
       <> warningFilePath
       <> ": "
       <> show edit
+  StaleFileEditSpan warningFilePath edit ->
+    "Auto-refactor: skipped stale edit in "
+      <> warningFilePath
+      <> ": "
+      <> show edit
 
 editFilePath :: FileEdit -> FilePath
 editFilePath = \case
   ReplaceSpanEdit filePath _ _ -> filePath
+  ReplaceSpanEditExpected filePath _ _ _ -> filePath
 
 replacementStartKey :: FileEdit -> (Int, Int)
 replacementStartKey = \case
   ReplaceSpanEdit _ span' _ -> spanStartKey span'
+  ReplaceSpanEditExpected _ span' _ _ -> spanStartKey span'

@@ -4,7 +4,6 @@ module Lore.Bench.Fixtures
   ( DefinitionIndexFixture (..),
     MinifiedImportsFixture (..),
     ReferenceSearchFixture (..),
-    ImportNormalizeFixture (..),
     SourceTextFixture (..),
     SourceRegionFixture (..),
     smallDefinitionIndexFixture,
@@ -15,8 +14,6 @@ module Lore.Bench.Fixtures
     smallMinifiedImportsFixture,
     ambiguousMinifiedImportsFixture,
     largeMinifiedImportsFixture,
-    smallImportNormalizeFixture,
-    largeImportNormalizeFixture,
     smallSourceTextFixture,
     largeSourceTextFixture,
     smallSourceRegionFixture,
@@ -29,7 +26,6 @@ module Lore.Bench.Fixtures
 where
 
 import Data.Char (ord)
-import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -40,7 +36,6 @@ import qualified GHC.Types.Unique as Unique
 import Lore.Diagnostics (Span (..))
 import qualified Lore.Internal.AutoRefactor.Edit as Edit
 import qualified Lore.Internal.Definition.Types as Def
-import qualified Lore.Refactor.Imports as Ref
 
 data DefinitionIndexFixture = DefinitionIndexFixture
   { fixtureModule :: !GHC.Module,
@@ -61,12 +56,6 @@ data ReferenceSearchFixture = ReferenceSearchFixture
     referenceFixtureTargetNames :: ![GHC.Name],
     referenceFixtureOccurrenceIndex :: !(Map.Map Def.OccKey (Set.Set GHC.Module)),
     referenceFixtureDuplicateHits :: ![Def.ReferenceHit]
-  }
-  deriving stock (Generic)
-
-data ImportNormalizeFixture = ImportNormalizeFixture
-  { normalizeFixtureImports :: ![Ref.NormalizedImport],
-    normalizeFixtureOperations :: ![Ref.ImportOperation]
   }
   deriving stock (Generic)
 
@@ -106,12 +95,6 @@ ambiguousMinifiedImportsFixture = mkMinifiedImportsFixture 20 400 True
 
 largeMinifiedImportsFixture :: MinifiedImportsFixture
 largeMinifiedImportsFixture = mkMinifiedImportsFixture 200 25000 True
-
-smallImportNormalizeFixture :: ImportNormalizeFixture
-smallImportNormalizeFixture = mkImportNormalizeFixture 5 1
-
-largeImportNormalizeFixture :: ImportNormalizeFixture
-largeImportNormalizeFixture = mkImportNormalizeFixture 500 100
 
 smallSourceTextFixture :: SourceTextFixture
 smallSourceTextFixture = mkSourceTextFixture 100 20
@@ -420,57 +403,6 @@ mkReferenceSearchFixture definitionCount hitsPerDefinition commonOcc =
         [ (Def.nameOccKey (Def.referenceHitTargetName hit), Set.singleton module_)
         | hit <- allHits
         ]
-
-mkImportNormalizeFixture :: Int -> Int -> ImportNormalizeFixture
-mkImportNormalizeFixture importCount operationCount =
-  ImportNormalizeFixture
-    { normalizeFixtureImports =
-        [ mkNormalizedImport importIndex
-        | importIndex <- [1 .. max 0 importCount]
-        ],
-      normalizeFixtureOperations =
-        if importCount <= 0
-          then []
-          else
-            [ mkOperation operationIndex
-            | operationIndex <- [1 .. operationCount]
-            ]
-    }
-  where
-    mkNormalizedImport importIndex =
-      Ref.NormalizedImport
-        { Ref.normalizedImportId = Just (Ref.ImportId importIndex),
-          Ref.normalizedImportOrder = importIndex,
-          Ref.normalizedImportSpan = Nothing,
-          Ref.normalizedImportModuleName = T.pack ("Fixture.Module" <> show ((importIndex `mod` 50) + 1)),
-          Ref.normalizedImportQualifiedStyle =
-            if importIndex `mod` 4 == 0
-              then Ref.ImportQualifiedPrefix
-              else Ref.ImportUnqualified,
-          Ref.normalizedImportAlias =
-            if importIndex `mod` 4 == 0
-              then Just (T.pack ("Q" <> show importIndex))
-              else Nothing,
-          Ref.normalizedImportSource = False,
-          Ref.normalizedImportSafe = False,
-          Ref.normalizedImportPackageQualifier = Nothing,
-          Ref.normalizedImportList =
-            if importIndex `mod` 3 == 0
-              then Ref.ExplicitImport [Ref.ImportItem (T.pack ("item" <> show importIndex)) Nothing]
-              else Ref.OpenImport
-        }
-
-    mkOperation operationIndex =
-      case operationIndex `mod` 2 of
-        0 ->
-          Ref.RemoveImportItems
-            (Ref.ImportId ((operationIndex `mod` importCount) + 1))
-            ( Ref.mkFlatRemovalTarget
-                (T.pack ("item" <> show ((operationIndex `mod` importCount) + 1)))
-                :| []
-            )
-        _ ->
-          Ref.RemoveWholeImport (Ref.ImportId ((operationIndex `mod` importCount) + 1))
 
 mkSourceTextFixture :: Int -> Int -> SourceTextFixture
 mkSourceTextFixture lineCount editCount =

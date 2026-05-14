@@ -63,6 +63,15 @@ spec =
       updated `shouldBe` source
       warnings `shouldBe` [InvalidFileEditSpan "Demo.hs" badEdit]
 
+    it "reports stale expected-source edits and skips them" do
+      let source = "value = 1\n"
+          staleEdit = ReplaceSpanEditExpected "Demo.hs" (Span "Demo.hs" 1 9 1 10) "9" "2"
+          (updated, warnings) =
+            applyReplacementEditsValidated source "Demo.hs" [staleEdit]
+
+      updated `shouldBe` source
+      show warnings `shouldSatisfy` isInfixOf "StaleFileEditSpan"
+
 replace :: Span -> T.Text -> FileEdit
 replace span' replacementText =
   ReplaceSpanEdit "Demo.hs" span' replacementText
