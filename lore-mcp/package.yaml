@@ -92,6 +92,7 @@ tests:
     - Lore.Mcp.Tools.Shared.Diagnostics
     - Lore.Mcp.Tools.Shared.Outputable
     - Lore.Mcp.Tools.Shared.PartialLoadWarning
+    - TempRecordFieldDebug
     ghc-options:
     - -threaded
     - -rtsopts

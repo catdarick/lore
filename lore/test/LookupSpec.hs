@@ -265,6 +265,31 @@ spec =
           hasSupportExact `shouldBe` True
           length symbols `shouldSatisfy` (>= 2)
 
+      it "supports owner-qualified lookups for same-module DuplicateRecordFields selectors" do
+        withFixtureCopy \fixtureRoot -> do
+          addRecordFieldLookupFixture fixtureRoot
+          (leftTaggedSymbols, rightTaggedSymbols) <-
+            fixtureLoreAt fixtureRoot do
+              _ <- loadTargets defaultLoadTargetsOptions
+              leftTaggedSymbols <- findSymbols "Demo.sharedValue@LeftTagged"
+              rightTaggedSymbols <- findSymbols "Demo.sharedValue@RightTagged"
+              pure (leftTaggedSymbols, rightTaggedSymbols)
+
+          let renderOcc = Plugins.getOccString . (.name)
+
+          length leftTaggedSymbols `shouldBe` 1
+          length rightTaggedSymbols `shouldBe` 1
+
+          map renderOcc leftTaggedSymbols
+            `shouldSatisfy` all (isInfixOf "sharedValue")
+          map renderOcc rightTaggedSymbols
+            `shouldSatisfy` all (isInfixOf "sharedValue")
+
+          map renderOcc leftTaggedSymbols
+            `shouldSatisfy` any (isInfixOf "LeftTagged")
+          map renderOcc rightTaggedSymbols
+            `shouldSatisfy` any (isInfixOf "RightTagged")
+
       it "supports module-qualified dotted operators" do
         result <-
           fixtureLore do

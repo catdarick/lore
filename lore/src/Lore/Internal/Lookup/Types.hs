@@ -41,7 +41,8 @@ newtype NameToInstancesIndex = NameToInstancesIndex
 
 data Symbol = Symbol
   { name :: GHC.Name,
-    visibility :: SymbolVisibility
+    visibility :: SymbolVisibility,
+    aliases :: Set.Set NormalizedOccName
   }
   deriving (Generic, NFData, Eq, Ord)
 

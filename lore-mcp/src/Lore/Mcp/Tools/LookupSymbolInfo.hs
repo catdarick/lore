@@ -150,7 +150,7 @@ lookupExactSymbolInfos query = do
 
 mkDetailedSymbolInfo :: (MonadLore m) => SymbolInfo -> m DetailedSymbolInfo
 mkDetailedSymbolInfo symbolInfo = do
-  instancesInfo <- listDirectInstances symbolInfo.symbolName
+  instancesInfo <- listDirectInstances (symbolName symbolInfo)
   pure
     DetailedSymbolInfo
       { symbolInfo,

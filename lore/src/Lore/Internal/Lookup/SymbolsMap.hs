@@ -327,7 +327,8 @@ buildIndexableSymbols occAliasesByName lookupTyThing visibility names =
                 { indexableSymbol =
                     Symbol
                       { name,
-                        visibility
+                        visibility,
+                        aliases = aliasKeys
                       },
                   indexableRawOccurrenceKey = rawOccurrenceKey,
                   indexableAliasKeys = aliasKeys
@@ -447,15 +448,21 @@ buildSymbolsIndex moduleSymbols =
       foldl'
         ( \mapAcc key ->
             Map.insertWith
-              (Map.unionWith Set.union)
+              (Map.unionWith mergeSymbolMeta)
               key
-              (Map.singleton symbol.name (exportedFromSet symbol.visibility))
+              (Map.singleton symbol.name (symbolMeta symbol))
               mapAcc
         )
         acc
         (Set.toList (symbolLookupKeys indexableSymbol))
       where
         symbol = indexableSymbol.indexableSymbol
+
+    mergeSymbolMeta (newModules, newAliases) (oldModules, oldAliases) =
+      (oldModules <> newModules, oldAliases <> newAliases)
+
+    symbolMeta symbol =
+      (exportedFromSet symbol.visibility, symbol.aliases)
 
     symbolLookupKeys indexableSymbol =
       maybe
@@ -470,9 +477,9 @@ buildSymbolsIndex moduleSymbols =
     mapToSymbols =
       Set.fromList . map mkSymbol . Map.toList
 
-    mkSymbol (symbolName, modules) =
+    mkSymbol (symbolName, (modules, aliases)) =
       let visibility = if Set.null modules then Symbol'Unexported else Symbol'ExportedFrom modules
-       in Symbol symbolName visibility
+       in Symbol symbolName visibility aliases
 
 logPreparedSymbolsIndex :: (MonadLore m) => String -> SymbolsIndex -> m ()
 logPreparedSymbolsIndex scope (SymbolsIndex symbolsMap) = do

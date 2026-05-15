@@ -3,7 +3,7 @@
 module Lore.Lookup
   ( NormalizedOccName,
     NormalizedModuleName,
-    NormalizedName (occName, moduleName),
+    NormalizedName (occName, moduleName, ownerHint),
     parseAndNormalizeName,
     normalizeModuleName,
     mkNormalizedModuleName,
@@ -27,19 +27,20 @@ module Lore.Lookup
   )
 where
 
-import Control.Monad (forM)
+import Control.Monad (filterM, forM)
 import Data.List (foldl', isInfixOf)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as Set
+import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Core.FamInstEnv as FamInstEnv
 import qualified GHC.Core.InstEnv as InstEnv
 import qualified GHC.Core.RoughMap as RoughMap
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
-import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
+import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, extractAndNormalizeOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap, findSimilarSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
@@ -69,7 +70,8 @@ data SymbolCategory
 
 findMatchingSymbols :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
 findMatchingSymbols targetName = do
-  findMatchingSymbolsInMap targetName <$> SymbolsMap.getCachedSymbolsMap
+  symbolsMap <- SymbolsMap.getCachedSymbolsMap
+  filterSymbolsByOwnerHint targetName.ownerHint (findMatchingSymbolsInMap targetName symbolsMap)
 
 findSimilarSymbols :: (MonadLore m) => Int -> NormalizedName -> m [SymbolSuggestion]
 findSimilarSymbols suggestionLimit targetName = do
@@ -95,11 +97,14 @@ pickSuggestedSymbol symbols =
 findMatchingSymbolsRoots :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
 findMatchingSymbolsRoots targetName = do
   symbolsMap <- SymbolsMap.getCachedSymbolsMap
-  let matchingSymbols = findMatchingSymbolsInMap targetName symbolsMap
+  matchingSymbols <-
+    filterSymbolsByOwnerHint
+      targetName.ownerHint
+      (findMatchingSymbolsInMap targetName symbolsMap)
   pathsToRoot <- forM (Set.toList matchingSymbols) $ \symbol -> do
     resolvePathToRoot symbol.name
   dedupedRootNames <- dedupeRootNamesByNormalizedOcc (map getPathRoot pathsToRoot)
-  pure $ Set.fromList $ map (mkSymbolFromName symbolsMap) dedupedRootNames
+  pure $ Set.fromList $ map (unsafeMkSymbolFromName symbolsMap) dedupedRootNames
 
 dedupeRootNamesByNormalizedOcc :: (MonadLore m) => [GHC.Name] -> m [GHC.Name]
 dedupeRootNamesByNormalizedOcc names =
@@ -156,18 +161,43 @@ lookupSymbolInfo name = do
 
 getNameVisibility :: SymbolsMap -> GHC.Name -> SymbolVisibility
 getNameVisibility symbolsMap name = do
-  let normalizedName = normalizeName name
-      matchingSymbols = Set.filter (\symbol -> symbol.name == name) $ findMatchingSymbolsInMap normalizedName symbolsMap
-  case Set.toList matchingSymbols of
-    [] -> Symbol'Unexported
-    (symbol : _) -> symbol.visibility
+  maybe Symbol'Unexported (.visibility) (lookupSymbolInMap symbolsMap name)
 
-mkSymbolFromName :: SymbolsMap -> GHC.Name -> Symbol
-mkSymbolFromName symbolsMap name =
-  Symbol
-    { name,
-      visibility = getNameVisibility symbolsMap name
-    }
+unsafeMkSymbolFromName :: SymbolsMap -> GHC.Name -> Symbol
+unsafeMkSymbolFromName symbolsMap name =
+  fromMaybe
+    ( Symbol
+        { name,
+          visibility = Symbol'Unexported,
+          aliases = Set.singleton (extractAndNormalizeOccName name)
+        }
+    )
+    (lookupSymbolInMap symbolsMap name)
+
+lookupSymbolInMap :: SymbolsMap -> GHC.Name -> Maybe Symbol
+lookupSymbolInMap symbolsMap name =
+  case Set.toList matchingSymbols of
+    [] -> Nothing
+    symbol : _ -> Just symbol
+  where
+    normalizedName = normalizeName name
+    matchingSymbols = Set.filter (\symbol -> symbol.name == name) $ findMatchingSymbolsInMap normalizedName symbolsMap
+
+filterSymbolsByOwnerHint :: (MonadLore m) => Maybe NormalizedOccName -> Set.Set Symbol -> m (Set.Set Symbol)
+filterSymbolsByOwnerHint maybeOwnerHint symbols =
+  case maybeOwnerHint of
+    Nothing ->
+      pure symbols
+    Just ownerHint' ->
+      Set.fromList <$> filterM (symbolMatchesOwnerHint ownerHint') (Set.toList symbols)
+
+symbolMatchesOwnerHint :: (MonadLore m) => NormalizedOccName -> Symbol -> m Bool
+symbolMatchesOwnerHint ownerHint' symbol = do
+  pathToRoot <- resolvePathToRoot symbol.name
+  pure $ any (matchesOwnerHint ownerHint') (drop 1 (NE.toList pathToRoot.unPathToRoot))
+  where
+    matchesOwnerHint hintedOwner name =
+      (parseAndNormalizeName (T.pack (GHC.getOccString name))).occName == hintedOwner
 
 classifySymbolCategory :: GHC.TyThing -> SymbolCategory
 classifySymbolCategory = \case

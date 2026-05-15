@@ -6,7 +6,7 @@
 module Lore.Internal.Lookup.Name
   ( NormalizedOccName,
     NormalizedModuleName,
-    NormalizedName (occName, moduleName),
+    NormalizedName (occName, moduleName, ownerHint),
     normalizeName,
     parseAndNormalizeName,
     unNormalizedOccName,
@@ -40,15 +40,22 @@ newtype NormalizedModuleName = NormalizedModuleName
 
 data NormalizedName = NormalizedName
   { moduleName :: Maybe NormalizedModuleName,
-    occName :: NormalizedOccName
+    occName :: NormalizedOccName,
+    ownerHint :: Maybe NormalizedOccName
   }
   deriving (Generic, NFData, Eq, Ord)
 
 instance Show NormalizedName where
-  show (NormalizedName maybeModuleName (NormalizedOccName occName)) =
-    case maybeModuleName of
-      Nothing -> T.unpack occName
-      Just (NormalizedModuleName moduleName) -> T.unpack moduleName <> "." <> T.unpack occName
+  show (NormalizedName maybeModuleName (NormalizedOccName occName) maybeOwnerHint) =
+    renderedBaseName <> renderedOwnerHint
+    where
+      renderedBaseName =
+        case maybeModuleName of
+          Nothing -> T.unpack occName
+          Just (NormalizedModuleName moduleName) -> T.unpack moduleName <> "." <> T.unpack occName
+
+      renderedOwnerHint =
+        maybe "" (("@" <>) . T.unpack . unNormalizedOccName) maybeOwnerHint
 
 normalizeOccName :: Text -> NormalizedOccName
 normalizeOccName occName = NormalizedOccName
@@ -65,7 +72,8 @@ normalizeName :: GHC.Name -> NormalizedName
 normalizeName ghcName =
   NormalizedName
     { moduleName = extractAndNormalizeModuleName <$> GHC.nameModule_maybe ghcName,
-      occName = extractAndNormalizeOccName ghcName
+      occName = extractAndNormalizeOccName ghcName,
+      ownerHint = Nothing
     }
 
 normalizeModuleName :: GHC.ModuleName -> NormalizedModuleName
@@ -86,16 +94,24 @@ extractAndNormalizeModuleName mdl = do
 
 parseAndNormalizeName :: Text -> NormalizedName
 parseAndNormalizeName queryText =
+  case splitOwnerHint queryText of
+    (queryTextWithoutOwnerHint, maybeOwnerHintText) ->
+      parseQualifiedName queryTextWithoutOwnerHint maybeOwnerHintText
+
+parseQualifiedName :: Text -> Maybe Text -> NormalizedName
+parseQualifiedName queryText maybeOwnerHintText =
   case qualifiedCandidates of
     (moduleHint, occName) : _ ->
       NormalizedName
         { moduleName = Just (NormalizedModuleName moduleHint),
-          occName = normalizeOccName occName
+          occName = normalizeOccName occName,
+          ownerHint = normalizeOwnerHint maybeOwnerHintText
         }
     [] ->
       NormalizedName
         { moduleName = Nothing,
-          occName = normalizeOccName queryText
+          occName = normalizeOccName queryText,
+          ownerHint = normalizeOwnerHint maybeOwnerHintText
         }
   where
     segments = T.splitOn "." queryText
@@ -111,6 +127,27 @@ parseAndNormalizeName queryText =
       if all isModuleNameSegment moduleSegments && not (T.null occName)
         then Just (moduleHint, occName)
         else Nothing
+
+splitOwnerHint :: Text -> (Text, Maybe Text)
+splitOwnerHint queryText =
+  case T.breakOnEnd "@" queryText of
+    ("", _) ->
+      (queryText, Nothing)
+    (prefixWithDelimiter, ownerHintText)
+      | T.null ownerHintText ->
+          (queryText, Nothing)
+      | otherwise ->
+          let queryWithoutOwnerHint = T.dropEnd 1 prefixWithDelimiter
+           in if T.null queryWithoutOwnerHint
+                then (queryText, Nothing)
+                else (queryWithoutOwnerHint, Just ownerHintText)
+
+normalizeOwnerHint :: Maybe Text -> Maybe NormalizedOccName
+normalizeOwnerHint maybeOwnerHintText = do
+  ownerHintText <- maybeOwnerHintText
+  if T.null ownerHintText
+    then Nothing
+    else Just (normalizeOccName ownerHintText)
 
 isModuleNameSegment :: Text -> Bool
 isModuleNameSegment segment =

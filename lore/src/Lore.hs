@@ -12,7 +12,7 @@ module Lore
     lookupLastLoadTargetsResult,
     NormalizedOccName,
     NormalizedModuleName,
-    NormalizedName (occName, moduleName),
+    NormalizedName (occName, moduleName, ownerHint),
     parseAndNormalizeName,
     normalizeModuleName,
     mkNormalizedModuleName,

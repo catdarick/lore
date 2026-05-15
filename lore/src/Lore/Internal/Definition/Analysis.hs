@@ -416,14 +416,35 @@ collectMinimalTypedOccurrences tcg =
   case GHC.Tc.tcg_rn_decls tcg of
     Nothing -> []
     Just renamedGroup ->
-      dedupeMinimalTypedOccurrences . mapMaybe toMinimalTypedOccurrence $ collectTyped renamedGroup
+      dedupeMinimalTypedOccurrences . mapMaybe toMinimalTypedOccurrence $ collectOccurrenceSeeds renamedGroup
   where
-    toMinimalTypedOccurrence locatedName = do
-      gre <- GHC.lookupGRE_Name (GHC.Tc.tcg_rdr_env tcg) (GHC.unLoc locatedName)
+    collectOccurrenceSeeds renamedGroup =
+      namedOccurrenceSeeds <> fieldOccurrenceSeeds
+      where
+        namedOccurrenceSeeds =
+          [ OccurrenceSeed
+              { occurrenceSeedName = GHC.unLoc locatedName,
+                occurrenceSeedRdrName = Nothing,
+                occurrenceSeedSpan = locatedSpan locatedName
+              }
+          | locatedName <- collectTyped renamedGroup :: [GHC.LocatedN GHC.Name]
+          ]
+
+        fieldOccurrenceSeeds =
+          [ OccurrenceSeed
+              { occurrenceSeedName = GHC.foExt fieldOccurrence,
+                occurrenceSeedRdrName = Just (GHC.unLoc fieldOccurrence.foLabel),
+                occurrenceSeedSpan = GHC.getLocA fieldOccurrence.foLabel
+              }
+          | fieldOccurrence <- collectTyped renamedGroup :: [GHC.FieldOcc GHC.GhcRn]
+          ]
+
+    toMinimalTypedOccurrence occurrenceSeed = do
+      gre <- lookupOccurrenceGre occurrenceSeed
       pure
         MinimalTypedOccurrence
-          { typedOccurrenceName = GHC.unLoc locatedName,
-            typedOccurrenceSpan = locatedSpan locatedName,
+          { typedOccurrenceName = GHC.greNamePrintableName gre.gre_name,
+            typedOccurrenceSpan = occurrenceSeed.occurrenceSeedSpan,
             typedOccurrenceParent = case GHC.gre_par gre of
               GHC.ParentIs parentName -> Just parentName
               GHC.NoParent -> Nothing,
@@ -435,6 +456,22 @@ collectMinimalTypedOccurrences tcg =
                 ]
           }
 
+    lookupOccurrenceGre occurrenceSeed =
+      case occurrenceSeed.occurrenceSeedRdrName of
+        Nothing ->
+          GHC.lookupGRE_Name (GHC.Tc.tcg_rdr_env tcg) occurrenceSeedName
+        Just occurrenceSeedRdrName ->
+          List.find (matchesFieldSelector occurrenceSeedName) (GHC.lookupGRE_RdrName occurrenceSeedRdrName (GHC.Tc.tcg_rdr_env tcg))
+      where
+        occurrenceSeedName = occurrenceSeed.occurrenceSeedName
+
+    matchesFieldSelector selectorName gre =
+      case gre.gre_name of
+        GHC.NormalGreName name ->
+          name == selectorName
+        GHC.FieldGreName fieldLabel ->
+          GHC.FieldLabel.flSelector fieldLabel == selectorName
+
     findImportId importSpan =
       ImportId . fst <$> List.find ((== importSpan) . snd) importDeclSpans
 
@@ -443,6 +480,12 @@ collectMinimalTypedOccurrences tcg =
       | (importId, importDecl) <- zip [0 ..] (GHC.Tc.tcg_rn_imports tcg),
         not (GHC.unLoc importDecl).ideclExt.ideclImplicit
       ]
+
+data OccurrenceSeed = OccurrenceSeed
+  { occurrenceSeedName :: !GHC.Name,
+    occurrenceSeedRdrName :: !(Maybe GHC.RdrName),
+    occurrenceSeedSpan :: !GHC.SrcSpan
+  }
 
 collectExprUsedInstanceNames :: GHC.CoreExpr -> [GHC.Name]
 collectExprUsedInstanceNames = \case
