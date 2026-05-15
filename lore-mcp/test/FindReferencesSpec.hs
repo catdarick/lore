@@ -135,6 +135,28 @@ spec = do
       result `shouldContainText` "RecordOne {fieldOne = value"
       result `shouldNotContainText` "mkRecordTwo value ="
 
+    it "does not require redundant owner hints for fully qualified ticked constructors" do
+      result <-
+        renderFindReferencesFixture
+          "RenderedTickedConstructor"
+          tickedConstructorReferenceModuleSource
+          "TestRefs.RenderedTickedConstructor.Ctor'"
+
+      result `shouldNotContainText` "is ambiguous. More qualification is required"
+      result `shouldContainText` "useCtor value ="
+      result `shouldContainText` "case Ctor' value of"
+
+    it "does not require redundant owner hints for fully qualified constructors" do
+      result <-
+        renderFindReferencesFixture
+          "RenderedConstructor"
+          constructorReferenceModuleSource
+          "TestRefs.RenderedConstructor.Ctor"
+
+      result `shouldNotContainText` "is ambiguous. More qualification is required"
+      result `shouldContainText` "useCtor value ="
+      result `shouldContainText` "case Ctor value of"
+
 renderFindReferencesFixture :: FilePath -> Text -> Text -> IO Text
 renderFindReferencesFixture moduleFileName moduleSource symbol =
   renderFindReferencesFixtureModules [(moduleFileName, moduleSource)] symbol
@@ -373,6 +395,38 @@ duplicateFieldNamesReferenceModuleSource =
       "mkRecordTwo :: Int -> RecordTwo",
       "mkRecordTwo value =",
       "  RecordTwo {fieldOne = value, fieldTwo = value + 2}"
+    ]
+
+tickedConstructorReferenceModuleSource :: Text
+tickedConstructorReferenceModuleSource =
+  T.unlines
+    [ "module TestRefs.RenderedTickedConstructor",
+      "  ( Wrap(..),",
+      "    useCtor",
+      "  ) where",
+      "",
+      "data Wrap = Ctor' Int",
+      "",
+      "useCtor :: Int -> Int",
+      "useCtor value =",
+      "  case Ctor' value of",
+      "    Ctor' inner -> inner"
+    ]
+
+constructorReferenceModuleSource :: Text
+constructorReferenceModuleSource =
+  T.unlines
+    [ "module TestRefs.RenderedConstructor",
+      "  ( Wrap(..),",
+      "    useCtor",
+      "  ) where",
+      "",
+      "data Wrap = Ctor Int",
+      "",
+      "useCtor :: Int -> Int",
+      "useCtor value =",
+      "  case Ctor value of",
+      "    Ctor inner -> inner"
     ]
 
 shouldContainText :: Text -> Text -> Expectation

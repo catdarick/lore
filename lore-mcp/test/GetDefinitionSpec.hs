@@ -172,7 +172,7 @@ spec = do
             ambiguousDefinitionResult <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Demo.AmbiguousId"] 0 Nothing)
             pure (lookupResult, ambiguousDefinitionResult)
 
-        lookupResult `shouldContainText` "Found 3 symbol candidates:"
+        lookupResult `shouldContainText` "Found 2 symbol candidates:"
         ambiguousDefinitionResult `shouldContainText` "is ambiguous. More qualification is required"
         ambiguousDefinitionResult `shouldContainText` "Demo.AmbiguousId"
 

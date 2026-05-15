@@ -29,7 +29,6 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
 import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.FieldLabel as GHC.FieldLabel
-import qualified GHC.Types.TypeEnv as GHC.TypeEnv
 import Lore.Internal.Definition.RequiredImports
   ( buildImportCandidates,
     buildRequiredImportsById,
@@ -347,14 +346,10 @@ buildUsedInstancesByBinder interestingBinders coreBinds =
 
 collectDefinitionCandidateNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
 collectDefinitionCandidateNames homeModule tcg =
-  nubOrd (topLevelNames <> localGreNames <> fieldSelectorNames <> instanceNames)
+  nubOrd (localGreNames <> fieldSelectorNames <> instanceNames)
   where
     belongsToModule name =
       GHC.nameModule_maybe name == Just homeModule
-
-    topLevelNames =
-      filter belongsToModule $
-        map GHC.getName (GHC.TypeEnv.typeEnvElts (GHC.Tc.tcg_type_env tcg))
 
     localGreNames =
       filter

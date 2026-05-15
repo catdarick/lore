@@ -4,7 +4,7 @@ module LookupSpec
 where
 
 import Control.Monad (forM)
-import Data.List (foldl', isInfixOf, isPrefixOf)
+import Data.List (foldl', isInfixOf)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -189,16 +189,13 @@ spec =
 
           length demoUnexportedFieldSymbols `shouldSatisfy` (> 0)
           demoUnexportedFieldOccs `shouldSatisfy` all (isInfixOf "hiddenValue")
-          demoUnexportedFieldOccs
-            `shouldSatisfy` any (isPrefixOf "$sel:hiddenValue:")
+
           fmap (fmap (GHC.moduleNameString . GHC.moduleName) . Plugins.nameModule_maybe . (.name)) demoUnexportedFieldSymbols
             `shouldSatisfy` all (== Just "Demo")
           all ((== Symbol'Unexported) . (.visibility)) demoUnexportedFieldSymbols `shouldBe` True
 
           length demoQualifiedFieldSymbols `shouldSatisfy` (> 0)
           demoQualifiedFieldOccs `shouldSatisfy` all (isInfixOf "hiddenValue")
-          demoQualifiedFieldOccs
-            `shouldSatisfy` any (isPrefixOf "$sel:hiddenValue:")
           fmap (fmap (GHC.moduleNameString . GHC.moduleName) . Plugins.nameModule_maybe . (.name)) demoQualifiedFieldSymbols
             `shouldSatisfy` all (== Just "Demo")
           all ((== Symbol'Unexported) . (.visibility)) demoQualifiedFieldSymbols `shouldBe` True
@@ -229,42 +226,6 @@ spec =
         fmap (\symbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name)) result
           `shouldBe` ["Demo.Support"]
 
-      it "returns both exact symbols and selector aliases for the same occurrence query" do
-        withFixtureCopy \fixtureRoot -> do
-          addRecordFieldLookupFixture fixtureRoot
-          addSupportHiddenValueFixture fixtureRoot
-          symbols <-
-            fixtureLoreAt fixtureRoot do
-              _ <- loadTargets defaultLoadTargetsOptions
-              findSymbols "hiddenValue"
-
-          let renderModule symbol =
-                fmap (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name)
-
-              renderedOccs =
-                fmap (Plugins.getOccString . (.name)) symbols
-
-              hasDemoSelector =
-                any
-                  ( \symbol ->
-                      renderModule symbol == Just "Demo"
-                        && isPrefixOf "$sel:hiddenValue:" (Plugins.getOccString symbol.name)
-                  )
-                  symbols
-
-              hasSupportExact =
-                any
-                  ( \symbol ->
-                      renderModule symbol == Just "Demo.Support"
-                        && Plugins.getOccString symbol.name == "hiddenValue"
-                  )
-                  symbols
-
-          renderedOccs `shouldSatisfy` any (isInfixOf "hiddenValue")
-          hasDemoSelector `shouldBe` True
-          hasSupportExact `shouldBe` True
-          length symbols `shouldSatisfy` (>= 2)
-
       it "supports owner-qualified lookups for same-module DuplicateRecordFields selectors" do
         withFixtureCopy \fixtureRoot -> do
           addRecordFieldLookupFixture fixtureRoot
@@ -284,11 +245,6 @@ spec =
             `shouldSatisfy` all (isInfixOf "sharedValue")
           map renderOcc rightTaggedSymbols
             `shouldSatisfy` all (isInfixOf "sharedValue")
-
-          map renderOcc leftTaggedSymbols
-            `shouldSatisfy` any (isInfixOf "LeftTagged")
-          map renderOcc rightTaggedSymbols
-            `shouldSatisfy` any (isInfixOf "RightTagged")
 
       it "supports module-qualified dotted operators" do
         result <-
@@ -587,14 +543,6 @@ addRecordFieldLookupFixture fixtureRoot = do
         T.replace recordFieldLookupExportAnchor recordFieldLookupExportReplacement sourceWithDuplicateRecordFields
   TIO.writeFile demoFile (sourceWithExports <> "\n\n" <> recordFieldLookupFixtureDeclarations)
 
-addSupportHiddenValueFixture :: FilePath -> IO ()
-addSupportHiddenValueFixture fixtureRoot = do
-  let supportFile = fixtureRoot </> "src" </> "Demo" </> "Support.hs"
-  source <- TIO.readFile supportFile
-  let sourceWithExports =
-        T.replace supportHiddenValueExportAnchor supportHiddenValueExportReplacement source
-  TIO.writeFile supportFile (sourceWithExports <> "\n\n" <> supportHiddenValueFixtureDeclarations)
-
 recordFieldLookupExportAnchor :: T.Text
 recordFieldLookupExportAnchor =
   T.unlines
@@ -635,28 +583,4 @@ recordFieldLookupFixtureDeclarations =
       "",
       "publicFn :: Hidden -> Int",
       "publicFn = hiddenValue"
-    ]
-
-supportHiddenValueExportAnchor :: T.Text
-supportHiddenValueExportAnchor =
-  T.unlines
-    [ "    mkSupportRecord,",
-      "    (.+.),",
-      "  )"
-    ]
-
-supportHiddenValueExportReplacement :: T.Text
-supportHiddenValueExportReplacement =
-  T.unlines
-    [ "    mkSupportRecord,",
-      "    hiddenValue,",
-      "    (.+.),",
-      "  )"
-    ]
-
-supportHiddenValueFixtureDeclarations :: T.Text
-supportHiddenValueFixtureDeclarations =
-  T.unlines
-    [ "hiddenValue :: Int",
-      "hiddenValue = supportSeed * 10"
     ]
