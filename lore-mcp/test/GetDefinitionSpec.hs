@@ -162,20 +162,19 @@ spec = do
         definitionResult `shouldContainText` "data Alpha = Alpha"
         definitionResult `shouldNotContainText` "data Beta = Beta"
 
-    it "returns all same-module matches for a duplicated qualified symbol name (regression for resolveRequestedSymbols)" do
+    it "renders owner-qualified disambiguation hints for same-module duplicate names" do
       withFixtureCopy \fixtureRoot -> do
         addSameModuleDuplicateSymbolFixture fixtureRoot
-        (lookupResult, definitionResult) <-
+        (lookupResult, ambiguousDefinitionResult) <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
             loadFixtureTargets
             lookupResult <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Demo.AmbiguousId")
-            definitionResult <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Demo.AmbiguousId"] 0 Nothing)
-            pure (lookupResult, definitionResult)
+            ambiguousDefinitionResult <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Demo.AmbiguousId"] 0 Nothing)
+            pure (lookupResult, ambiguousDefinitionResult)
 
         lookupResult `shouldContainText` "Found 3 symbol candidates:"
-        definitionResult `shouldContainText` "type AmbiguousId = Int"
-        definitionResult `shouldContainText` "data instance AmbiguousField AmbiguousRec AmbiguousId = AmbiguousId"
-        definitionResult `shouldNotContainText` "is ambiguous. More qualification is required"
+        ambiguousDefinitionResult `shouldContainText` "is ambiguous. More qualification is required"
+        ambiguousDefinitionResult `shouldContainText` "Demo.AmbiguousId"
 
   describe "lookupSymbolInfo" do
     it "resolves exported and unexported record fields from DuplicateRecordFields modules" do

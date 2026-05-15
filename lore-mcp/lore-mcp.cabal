@@ -54,6 +54,7 @@ executable lore-mcp
       Lore.Mcp.Tools.Shared.Diagnostics
       Lore.Mcp.Tools.Shared.Outputable
       Lore.Mcp.Tools.Shared.PartialLoadWarning
+      Lore.Mcp.Tools.Shared.SymbolResolution
       Paths_lore_mcp
   autogen-modules:
       Paths_lore_mcp
@@ -126,6 +127,7 @@ test-suite lore-mcp-test
   other-modules:
       FindReferencesSpec
       GetDefinitionSpec
+      LookupInstancesSpec
       McpTestSupport
       ProtocolRequestSpec
       Lore.JsonRpc.Server
@@ -158,6 +160,7 @@ test-suite lore-mcp-test
       Lore.Mcp.Tools.Shared.Diagnostics
       Lore.Mcp.Tools.Shared.Outputable
       Lore.Mcp.Tools.Shared.PartialLoadWarning
+      Lore.Mcp.Tools.Shared.SymbolResolution
   hs-source-dirs:
       test
       src

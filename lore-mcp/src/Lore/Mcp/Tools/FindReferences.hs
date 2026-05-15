@@ -8,7 +8,7 @@ import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
 import Data.List (foldl', sortOn)
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (catMaybes, fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
 import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -19,19 +19,14 @@ import qualified GHC.Plugins as Plugins
 import Lore
   ( DeclarationSpans (..),
     DefinitionSource (..),
-    LoadTargetsResult,
     MonadLore,
-    NormalizedName (occName, ownerHint),
+    NormalizedName (occName),
     NormalizedOccName,
     PathToRoot (..),
     ReferenceHit (..),
     ReferenceMatch (..),
     Symbol (..),
-    SymbolInfo (..),
-    findMatchingSymbols,
     lookupLastLoadTargetsResult,
-    lookupSymbolInfo,
-    mergePathsToRootOn,
     parseAndNormalizeName,
     resolvePathToRoot,
     resolveReferenceMatchesForNames,
@@ -43,6 +38,7 @@ import Lore.Mcp.Internal.SourceSpan (realSrcSpanFromSrcSpan)
 import Lore.Mcp.Internal.SourceText (readSpanLines, readSpanText, relativeSourcePath)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines)
+import Lore.Mcp.Tools.Shared.SymbolResolution (ResolvedSymbolQuery (resolvedSymbol), withResolvedSymbols)
 import System.Directory (getCurrentDirectory)
 
 data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
@@ -77,47 +73,26 @@ findReferencesTool =
 findReferencesHandler :: (MonadLore m) => FindReferencesArgs 'ValueType -> m Text
 findReferencesHandler FindReferencesArgs {symbol, skip} = do
   let targetName = parseAndNormalizeName symbol
-  matchingSymbols <- Set.toList <$> findMatchingSymbols targetName
   maybeLoadResult <- lookupLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
-      resolvedRoots <- resolveRootsWithChains matchingSymbols
-      case resolvedRoots of
-        [] ->
-          pure $ renderMissingResult loadResult symbol
-        [(_, rootChain)] -> do
-          references <- resolveReferenceMatchesForNames (filterRootChainByQuery targetName.occName matchingSymbols rootChain)
-          renderedReferences <- renderReferenceDefinitions resolvedSkip references
-          renderReferencesResult loadResult symbol renderedReferences
-        ambiguousRoots ->
-          pure $ renderAmbiguousResult loadResult symbol targetName ambiguousMatches
-          where
-            ambiguousMatches =
-              map fst ambiguousRoots
+      renderedBody <-
+        withResolvedSymbols [symbol] \resolvedQueries ->
+          case resolvedQueries of
+            [resolvedQuery] -> do
+              let matchedSymbol = resolvedQuery.resolvedSymbol
+              rootChain <- NE.toList . (.unPathToRoot) <$> resolvePathToRoot matchedSymbol.name
+              references <- resolveReferenceMatchesForNames (filterRootChainByQuery targetName.occName [matchedSymbol] rootChain)
+              renderedReferences <- renderReferenceDefinitions resolvedSkip references
+              renderReferencesResult symbol renderedReferences
+            _ ->
+              pure "Internal error: expected exactly one resolved symbol query."
+      pure (appendPartialLoadWarning loadResult "Reference results may be incomplete." renderedBody)
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
-
-resolveRootsWithChains :: (MonadLore m) => [Symbol] -> m [(SymbolInfo, [GHC.Name])]
-resolveRootsWithChains symbols = do
-  pathsToRoot <- mapM (resolvePathToRoot . (.name)) symbols
-  let mergedPaths = mergePathsToRootOn renderName pathsToRoot
-  catMaybes <$> mapM resolveRootInfo mergedPaths
-  where
-    resolveRootInfo pathToRoot = do
-      let rootChain = NE.toList pathToRoot.unPathToRoot
-          rootName = NE.last pathToRoot.unPathToRoot
-      maybeSymbolInfo <- lookupSymbolInfo rootName
-      pure ((,rootChain) <$> maybeSymbolInfo)
-
-    renderName name =
-      case Plugins.nameModule_maybe name of
-        Nothing ->
-          "<no-module>." <> Plugins.getOccString name
-        Just module_ ->
-          Plugins.moduleNameString (Plugins.moduleName module_) <> "." <> Plugins.getOccString name
 
 filterRootChainByQuery :: NormalizedOccName -> [Symbol] -> [GHC.Name] -> [GHC.Name]
 filterRootChainByQuery targetOccName matchedSymbols rootChain =
@@ -195,114 +170,13 @@ renderReferenceDefinitions skip definitionSlices =
     pagedMatches =
       take maxRenderedReferenceResults (drop resolvedSkip sortedMatches)
 
-renderMissingResult :: LoadTargetsResult -> Text -> Text
-renderMissingResult loadResult symbol =
-  appendPartialLoadWarning loadResult "Reference results may be incomplete." $
-    "No symbols found for " <> quoteText symbol <> "."
-
-renderReferencesResult :: (MonadLore m) => LoadTargetsResult -> Text -> Maybe PaginatedReferenceMatches -> m Text
-renderReferencesResult loadResult symbol renderedReferences =
+renderReferencesResult :: (MonadLore m) => Text -> Maybe PaginatedReferenceMatches -> m Text
+renderReferencesResult symbol renderedReferences =
   case renderedReferences of
     Nothing ->
       pure ("No references found for " <> quoteText symbol <> ".")
     Just paginatedReferences ->
-      appendPartialLoadWarning loadResult "Reference results may be incomplete."
-        <$> renderReferenceResultsPage paginatedReferences
-
-renderAmbiguousResult :: LoadTargetsResult -> Text -> NormalizedName -> [SymbolInfo] -> Text
-renderAmbiguousResult loadResult symbol targetName ambiguousMatches =
-  appendPartialLoadWarning loadResult "Reference results may be incomplete." (renderedBody disambiguationHints)
-  where
-    disambiguationHints =
-      renderDisambiguationHints symbol targetName ambiguousMatches
-
-    renderedBody disambiguationHintLines =
-      T.intercalate "\n" $
-        [ "The requested name " <> quoteText symbol <> " is ambiguous. More qualification is required:",
-          ""
-        ]
-          <> map ("  - " <>) disambiguationHintLines
-          <> ["", "Run the tool again with a fully qualified symbol name from the list above."]
-
-renderDisambiguationHints :: Text -> NormalizedName -> [SymbolInfo] -> [Text]
-renderDisambiguationHints queryText targetName ambiguousMatches =
-  case targetName.ownerHint of
-    Just _ ->
-      dedupeItems (ownerQualifiedHints <> moduleQualifiedHints)
-    Nothing ->
-      if hasSingleDefinitionModule
-        then
-          if null ownerQualifiedHints
-            then moduleQualifiedHints
-            else ownerQualifiedHints
-        else moduleHints
-  where
-    hasSingleDefinitionModule =
-      length (ambiguousDefinitionModules ambiguousMatches) <= 1
-
-    moduleHints = moduleQualifiedHints
-
-    moduleQualifiedHints =
-      map ((<> "." <> queryBaseName queryText) . renderModuleName) (ambiguousDefinitionModules ambiguousMatches)
-
-    ownerQualifiedHints =
-      ownerQualifiedDisambiguationHints queryText ambiguousMatches
-
-ownerQualifiedDisambiguationHints :: Text -> [SymbolInfo] -> [Text]
-ownerQualifiedDisambiguationHints queryText ambiguousMatches =
-  dedupeItems (map renderOwnerQualifiedHint ambiguousMatches)
-  where
-    renderOwnerQualifiedHint symbolInfo =
-      renderModuleName symbolInfo.definedIn
-        <> "."
-        <> queryBaseName queryText
-        <> "@"
-        <> T.pack (Plugins.getOccString symbolInfo.symbolName)
-
-dedupeItems :: (Ord a) => [a] -> [a]
-dedupeItems =
-  reverse . snd . foldl' go (Set.empty, [])
-  where
-    go (seenItems, keptItems) item
-      | item `Set.member` seenItems =
-          (seenItems, keptItems)
-      | otherwise =
-          (Set.insert item seenItems, item : keptItems)
-
-ambiguousDefinitionModules :: [SymbolInfo] -> [GHC.Module]
-ambiguousDefinitionModules =
-  map head
-    . groupModules
-    . sortOn renderModuleName
-    . map definedIn
-  where
-    groupModules [] = []
-    groupModules (module_ : modules) =
-      let (matchingModules, rest) = span ((== renderModuleName module_) . renderModuleName) modules
-       in (module_ : matchingModules) : groupModules rest
-
-renderModuleName :: GHC.Module -> Text
-renderModuleName =
-  T.pack . GHC.moduleNameString . GHC.moduleName
-
-queryBaseName :: Text -> Text
-queryBaseName queryText =
-  case reverse (T.splitOn "." (stripOwnerHintSuffix queryText)) of
-    occNameText : _ | not (T.null occNameText) ->
-      occNameText
-    _ ->
-      stripOwnerHintSuffix queryText
-
-stripOwnerHintSuffix :: Text -> Text
-stripOwnerHintSuffix queryText =
-  case T.breakOnEnd "@" queryText of
-    ("", _) ->
-      queryText
-    (prefixWithDelimiter, ownerHintText)
-      | T.null ownerHintText ->
-          queryText
-      | otherwise ->
-          T.dropEnd 1 prefixWithDelimiter
+      renderReferenceResultsPage paginatedReferences
 
 quoteText :: Text -> Text
 quoteText value =

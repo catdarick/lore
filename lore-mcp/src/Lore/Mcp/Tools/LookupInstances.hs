@@ -4,6 +4,7 @@ module Lore.Mcp.Tools.LookupInstances
 where
 
 import qualified Data.Aeson as J
+import Data.List (foldl')
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
@@ -18,14 +19,8 @@ import qualified GHC.Plugins as Plugins
 import Lore
   ( Instances (..),
     MonadLore,
-    PathToRoot (..),
-    Symbol (..),
-    findMatchingSymbols,
     listIntersectingInstances,
     lookupLastLoadTargetsResult,
-    mergePathsToRootOn,
-    parseAndNormalizeName,
-    resolvePathToRoot,
   )
 import Lore.Mcp.Internal.Annotated
   ( Description,
@@ -47,6 +42,7 @@ import Lore.Mcp.Internal.Render
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared.Outputable (renderOutputable)
 import Lore.Mcp.Tools.Shared.PartialLoadWarning (mkPartialWarning)
+import Lore.Mcp.Tools.Shared.SymbolResolution (ResolvedSymbolQuery (resolvedRootName), withResolvedSymbols)
 
 data LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs
   { names ::
@@ -83,22 +79,12 @@ lookupInstancesHandler LookupInstancesArgs {names, skip} = do
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
-      resolution <- resolveLookupNames names
-      case resolution of
-        Left ambiguousQueries ->
-          pure $
-            renderText $
-              renderAmbiguousQueries names ambiguousQueries
-                |> mkPartialWarning loadResult
-        Right resolvedQueries -> do
-          intersectingInstances <-
-            if resolvedQueries.hasMissingQueries
-              then pure (Instances [] [])
-              else listIntersectingInstances resolvedQueries.resolvedNames
-          let toRender =
-                renderLookupInstancesResult resolvedSkip (toMatchingInstances intersectingInstances)
-                  |> mkPartialWarning loadResult
-          pure (renderText toRender)
+      renderedBody <-
+        withResolvedSymbols names \resolvedQueries -> do
+          let resolvedRootNames = dedupeNamesBy renderName (map (.resolvedRootName) resolvedQueries)
+          intersectingInstances <- listIntersectingInstances resolvedRootNames
+          pure (renderLookupInstancesResult resolvedSkip (toMatchingInstances intersectingInstances))
+      pure (renderText (renderedBody |> mkPartialWarning loadResult))
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
@@ -114,21 +100,6 @@ renderLookupInstancesResult skip lookupResult =
 data MatchingInstance
   = MatchingClassInstance GHC.ClsInst
   | MatchingFamilyInstance GHC.FamInst
-
-data AmbiguousQuery = AmbiguousQuery
-  { queryText :: Text,
-    matchedRoots :: [Plugins.Name]
-  }
-
-data ResolvedQueries = ResolvedQueries
-  { resolvedNames :: [Plugins.Name],
-    hasMissingQueries :: Bool
-  }
-
-data LookupNameResolution
-  = LookupNameMissing
-  | LookupNameResolved Plugins.Name
-  | LookupNameAmbiguous AmbiguousQuery
 
 renderMatchingInstancesList :: Int -> NonEmpty MatchingInstance -> RenderList
 renderMatchingInstancesList skip matchingInstances =
@@ -158,108 +129,28 @@ instance Renderable RenderedMatchingInstance where
       MatchingFamilyInstance familyInstance ->
         renderOutputable familyInstance
 
-resolveLookupNames :: (MonadLore m) => [Text] -> m (Either [AmbiguousQuery] ResolvedQueries)
-resolveLookupNames queries = do
-  resolvedQueries <- mapM resolveLookupName queries
-  let ambiguousQueries = [ambiguousQuery | LookupNameAmbiguous ambiguousQuery <- resolvedQueries]
-      resolvedNames = [resolvedName | LookupNameResolved resolvedName <- resolvedQueries]
-      hasMissingQueries = any isMissing resolvedQueries
-  if null ambiguousQueries
-    then
-      pure $
-        Right
-          ResolvedQueries
-            { resolvedNames,
-              hasMissingQueries
-            }
-    else pure (Left ambiguousQueries)
-  where
-    isMissing = \case
-      LookupNameMissing -> True
-      _ -> False
-
-resolveLookupName :: (MonadLore m) => Text -> m LookupNameResolution
-resolveLookupName query = do
-  matchingSymbols <- Set.toList <$> findMatchingSymbols (parseAndNormalizeName query)
-  rootNames <- resolveRootNames matchingSymbols
-  case rootNames of
-    [] ->
-      pure LookupNameMissing
-    [rootName] ->
-      pure (LookupNameResolved rootName)
-    _ ->
-      pure
-        ( LookupNameAmbiguous
-            AmbiguousQuery
-              { queryText = query,
-                matchedRoots = rootNames
-              }
-        )
-
-resolveRootNames :: (MonadLore m) => [Symbol] -> m [Plugins.Name]
-resolveRootNames symbols = do
-  pathsToRoot <- mapM (resolvePathToRoot . (.name)) symbols
-  let mergedPaths = mergePathsToRootOn renderName pathsToRoot
-  pure $
-    Set.toList $
-      Set.fromList $
-        map (NE.last . (.unPathToRoot)) mergedPaths
-  where
-    renderName name =
-      case Plugins.nameModule_maybe name of
-        Nothing ->
-          "<no-module>." <> Plugins.getOccString name
-        Just module_ ->
-          Plugins.moduleNameString (Plugins.moduleName module_) <> "." <> Plugins.getOccString name
-
 toMatchingInstances :: Instances -> [MatchingInstance]
 toMatchingInstances instances_ =
   map MatchingClassInstance instances_.classInstances
     <> map MatchingFamilyInstance instances_.familyInstances
 
-renderAmbiguousQueries :: [Text] -> [AmbiguousQuery] -> Text
-renderAmbiguousQueries queries ambiguousQueries =
-  T.intercalate "\n" $
-    [ "One or more names are ambiguous and resolve to multiple roots. Qualify them with a module prefix.",
-      ""
-    ]
-      <> concatMap renderAmbiguousQuery (zip [1 :: Int ..] ambiguousQueries)
-      <> [ "",
-           "Run the tool again with qualified names, for example: " <> renderExampleQualification queries ambiguousQueries
-         ]
-
-renderAmbiguousQuery :: (Int, AmbiguousQuery) -> [Text]
-renderAmbiguousQuery (index, ambiguousQuery) =
-  [ "  " <> T.pack (show index) <> ". " <> quoteText ambiguousQuery.queryText <> " matches:"
-  ]
-    <> map (("       - " <>) . renderNameWithModule) ambiguousQuery.matchedRoots
-
-renderNameWithModule :: Plugins.Name -> Text
-renderNameWithModule name =
+renderName :: Plugins.Name -> String
+renderName name =
   case Plugins.nameModule_maybe name of
     Nothing ->
-      T.pack (Plugins.getOccString name)
+      "<no-module>." <> Plugins.getOccString name
     Just module_ ->
-      T.pack (Plugins.moduleNameString (Plugins.moduleName module_))
-        <> "."
-        <> T.pack (Plugins.getOccString name)
+      Plugins.moduleNameString (Plugins.moduleName module_) <> "." <> Plugins.getOccString name
 
-renderExampleQualification :: [Text] -> [AmbiguousQuery] -> Text
-renderExampleQualification queries ambiguousQueries =
-  let qualified =
-        map (qualifyName ambiguousQueries) queries
-   in "[" <> T.intercalate ", " (map quoteText qualified) <> "]"
+dedupeNamesBy :: (Ord key) => (name -> key) -> [name] -> [name]
+dedupeNamesBy renderKey =
+  reverse . snd . foldl' dedupeName (Set.empty, [])
   where
-    qualifyName allAmbiguous query =
-      case [ambiguous | ambiguous <- allAmbiguous, ambiguous.queryText == query] of
-        AmbiguousQuery {matchedRoots = rootName : _} : _ ->
-          renderNameWithModule rootName
-        _ ->
-          query
-
-quoteText :: Text -> Text
-quoteText value =
-  "\"" <> value <> "\""
+    dedupeName (seenKeys, dedupedNames) name =
+      let key = renderKey name
+       in if key `Set.member` seenKeys
+            then (seenKeys, dedupedNames)
+            else (Set.insert key seenKeys, name : dedupedNames)
 
 maxRenderedMatchingInstances :: Int
 maxRenderedMatchingInstances = 25

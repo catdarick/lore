@@ -60,6 +60,7 @@ tests:
     other-modules:
     - FindReferencesSpec
     - GetDefinitionSpec
+    - LookupInstancesSpec
     - McpTestSupport
     - ProtocolRequestSpec
     - Lore.JsonRpc.Server
@@ -92,7 +93,7 @@ tests:
     - Lore.Mcp.Tools.Shared.Diagnostics
     - Lore.Mcp.Tools.Shared.Outputable
     - Lore.Mcp.Tools.Shared.PartialLoadWarning
-    - TempRecordFieldDebug
+    - Lore.Mcp.Tools.Shared.SymbolResolution
     ghc-options:
     - -threaded
     - -rtsopts

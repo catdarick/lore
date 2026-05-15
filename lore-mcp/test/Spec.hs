@@ -5,6 +5,7 @@ where
 
 import qualified FindReferencesSpec
 import qualified GetDefinitionSpec
+import qualified LookupInstancesSpec
 import qualified ProtocolRequestSpec
 import Test.Hspec
 
@@ -13,4 +14,5 @@ main =
   hspec do
     GetDefinitionSpec.spec
     FindReferencesSpec.spec
+    LookupInstancesSpec.spec
     ProtocolRequestSpec.spec
