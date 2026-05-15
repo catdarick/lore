@@ -18,6 +18,7 @@ module Lore.Internal.Lookup.SymbolsMap
     invalidateHomeSymbolsIndexCache,
     invalidateExternalSymbolsIndexCache,
     findMatchingSymbolsInMap,
+    findSimilarSymbolsInMap,
   )
 where
 
@@ -26,6 +27,7 @@ import Control.Monad (forM, when)
 import Control.Monad.Reader (MonadIO (..), asks)
 import Data.List (foldl')
 import qualified Data.Map as Map
+import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified GHC
@@ -34,6 +36,7 @@ import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.FieldLabel as GHC.FieldLabel
+import qualified GHC.Types.TyThing as TyThing
 import Lore.Internal.Definition.Cache.TypedModuleFacts (lookupTypedModuleFactsCache)
 import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (typedDefinitionNames, typedDefinitionOccAliases))
 import Lore.Internal.Lookup.Cache.Types
@@ -43,10 +46,13 @@ import Lore.Internal.Lookup.Cache.Types
     SymbolsDependencySetCache (..),
   )
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
-import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, extractAndNormalizeOccName, normalizeName, parseAndNormalizeName)
+import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, extractAndNormalizeOccName, normalizeName, parseAndNormalizeName, unNormalizedOccName)
+import Lore.Internal.Lookup.Search.Score (buildSearchIndex, searchOccurrences)
+import Lore.Internal.Lookup.Search.Types (SearchResult (..))
 import Lore.Internal.Lookup.Types
   ( ModSummaries (..),
     Symbol (..),
+    SymbolSuggestionCandidate (..),
     SymbolVisibility (..),
     SymbolsIndex (..),
     SymbolsMap (..),
@@ -86,6 +92,34 @@ findMatchingSymbolsInMap targetName SymbolsMap {homeSymbolsMap, externalSymbolsM
     externalMatchingSymbols = lookupSymbolsInIndex externalSymbolsMap
     moduleMatchingSymbols =
       Set.filter (isModuleMatching targetName) (homeMatchingSymbols <> externalMatchingSymbols)
+
+findSimilarSymbolsInMap :: Int -> NormalizedName -> SymbolsMap -> [SymbolSuggestionCandidate]
+findSimilarSymbolsInMap suggestionLimit targetName symbolsMap =
+  map mkSymbolSuggestionCandidate $
+    searchOccurrences suggestionLimit (unNormalizedOccName targetName.occName) searchIndex
+  where
+    SymbolsIndex combinedSymbolsIndex = combineSymbolsIndexes symbolsMap
+    searchIndex =
+      buildSearchIndex
+        [ (occName, unNormalizedOccName occName, moduleMatchingSymbols)
+        | (occName, symbols) <- Map.toList combinedSymbolsIndex,
+          let moduleMatchingSymbols = Set.filter (isModuleMatching targetName) symbols,
+          not (Set.null moduleMatchingSymbols)
+        ]
+
+    mkSymbolSuggestionCandidate result =
+      SymbolSuggestionCandidate
+        { suggestionCandidateSymbols = result.searchResultValue,
+          suggestionCandidateLookupName = result.searchResultText,
+          suggestionCandidateScore = result.searchResultScore
+        }
+
+combineSymbolsIndexes :: SymbolsMap -> SymbolsIndex
+combineSymbolsIndexes SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
+  SymbolsIndex (Map.unionWith Set.union homeSymbols externalSymbols)
+  where
+    SymbolsIndex homeSymbols = homeSymbolsMap
+    SymbolsIndex externalSymbols = externalSymbolsMap
 
 isModuleMatching :: NormalizedName -> Symbol -> Bool
 isModuleMatching targetName symbol =
@@ -194,9 +228,16 @@ enumerateVisiblePackageModules = do
   pure mods
 
 data ModuleSymbolsResult
-  = ModuleSymbolsLoaded GHC.Module (Set.Set Symbol) (Map.Map GHC.Name (Set.Set NormalizedOccName))
+  = ModuleSymbolsLoaded GHC.Module [IndexableSymbol]
   | ModuleSymbolsMissing GHC.Module
   | ModuleSymbolsFailed GHC.Module
+  deriving (Generic, NFData)
+
+data IndexableSymbol = IndexableSymbol
+  { indexableSymbol :: !Symbol,
+    indexableRawOccurrenceKey :: !(Maybe NormalizedOccName),
+    indexableAliasKeys :: !(Set.Set NormalizedOccName)
+  }
   deriving (Generic, NFData)
 
 getExternalModuleSymbols :: GHC.HscEnv -> GHC.Module -> IO ModuleSymbolsResult
@@ -205,14 +246,14 @@ getExternalModuleSymbols hsc_env mdl = do
     do \(_ :: SomeException) -> pure (ModuleSymbolsFailed mdl)
     do
       iface <- GHC.hscGetModuleInterface hsc_env mdl
-      let exportedNames = availInfosNameSet (GHC.mi_exports iface)
-          exportedOccAliases = availInfosFieldAliases (GHC.mi_exports iface)
-          exportedSymbols = flip Set.map exportedNames \exportedName ->
-            Symbol
-              { name = exportedName,
-                visibility = Symbol'ExportedFrom (Set.singleton mdl)
-              }
-      pure (ModuleSymbolsLoaded mdl exportedSymbols exportedOccAliases)
+      let exportedOccAliases = availInfosFieldAliases (GHC.mi_exports iface)
+      exportedSymbols <-
+        buildIndexableSymbols
+          exportedOccAliases
+          (GHC.lookupType hsc_env)
+          (Symbol'ExportedFrom (Set.singleton mdl))
+          (availInfosNameSet (GHC.mi_exports iface))
+      pure (ModuleSymbolsLoaded mdl exportedSymbols)
 
 getHomeModuleSymbols :: (MonadLore m) => GHC.Module -> m ModuleSymbolsResult
 getHomeModuleSymbols mdl = do
@@ -244,17 +285,64 @@ getHomeModuleSymbols mdl = do
                         Map.unionWith Set.union definedOccAliases exportedOccAliases
                       unexportedNameSet =
                         Set.difference definedNameSet exportedNameSet
-                      exportedSymbols = flip Set.map exportedNameSet \exportedName ->
-                        Symbol
-                          { name = exportedName,
-                            visibility = Symbol'ExportedFrom (Set.singleton mdl)
-                          }
-                      unexportedSymbols = flip Set.map unexportedNameSet \unexportedName ->
-                        Symbol
-                          { name = unexportedName,
-                            visibility = Symbol'Unexported
-                          }
-                  pure (ModuleSymbolsLoaded mdl (exportedSymbols <> unexportedSymbols) occAliasesByName)
+                  exportedSymbols <-
+                    buildIndexableSymbols
+                      occAliasesByName
+                      GHC.lookupName
+                      (Symbol'ExportedFrom (Set.singleton mdl))
+                      exportedNameSet
+                  unexportedSymbols <-
+                    buildIndexableSymbols
+                      occAliasesByName
+                      GHC.lookupName
+                      Symbol'Unexported
+                      unexportedNameSet
+                  pure (ModuleSymbolsLoaded mdl (exportedSymbols <> unexportedSymbols))
+
+buildIndexableSymbols ::
+  (Monad m) =>
+  Map.Map GHC.Name (Set.Set NormalizedOccName) ->
+  (GHC.Name -> m (Maybe TyThing.TyThing)) ->
+  SymbolVisibility ->
+  Set.Set GHC.Name ->
+  m [IndexableSymbol]
+buildIndexableSymbols occAliasesByName lookupTyThing visibility names =
+  catMaybes <$> forM (Set.toList names) mkIndexableSymbol
+  where
+    mkIndexableSymbol name = do
+      maybeTyThing <- lookupTyThing name
+      let aliasKeys =
+            Map.findWithDefault Set.empty name occAliasesByName
+          rawOccurrenceKey =
+            if
+              | not (Set.null aliasKeys) -> Nothing
+              | isUserFacingRawName name maybeTyThing -> Just (extractAndNormalizeOccName name)
+              | otherwise -> Nothing
+      pure
+        if Set.null aliasKeys && rawOccurrenceKey == Nothing
+          then Nothing
+          else
+            Just
+              IndexableSymbol
+                { indexableSymbol =
+                    Symbol
+                      { name,
+                        visibility
+                      },
+                  indexableRawOccurrenceKey = rawOccurrenceKey,
+                  indexableAliasKeys = aliasKeys
+                }
+
+isUserFacingTyThing :: TyThing.TyThing -> Bool
+isUserFacingTyThing = \case
+  TyThing.ACoAxiom {} -> False
+  _ -> True
+
+isUserFacingRawName :: GHC.Name -> Maybe TyThing.TyThing -> Bool
+isUserFacingRawName name maybeTyThing =
+  not (GHC.isSystemName name)
+    && not (GHC.isDerivedOccName (GHC.nameOccName name))
+    && maybe True isUserFacingTyThing maybeTyThing
 
 getExportedHomeModuleSymbols :: (MonadLore m) => GHC.Module -> m (Maybe (Set.Set GHC.Name, Map.Map GHC.Name (Set.Set NormalizedOccName)))
 getExportedHomeModuleSymbols homeModule = do
@@ -318,7 +406,7 @@ availInfosFieldAliases availInfos =
     [ (name, Set.singleton (normalizeOccAlias aliasText))
     | availInfo <- availInfos,
       greName <- availInfoGreNames availInfo,
-      name <- [GHC.greNameMangledName greName],
+      name <- [GHC.greNamePrintableName greName],
       Just aliasText <- [greNameFieldAliasText greName]
     ]
   where
@@ -348,14 +436,14 @@ buildSymbolsIndex moduleSymbols =
   SymbolsIndex (mapToSymbols <$> foldl' insertModuleSymbols Map.empty moduleSymbols)
   where
     insertModuleSymbols acc = \case
-      ModuleSymbolsLoaded _ symbols occAliasesByName ->
-        foldl' (insertSymbol occAliasesByName) acc symbols
+      ModuleSymbolsLoaded _ symbols ->
+        foldl' insertSymbol acc symbols
       ModuleSymbolsMissing _ ->
         acc
       ModuleSymbolsFailed _ ->
         acc
 
-    insertSymbol occAliasesByName acc symbol =
+    insertSymbol acc indexableSymbol =
       foldl'
         ( \mapAcc key ->
             Map.insertWith
@@ -365,12 +453,15 @@ buildSymbolsIndex moduleSymbols =
               mapAcc
         )
         acc
-        (Set.toList (symbolLookupKeys occAliasesByName symbol.name))
+        (Set.toList (symbolLookupKeys indexableSymbol))
+      where
+        symbol = indexableSymbol.indexableSymbol
 
-    symbolLookupKeys occAliasesByName symbolName =
-      Set.insert
-        (extractAndNormalizeOccName symbolName)
-        (Map.findWithDefault Set.empty symbolName occAliasesByName)
+    symbolLookupKeys indexableSymbol =
+      maybe
+        indexableSymbol.indexableAliasKeys
+        (`Set.insert` indexableSymbol.indexableAliasKeys)
+        indexableSymbol.indexableRawOccurrenceKey
 
     exportedFromSet = \case
       Symbol'ExportedFrom modules_ -> modules_

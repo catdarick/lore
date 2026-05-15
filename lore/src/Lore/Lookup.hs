@@ -8,6 +8,7 @@ module Lore.Lookup
     normalizeModuleName,
     mkNormalizedModuleName,
     Symbol (..),
+    SymbolSuggestion (..),
     SymbolVisibility (..),
     SymbolCategory (..),
     SymbolInfo (..),
@@ -15,6 +16,7 @@ module Lore.Lookup
     PathToRoot (..),
     classifySymbolCategory,
     findMatchingSymbols,
+    findSimilarSymbols,
     findMatchingSymbolsRoots,
     lookupSymbolInfo,
     listIntersectingInstances,
@@ -29,6 +31,7 @@ import Control.Monad (forM)
 import Data.List (foldl', isInfixOf)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Core.FamInstEnv as FamInstEnv
@@ -38,9 +41,9 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
-import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap)
+import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap, findSimilarSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
-import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolVisibility (..), SymbolsMap)
+import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolSuggestion (..), SymbolSuggestionCandidate (..), SymbolVisibility (..), SymbolsMap)
 import Lore.Monad (MonadLore)
 
 data SymbolInfo = SymbolInfo
@@ -67,6 +70,27 @@ data SymbolCategory
 findMatchingSymbols :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
 findMatchingSymbols targetName = do
   findMatchingSymbolsInMap targetName <$> SymbolsMap.getCachedSymbolsMap
+
+findSimilarSymbols :: (MonadLore m) => Int -> NormalizedName -> m [SymbolSuggestion]
+findSimilarSymbols suggestionLimit targetName = do
+  candidates <- findSimilarSymbolsInMap suggestionLimit targetName <$> SymbolsMap.getCachedSymbolsMap
+  pure (mapMaybe mkSymbolSuggestion candidates)
+
+mkSymbolSuggestion :: SymbolSuggestionCandidate -> Maybe SymbolSuggestion
+mkSymbolSuggestion candidate = do
+  symbol <- pickSuggestedSymbol candidate.suggestionCandidateSymbols
+  pure
+    SymbolSuggestion
+      { suggestedSymbol = symbol,
+        suggestedLookupName = candidate.suggestionCandidateLookupName,
+        suggestionScore = candidate.suggestionCandidateScore
+      }
+
+pickSuggestedSymbol :: Set.Set Symbol -> Maybe Symbol
+pickSuggestedSymbol symbols =
+  case Set.toList symbols of
+    [] -> Nothing
+    symbol : _ -> Just symbol
 
 findMatchingSymbolsRoots :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
 findMatchingSymbolsRoots targetName = do

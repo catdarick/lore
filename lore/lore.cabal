@@ -33,6 +33,7 @@ library
       Lore.Interpreter
       Lore.Logger
       Lore.Lookup
+      Lore.Lookup.Search
       Lore.Monad
       Lore.Refactor.Imports
       Lore.Refactor.ImportCleanup.Internal
@@ -79,6 +80,9 @@ library
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.Name
       Lore.Internal.Lookup.NameToInstances
+      Lore.Internal.Lookup.Search.Score
+      Lore.Internal.Lookup.Search.Tokenize
+      Lore.Internal.Lookup.Search.Types
       Lore.Internal.Lookup.SymbolsMap
       Lore.Internal.Lookup.Types
       Lore.Internal.Monad
@@ -155,6 +159,7 @@ library
     , containers
     , deepseq
     , directory
+    , edit-distance
     , exceptions
     , filepath
     , ghc
@@ -182,6 +187,7 @@ test-suite lore-test
       ImportCleanupRewriteSpec
       InterpreterSpec
       LookupSpec
+      LookupSearchSpec
       LoggerSpec
       RedundantImportsSpec
       SourceEditSpec
@@ -239,6 +245,7 @@ test-suite lore-test
     , containers
     , deepseq
     , directory
+    , edit-distance
     , exceptions
     , filepath
     , ghc
@@ -313,6 +320,9 @@ benchmark lore-bench
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.Name
       Lore.Internal.Lookup.NameToInstances
+      Lore.Internal.Lookup.Search.Score
+      Lore.Internal.Lookup.Search.Tokenize
+      Lore.Internal.Lookup.Search.Types
       Lore.Internal.Lookup.SymbolsMap
       Lore.Internal.Lookup.Types
       Lore.Internal.Monad
@@ -337,6 +347,7 @@ benchmark lore-bench
       Lore.Lib.Text
       Lore.Logger
       Lore.Lookup
+      Lore.Lookup.Search
       Lore.Module
       Lore.Monad
       Lore.Refactor.ImportCleanup.Internal
@@ -401,6 +412,7 @@ benchmark lore-bench
     , criterion
     , deepseq
     , directory
+    , edit-distance
     , exceptions
     , filepath
     , ghc
@@ -476,6 +488,9 @@ benchmark lore-memory-bench
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.Name
       Lore.Internal.Lookup.NameToInstances
+      Lore.Internal.Lookup.Search.Score
+      Lore.Internal.Lookup.Search.Tokenize
+      Lore.Internal.Lookup.Search.Types
       Lore.Internal.Lookup.SymbolsMap
       Lore.Internal.Lookup.Types
       Lore.Internal.Monad
@@ -500,6 +515,7 @@ benchmark lore-memory-bench
       Lore.Lib.Text
       Lore.Logger
       Lore.Lookup
+      Lore.Lookup.Search
       Lore.Module
       Lore.Monad
       Lore.Refactor.ImportCleanup.Internal
@@ -564,6 +580,7 @@ benchmark lore-memory-bench
     , criterion
     , deepseq
     , directory
+    , edit-distance
     , exceptions
     , filepath
     , ghc

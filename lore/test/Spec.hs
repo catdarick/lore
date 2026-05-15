@@ -11,6 +11,7 @@ import qualified ImportCleanupResolveSpec
 import qualified ImportCleanupRewriteSpec
 import qualified InterpreterSpec
 import qualified LoggerSpec
+import qualified LookupSearchSpec
 import qualified LookupSpec
 import qualified RedundantImportsSpec
 import qualified SourceEditSpec
@@ -28,6 +29,7 @@ main =
     ImportCleanupRewriteSpec.spec
     InterpreterSpec.spec
     LoggerSpec.spec
+    LookupSearchSpec.spec
     LookupSpec.spec
     RedundantImportsSpec.spec
     SourceEditSpec.spec

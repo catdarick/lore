@@ -216,6 +216,35 @@ spec = do
       supportValuesLookup `shouldContainText` "Found 1 symbol candidates:"
       supportValuesLookup `shouldNotContainText` "type SupportRecord :: Type"
 
+    it "suggests similar symbols when exact lookup misses" do
+      supportValuesLookup <-
+        fixtureLoreMcp do
+          loadFixtureTargets
+          callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "supportVlaues")
+
+      supportValuesLookup `shouldContainText` "No symbols found for \"supportVlaues\"."
+      supportValuesLookup `shouldContainText` "Maybe you meant one of these?"
+      supportValuesLookup `shouldContainText` "supportValues"
+
+    it "suggests each lookup occurrence once and hides generated symbols" do
+      withFixtureCopy \fixtureRoot -> do
+        addSuggestionDuplicateFixture fixtureRoot
+        suggestedLookup <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureTargets
+            callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "suggestedsSymbol")
+
+        suggestedLookup `shouldContainText` "No symbols found for \"suggestedsSymbol\"."
+        suggestedLookup `shouldContainText` "SuggestedSymbol"
+        T.count "SuggestedSymbol" suggestedLookup `shouldBe` 1
+        suggestedLookup `shouldNotContainText` "$tc"
+        generatedLookup <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureTargets
+            callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "repSuggestedSymbol")
+        generatedLookup `shouldContainText` "SuggestedSymbol"
+        generatedLookup `shouldNotContainText` "Rep_SuggestedSymbol"
+
     it "returns both exact symbols and selector aliases for ambiguous occurrence queries" do
       withFixtureCopy \fixtureRoot -> do
         addRecordFieldLookupFixture fixtureRoot
@@ -246,6 +275,22 @@ addSameModuleDuplicateSymbolFixture fixtureRoot = do
   let demoFile = fixtureRoot </> "src" </> "Demo.hs"
   source <- TIO.readFile demoFile
   TIO.writeFile demoFile (source <> "\n\n" <> sameModuleDuplicateFixtureDeclarations)
+
+addSuggestionDuplicateFixture :: FilePath -> IO ()
+addSuggestionDuplicateFixture fixtureRoot = do
+  let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+  source <- TIO.readFile demoFile
+  let sourceWithDeriveGeneric =
+        "{-# LANGUAGE DeriveGeneric #-}\n"
+          <> T.replace "import Data.Kind (Type)" "import Data.Kind (Type)\nimport GHC.Generics (Generic)" source
+  TIO.writeFile demoFile (sourceWithDeriveGeneric <> "\n\n" <> suggestionDuplicateFixtureDeclarations)
+
+suggestionDuplicateFixtureDeclarations :: Text
+suggestionDuplicateFixtureDeclarations =
+  T.unlines
+    [ "data SuggestedSymbol = SuggestedSymbol",
+      "  deriving (Generic)"
+    ]
 
 sameModuleDuplicateFixtureDeclarations :: Text
 sameModuleDuplicateFixtureDeclarations =

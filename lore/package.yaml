@@ -40,6 +40,7 @@ dependencies:
 - transformers
 - unliftio
 - megaparsec
+- edit-distance
 
 ghc-options:
 - -Werror
@@ -63,6 +64,7 @@ library:
   - Lore.Interpreter
   - Lore.Logger
   - Lore.Lookup
+  - Lore.Lookup.Search
   - Lore.Monad
   - Lore.Refactor.Imports
   - Lore.Refactor.ImportCleanup.Internal
@@ -84,6 +86,7 @@ tests:
     - ImportCleanupRewriteSpec
     - InterpreterSpec
     - LookupSpec
+    - LookupSearchSpec
     - LoggerSpec
     - RedundantImportsSpec
     - SourceEditSpec

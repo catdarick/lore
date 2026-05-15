@@ -6,6 +6,8 @@ module Lore.Internal.Lookup.Types
     ModSummaries (..),
     NameToInstancesIndex (..),
     Symbol (..),
+    SymbolSuggestionCandidate (..),
+    SymbolSuggestion (..),
     SymbolVisibility (..),
     symbolExportedFrom,
   )
@@ -14,6 +16,7 @@ where
 import Control.DeepSeq (NFData)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified GHC
 import GHC.Generics (Generic)
 import qualified GHC.Types.Name.Env as NameEnv
@@ -39,6 +42,20 @@ newtype NameToInstancesIndex = NameToInstancesIndex
 data Symbol = Symbol
   { name :: GHC.Name,
     visibility :: SymbolVisibility
+  }
+  deriving (Generic, NFData, Eq, Ord)
+
+data SymbolSuggestion = SymbolSuggestion
+  { suggestedSymbol :: Symbol,
+    suggestedLookupName :: Text,
+    suggestionScore :: Double
+  }
+  deriving (Generic, NFData, Eq, Ord)
+
+data SymbolSuggestionCandidate = SymbolSuggestionCandidate
+  { suggestionCandidateSymbols :: Set.Set Symbol,
+    suggestionCandidateLookupName :: Text,
+    suggestionCandidateScore :: Double
   }
   deriving (Generic, NFData, Eq, Ord)
 
