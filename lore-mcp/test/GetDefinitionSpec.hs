@@ -163,6 +163,64 @@ spec = do
         definitionResult `shouldContainText` "data instance AmbiguousField AmbiguousRec AmbiguousId = AmbiguousId"
         definitionResult `shouldNotContainText` "is ambiguous. More qualification is required"
 
+  describe "lookupSymbolInfo" do
+    it "resolves exported and unexported record fields from DuplicateRecordFields modules" do
+      withFixtureCopy \fixtureRoot -> do
+        addRecordFieldLookupFixture fixtureRoot
+        (exportedFieldLookup, unexportedFieldLookup, qualifiedFieldLookup, constructorLookup) <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureTargets
+            exportedFieldLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "userName")
+            unexportedFieldLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "hiddenValue")
+            qualifiedFieldLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Demo.hiddenValue")
+            constructorLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Demo.Hidden")
+            pure (exportedFieldLookup, unexportedFieldLookup, qualifiedFieldLookup, constructorLookup)
+
+        exportedFieldLookup `shouldContainText` "userName"
+        exportedFieldLookup `shouldContainText` "Found 1 symbol candidates:"
+        exportedFieldLookup `shouldContainText` ":: User -> String"
+
+        unexportedFieldLookup `shouldContainText` "hiddenValue"
+        unexportedFieldLookup `shouldContainText` ":: Hidden -> Int"
+        unexportedFieldLookup `shouldNotContainText` "type Hidden :: Type"
+
+        qualifiedFieldLookup `shouldContainText` "hiddenValue"
+        qualifiedFieldLookup `shouldContainText` "Found 1 symbol candidates:"
+        qualifiedFieldLookup `shouldContainText` ":: Hidden -> Int"
+        qualifiedFieldLookup `shouldNotContainText` "type Hidden :: Type"
+
+        constructorLookup `shouldContainText` "Hidden"
+        constructorLookup `shouldContainText` "type Hidden :: Type"
+
+    it "keeps lookup for existing unexported top-level home-module symbols" do
+      supportValuesLookup <-
+        fixtureLoreMcp do
+          loadFixtureTargets
+          callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "supportValues")
+
+      supportValuesLookup `shouldContainText` "supportValues"
+      supportValuesLookup `shouldContainText` "Found 1 symbol candidates:"
+      supportValuesLookup `shouldNotContainText` "type SupportRecord :: Type"
+
+    it "returns both exact symbols and selector aliases for ambiguous occurrence queries" do
+      withFixtureCopy \fixtureRoot -> do
+        addRecordFieldLookupFixture fixtureRoot
+        addSupportHiddenValueFixture fixtureRoot
+        (unqualifiedLookup, qualifiedLookup) <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureTargets
+            unqualifiedLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "hiddenValue")
+            qualifiedLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Demo.hiddenValue")
+            pure (unqualifiedLookup, qualifiedLookup)
+
+        unqualifiedLookup `shouldContainText` "Found 2 symbol candidates:"
+        unqualifiedLookup `shouldContainText` ":: Hidden -> Int"
+        unqualifiedLookup `shouldContainText` "hiddenValue :: Int"
+
+        qualifiedLookup `shouldContainText` "Found 1 symbol candidates:"
+        qualifiedLookup `shouldContainText` ":: Hidden -> Int"
+        qualifiedLookup `shouldNotContainText` "hiddenValue :: Int"
+
 lookupSymbolInfoArgs :: Text -> J.Value
 lookupSymbolInfoArgs symbol =
   J.object
@@ -241,6 +299,26 @@ addSharedTopLevelDependencyFixture fixtureRoot = do
       moduleFile = moduleDir </> "SharedTopLevel.hs"
   createDirectoryIfMissing True moduleDir
   TIO.writeFile moduleFile sharedTopLevelDependencyFixtureModuleSource
+
+addRecordFieldLookupFixture :: FilePath -> IO ()
+addRecordFieldLookupFixture fixtureRoot = do
+  let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+  source <- TIO.readFile demoFile
+  let sourceWithDuplicateRecordFields =
+        if T.isInfixOf "{-# LANGUAGE DuplicateRecordFields #-}" source
+          then source
+          else "{-# LANGUAGE DuplicateRecordFields #-}\n" <> source
+      sourceWithExports =
+        T.replace recordFieldLookupExportAnchor recordFieldLookupExportReplacement sourceWithDuplicateRecordFields
+  TIO.writeFile demoFile (sourceWithExports <> "\n\n" <> recordFieldLookupFixtureDeclarations)
+
+addSupportHiddenValueFixture :: FilePath -> IO ()
+addSupportHiddenValueFixture fixtureRoot = do
+  let supportFile = fixtureRoot </> "src" </> "Demo" </> "Support.hs"
+  source <- TIO.readFile supportFile
+  let sourceWithExports =
+        T.replace supportHiddenValueExportAnchor supportHiddenValueExportReplacement source
+  TIO.writeFile supportFile (sourceWithExports <> "\n\n" <> supportHiddenValueFixtureDeclarations)
 
 constructorScopedDependencyFixtureModuleSource :: Text
 constructorScopedDependencyFixtureModuleSource =
@@ -341,6 +419,72 @@ sharedTopLevelDependencyFixtureModuleSource =
       "pairLeft, pairRight :: Int",
       "(pairLeft, pairRight) =",
       "  (mkLeft seedValue, mkRight seedValue)"
+    ]
+
+recordFieldLookupExportAnchor :: Text
+recordFieldLookupExportAnchor =
+  T.unlines
+    [ "    HasIndex (..),",
+      "  )",
+      "where"
+    ]
+
+recordFieldLookupExportReplacement :: Text
+recordFieldLookupExportReplacement =
+  T.unlines
+    [ "    HasIndex (..),",
+      "    User(..),",
+      "    Hidden(Hidden),",
+      "    publicFn,",
+      "  )",
+      "where"
+    ]
+
+recordFieldLookupFixtureDeclarations :: Text
+recordFieldLookupFixtureDeclarations =
+  T.unlines
+    [ "data User = User",
+      "  { userName :: String",
+      "  }",
+      "",
+      "data Hidden = Hidden",
+      "  { hiddenValue :: Int",
+      "  }",
+      "",
+      "data LeftTagged = LeftTagged",
+      "  { sharedValue :: Int",
+      "  }",
+      "",
+      "data RightTagged = RightTagged",
+      "  { sharedValue :: String",
+      "  }",
+      "",
+      "publicFn :: Hidden -> Int",
+      "publicFn = hiddenValue"
+    ]
+
+supportHiddenValueExportAnchor :: Text
+supportHiddenValueExportAnchor =
+  T.unlines
+    [ "    mkSupportRecord,",
+      "    (.+.),",
+      "  )"
+    ]
+
+supportHiddenValueExportReplacement :: Text
+supportHiddenValueExportReplacement =
+  T.unlines
+    [ "    mkSupportRecord,",
+      "    hiddenValue,",
+      "    (.+.),",
+      "  )"
+    ]
+
+supportHiddenValueFixtureDeclarations :: Text
+supportHiddenValueFixtureDeclarations =
+  T.unlines
+    [ "hiddenValue :: Int",
+      "hiddenValue = supportSeed * 10"
     ]
 
 paginationExportAnchor :: Text

@@ -74,7 +74,36 @@ findMatchingSymbolsRoots targetName = do
   let matchingSymbols = findMatchingSymbolsInMap targetName symbolsMap
   pathsToRoot <- forM (Set.toList matchingSymbols) $ \symbol -> do
     resolvePathToRoot symbol.name
-  pure $ Set.fromList $ map (mkSymbolFromName symbolsMap . getPathRoot) pathsToRoot
+  dedupedRootNames <- dedupeRootNamesByNormalizedOcc (map getPathRoot pathsToRoot)
+  pure $ Set.fromList $ map (mkSymbolFromName symbolsMap) dedupedRootNames
+
+dedupeRootNamesByNormalizedOcc :: (MonadLore m) => [GHC.Name] -> m [GHC.Name]
+dedupeRootNamesByNormalizedOcc names =
+  concat <$> mapM pickPreferredName (Map.elems namesByNormalized)
+  where
+    namesByNormalized =
+      Map.fromListWith
+        (<>)
+        [ (normalizeName name, [name])
+        | name <- names
+        ]
+
+    pickPreferredName [] =
+      pure []
+    pickPreferredName namesForNormalizedOcc = do
+      categorizedNames <-
+        forM namesForNormalizedOcc $ \name -> do
+          maybeTyThing <- GHC.lookupName name
+          pure (name, maybe SymbolUnknown classifySymbolCategory maybeTyThing)
+      let nonValueNames =
+            [ name
+            | (name, category) <- categorizedNames,
+              category /= SymbolValue
+            ]
+      pure
+        case nonValueNames of
+          [] -> take 1 namesForNormalizedOcc
+          (preferredName : _) -> [preferredName]
 
 lookupSymbolInfo :: (MonadLore m) => GHC.Name -> m (Maybe SymbolInfo)
 lookupSymbolInfo name = do

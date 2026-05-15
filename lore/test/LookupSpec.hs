@@ -4,7 +4,7 @@ module LookupSpec
 where
 
 import Control.Monad (forM)
-import Data.List (foldl', isInfixOf)
+import Data.List (foldl', isInfixOf, isPrefixOf)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -146,6 +146,67 @@ spec =
         fmap (GHC.moduleNameString . GHC.moduleName . definedIn) result
           `shouldBe` ["Demo.Support"]
 
+      it "finds exported and unexported record fields from DuplicateRecordFields modules" do
+        withFixtureCopy \fixtureRoot -> do
+          addRecordFieldLookupFixture fixtureRoot
+          (exportedFieldSymbols, unexportedFieldSymbols, qualifiedFieldSymbols, constructorSymbols) <-
+            fixtureLoreAt fixtureRoot do
+              _ <- loadTargets defaultLoadTargetsOptions
+              exportedFieldSymbols <- findSymbols "userName"
+              unexportedFieldSymbols <- findSymbols "hiddenValue"
+              qualifiedFieldSymbols <- findSymbols "Demo.hiddenValue"
+              constructorSymbols <- findSymbols "Demo.Hidden"
+              pure (exportedFieldSymbols, unexportedFieldSymbols, qualifiedFieldSymbols, constructorSymbols)
+
+          let isExportedFrom moduleName visibility =
+                case visibility of
+                  Symbol'ExportedFrom modules_ ->
+                    moduleName `elem` map (GHC.moduleNameString . GHC.moduleName) (Set.toList modules_)
+                  Symbol'Unexported ->
+                    False
+
+              isDefinedInModule moduleName symbol =
+                fmap (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name) == Just moduleName
+
+              demoUnexportedFieldSymbols =
+                filter (isDefinedInModule "Demo") unexportedFieldSymbols
+
+              demoQualifiedFieldSymbols =
+                filter (isDefinedInModule "Demo") qualifiedFieldSymbols
+
+              demoUnexportedFieldOccs =
+                fmap (Plugins.getOccString . (.name)) demoUnexportedFieldSymbols
+
+              demoQualifiedFieldOccs =
+                fmap (Plugins.getOccString . (.name)) demoQualifiedFieldSymbols
+
+          length exportedFieldSymbols `shouldBe` 1
+          fmap (Plugins.getOccString . (.name)) exportedFieldSymbols
+            `shouldBe` ["userName"]
+          fmap (fmap (GHC.moduleNameString . GHC.moduleName) . Plugins.nameModule_maybe . (.name)) exportedFieldSymbols
+            `shouldBe` [Just "Demo"]
+          all (isExportedFrom "Demo" . (.visibility)) exportedFieldSymbols `shouldBe` True
+
+          length demoUnexportedFieldSymbols `shouldSatisfy` (> 0)
+          demoUnexportedFieldOccs `shouldSatisfy` all (isInfixOf "hiddenValue")
+          demoUnexportedFieldOccs
+            `shouldSatisfy` any (isPrefixOf "$sel:hiddenValue:")
+          fmap (fmap (GHC.moduleNameString . GHC.moduleName) . Plugins.nameModule_maybe . (.name)) demoUnexportedFieldSymbols
+            `shouldSatisfy` all (== Just "Demo")
+          all ((== Symbol'Unexported) . (.visibility)) demoUnexportedFieldSymbols `shouldBe` True
+
+          length demoQualifiedFieldSymbols `shouldSatisfy` (> 0)
+          demoQualifiedFieldOccs `shouldSatisfy` all (isInfixOf "hiddenValue")
+          demoQualifiedFieldOccs
+            `shouldSatisfy` any (isPrefixOf "$sel:hiddenValue:")
+          fmap (fmap (GHC.moduleNameString . GHC.moduleName) . Plugins.nameModule_maybe . (.name)) demoQualifiedFieldSymbols
+            `shouldSatisfy` all (== Just "Demo")
+          all ((== Symbol'Unexported) . (.visibility)) demoQualifiedFieldSymbols `shouldBe` True
+
+          null constructorSymbols `shouldBe` False
+          fmap (Outputable.showSDocUnsafe . Outputable.ppr . name) constructorSymbols
+            `shouldSatisfy` any (isInfixOf "Hidden")
+
     describe "findSymbols" do
       it "supports module-qualified hints before filtering candidates" do
         result <-
@@ -167,6 +228,42 @@ spec =
         all (== Symbol'Unexported) (fmap (.visibility) result) `shouldBe` True
         fmap (\symbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name)) result
           `shouldBe` ["Demo.Support"]
+
+      it "returns both exact symbols and selector aliases for the same occurrence query" do
+        withFixtureCopy \fixtureRoot -> do
+          addRecordFieldLookupFixture fixtureRoot
+          addSupportHiddenValueFixture fixtureRoot
+          symbols <-
+            fixtureLoreAt fixtureRoot do
+              _ <- loadTargets defaultLoadTargetsOptions
+              findSymbols "hiddenValue"
+
+          let renderModule symbol =
+                fmap (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name)
+
+              renderedOccs =
+                fmap (Plugins.getOccString . (.name)) symbols
+
+              hasDemoSelector =
+                any
+                  ( \symbol ->
+                      renderModule symbol == Just "Demo"
+                        && isPrefixOf "$sel:hiddenValue:" (Plugins.getOccString symbol.name)
+                  )
+                  symbols
+
+              hasSupportExact =
+                any
+                  ( \symbol ->
+                      renderModule symbol == Just "Demo.Support"
+                        && Plugins.getOccString symbol.name == "hiddenValue"
+                  )
+                  symbols
+
+          renderedOccs `shouldSatisfy` any (isInfixOf "hiddenValue")
+          hasDemoSelector `shouldBe` True
+          hasSupportExact `shouldBe` True
+          length symbols `shouldSatisfy` (>= 2)
 
       it "supports module-qualified dotted operators" do
         result <-
@@ -452,3 +549,89 @@ symbolExportedFromModule moduleName symbolInfo =
       False
     Symbol'ExportedFrom modules_ ->
       moduleName `elem` map (GHC.moduleNameString . GHC.moduleName) (Set.toList modules_)
+
+addRecordFieldLookupFixture :: FilePath -> IO ()
+addRecordFieldLookupFixture fixtureRoot = do
+  let demoFile = fixtureRoot </> "src" </> "Demo.hs"
+  source <- TIO.readFile demoFile
+  let sourceWithDuplicateRecordFields =
+        if T.isInfixOf "{-# LANGUAGE DuplicateRecordFields #-}" source
+          then source
+          else "{-# LANGUAGE DuplicateRecordFields #-}\n" <> source
+      sourceWithExports =
+        T.replace recordFieldLookupExportAnchor recordFieldLookupExportReplacement sourceWithDuplicateRecordFields
+  TIO.writeFile demoFile (sourceWithExports <> "\n\n" <> recordFieldLookupFixtureDeclarations)
+
+addSupportHiddenValueFixture :: FilePath -> IO ()
+addSupportHiddenValueFixture fixtureRoot = do
+  let supportFile = fixtureRoot </> "src" </> "Demo" </> "Support.hs"
+  source <- TIO.readFile supportFile
+  let sourceWithExports =
+        T.replace supportHiddenValueExportAnchor supportHiddenValueExportReplacement source
+  TIO.writeFile supportFile (sourceWithExports <> "\n\n" <> supportHiddenValueFixtureDeclarations)
+
+recordFieldLookupExportAnchor :: T.Text
+recordFieldLookupExportAnchor =
+  T.unlines
+    [ "    HasIndex (..),",
+      "  )",
+      "where"
+    ]
+
+recordFieldLookupExportReplacement :: T.Text
+recordFieldLookupExportReplacement =
+  T.unlines
+    [ "    HasIndex (..),",
+      "    User(..),",
+      "    Hidden(Hidden),",
+      "    publicFn,",
+      "  )",
+      "where"
+    ]
+
+recordFieldLookupFixtureDeclarations :: T.Text
+recordFieldLookupFixtureDeclarations =
+  T.unlines
+    [ "data User = User",
+      "  { userName :: String",
+      "  }",
+      "",
+      "data Hidden = Hidden",
+      "  { hiddenValue :: Int",
+      "  }",
+      "",
+      "data LeftTagged = LeftTagged",
+      "  { sharedValue :: Int",
+      "  }",
+      "",
+      "data RightTagged = RightTagged",
+      "  { sharedValue :: String",
+      "  }",
+      "",
+      "publicFn :: Hidden -> Int",
+      "publicFn = hiddenValue"
+    ]
+
+supportHiddenValueExportAnchor :: T.Text
+supportHiddenValueExportAnchor =
+  T.unlines
+    [ "    mkSupportRecord,",
+      "    (.+.),",
+      "  )"
+    ]
+
+supportHiddenValueExportReplacement :: T.Text
+supportHiddenValueExportReplacement =
+  T.unlines
+    [ "    mkSupportRecord,",
+      "    hiddenValue,",
+      "    (.+.),",
+      "  )"
+    ]
+
+supportHiddenValueFixtureDeclarations :: T.Text
+supportHiddenValueFixtureDeclarations =
+  T.unlines
+    [ "hiddenValue :: Int",
+      "hiddenValue = supportSeed * 10"
+    ]

@@ -26,13 +26,16 @@ import Control.Monad (forM, when)
 import Control.Monad.Reader (MonadIO (..), asks)
 import Data.List (foldl')
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
+import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Driver.Main as GHC
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Avail as GHC
+import qualified GHC.Types.FieldLabel as GHC.FieldLabel
+import Lore.Internal.Definition.Cache.TypedModuleFacts (lookupTypedModuleFactsCache)
+import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (typedDefinitionNames, typedDefinitionOccAliases))
 import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
@@ -40,14 +43,14 @@ import Lore.Internal.Lookup.Cache.Types
     SymbolsDependencySetCache (..),
   )
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
-import Lore.Internal.Lookup.Name (NormalizedName (..), extractAndNormalizeOccName)
+import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, extractAndNormalizeOccName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.Types
   ( ModSummaries (..),
     Symbol (..),
     SymbolVisibility (..),
     SymbolsIndex (..),
     SymbolsMap (..),
-    isSymbolNameMatching,
+    symbolExportedFrom,
   )
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Lib.Force (evaluateNFM)
@@ -75,12 +78,27 @@ getCachedSymbolsMap = do
 
 findMatchingSymbolsInMap :: NormalizedName -> SymbolsMap -> Set.Set Symbol
 findMatchingSymbolsInMap targetName SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
-  Set.filter (isSymbolNameMatching targetName) (homeMatchingSymbols <> externalMatchingSymbols)
+  moduleMatchingSymbols
   where
     lookupSymbolsInIndex (SymbolsIndex symbolsMap) =
       Map.findWithDefault Set.empty targetName.occName symbolsMap
     homeMatchingSymbols = lookupSymbolsInIndex homeSymbolsMap
     externalMatchingSymbols = lookupSymbolsInIndex externalSymbolsMap
+    moduleMatchingSymbols =
+      Set.filter (isModuleMatching targetName) (homeMatchingSymbols <> externalMatchingSymbols)
+
+isModuleMatching :: NormalizedName -> Symbol -> Bool
+isModuleMatching targetName symbol =
+  case targetName.moduleName of
+    Nothing ->
+      True
+    Just hintedModule ->
+      hintedModule `Set.member` symbolAssociatedModules
+  where
+    symbolName = normalizeName symbol.name
+    definingModuleName = maybe Set.empty Set.singleton symbolName.moduleName
+    exportingModuleNames = Set.map extractAndNormalizeModuleName (symbolExportedFrom symbol)
+    symbolAssociatedModules = definingModuleName <> exportingModuleNames
 
 invalidateHomeSymbolsIndexCache :: (MonadLore m) => m ()
 invalidateHomeSymbolsIndexCache = do
@@ -176,7 +194,7 @@ enumerateVisiblePackageModules = do
   pure mods
 
 data ModuleSymbolsResult
-  = ModuleSymbolsLoaded GHC.Module (Set.Set Symbol)
+  = ModuleSymbolsLoaded GHC.Module (Set.Set Symbol) (Map.Map GHC.Name (Set.Set NormalizedOccName))
   | ModuleSymbolsMissing GHC.Module
   | ModuleSymbolsFailed GHC.Module
   deriving (Generic, NFData)
@@ -187,13 +205,14 @@ getExternalModuleSymbols hsc_env mdl = do
     do \(_ :: SomeException) -> pure (ModuleSymbolsFailed mdl)
     do
       iface <- GHC.hscGetModuleInterface hsc_env mdl
-      let exportedNames = Set.fromList $ concatMap GHC.availNames (GHC.mi_exports iface)
+      let exportedNames = availInfosNameSet (GHC.mi_exports iface)
+          exportedOccAliases = availInfosFieldAliases (GHC.mi_exports iface)
           exportedSymbols = flip Set.map exportedNames \exportedName ->
             Symbol
               { name = exportedName,
                 visibility = Symbol'ExportedFrom (Set.singleton mdl)
               }
-      pure (ModuleSymbolsLoaded mdl exportedSymbols)
+      pure (ModuleSymbolsLoaded mdl exportedSymbols exportedOccAliases)
 
 getHomeModuleSymbols :: (MonadLore m) => GHC.Module -> m ModuleSymbolsResult
 getHomeModuleSymbols mdl = do
@@ -204,50 +223,154 @@ getHomeModuleSymbols mdl = do
       case maybeModuleInfo of
         Nothing ->
           pure (ModuleSymbolsMissing mdl)
-        Just moduleInfo -> do
-          let exportedNameSet =
-                Set.fromList (GHC.modInfoExports moduleInfo)
-              topLevelNameSet =
-                Set.fromList (fromMaybe [] (GHC.modInfoTopLevelScope moduleInfo))
-              definedTopLevelNameSet =
-                Set.filter isDefinedInCurrentModule topLevelNameSet
-              unexportedNameSet =
-                Set.difference definedTopLevelNameSet exportedNameSet
-              exportedSymbols = flip Set.map exportedNameSet \exportedName ->
-                Symbol
-                  { name = exportedName,
-                    visibility = Symbol'ExportedFrom (Set.singleton mdl)
-                  }
-              unexportedSymbols = flip Set.map unexportedNameSet \unexportedName ->
-                Symbol
-                  { name = unexportedName,
-                    visibility = Symbol'Unexported
-                  }
-          pure (ModuleSymbolsLoaded mdl (exportedSymbols <> unexportedSymbols))
+        Just _moduleInfo -> do
+          maybeTypedModuleFacts <- lookupTypedModuleFactsCache mdl
+          case maybeTypedModuleFacts of
+            Nothing -> do
+              Log.err $ "Missing typed module facts for loaded home module " <> moduleDisplayName mdl <> ". Failing home symbols indexing for this module."
+              pure (ModuleSymbolsFailed mdl)
+            Just typedModuleFacts -> do
+              maybeExportedSymbols <- getExportedHomeModuleSymbols mdl
+              case maybeExportedSymbols of
+                Nothing -> do
+                  Log.err $ "Unable to read module interface exports for loaded home module " <> moduleDisplayName mdl <> ". Failing home symbols indexing for this module."
+                  pure (ModuleSymbolsFailed mdl)
+                Just (exportedNameSet, exportedOccAliases) -> do
+                  let definedNameSet =
+                        getDefinedHomeModuleNames mdl typedModuleFacts
+                      definedOccAliases =
+                        getDefinedHomeModuleOccAliases mdl typedModuleFacts
+                      occAliasesByName =
+                        Map.unionWith Set.union definedOccAliases exportedOccAliases
+                      unexportedNameSet =
+                        Set.difference definedNameSet exportedNameSet
+                      exportedSymbols = flip Set.map exportedNameSet \exportedName ->
+                        Symbol
+                          { name = exportedName,
+                            visibility = Symbol'ExportedFrom (Set.singleton mdl)
+                          }
+                      unexportedSymbols = flip Set.map unexportedNameSet \unexportedName ->
+                        Symbol
+                          { name = unexportedName,
+                            visibility = Symbol'Unexported
+                          }
+                  pure (ModuleSymbolsLoaded mdl (exportedSymbols <> unexportedSymbols) occAliasesByName)
+
+getExportedHomeModuleSymbols :: (MonadLore m) => GHC.Module -> m (Maybe (Set.Set GHC.Name, Map.Map GHC.Name (Set.Set NormalizedOccName)))
+getExportedHomeModuleSymbols homeModule = do
+  hscEnv <- GHC.getSession
+  maybeIface <-
+    liftIO $
+      handle
+        do \(_ :: SomeException) -> pure Nothing
+        do Just <$> GHC.hscGetModuleInterface hscEnv homeModule
+  pure do
+    iface <- maybeIface
+    pure
+      ( availInfosNameSet (GHC.mi_exports iface),
+        availInfosFieldAliases (GHC.mi_exports iface)
+      )
+
+getDefinedHomeModuleNames :: GHC.Module -> MinimalTypedModuleFacts -> Set.Set GHC.Name
+getDefinedHomeModuleNames homeModule typedModuleFacts =
+  Set.fromList
+    (filter isDefinedInCurrentModule (typedDefinitionNames typedModuleFacts))
   where
     isDefinedInCurrentModule name =
       case GHC.nameModule_maybe name of
-        Just module_ -> module_ == mdl
+        Just module_ -> module_ == homeModule
         Nothing -> False
+
+getDefinedHomeModuleOccAliases :: GHC.Module -> MinimalTypedModuleFacts -> Map.Map GHC.Name (Set.Set NormalizedOccName)
+getDefinedHomeModuleOccAliases homeModule typedModuleFacts =
+  typedAliasesByName
+  where
+    typedAliasesByName =
+      Map.fromListWith
+        Set.union
+        [ (name, normalizeOccAliases aliases)
+        | (name, aliases) <- Map.toList (typedDefinitionOccAliases typedModuleFacts),
+          GHC.nameModule_maybe name == Just homeModule
+        ]
+
+    normalizeOccAliases aliases =
+      Set.map (\aliasText -> (parseAndNormalizeName aliasText).occName) aliases
+
+availInfosNameSet :: [GHC.AvailInfo] -> Set.Set GHC.Name
+availInfosNameSet availInfos =
+  Set.fromList
+    [ name
+    | availInfo <- availInfos,
+      name <- availInfoNamesWithFields availInfo
+    ]
+
+availInfoNamesWithFields :: GHC.AvailInfo -> [GHC.Name]
+availInfoNamesWithFields = \case
+  GHC.Avail greName ->
+    [GHC.greNamePrintableName greName]
+  GHC.AvailTC parentName subordinateNames ->
+    parentName : map GHC.greNamePrintableName subordinateNames
+
+availInfosFieldAliases :: [GHC.AvailInfo] -> Map.Map GHC.Name (Set.Set NormalizedOccName)
+availInfosFieldAliases availInfos =
+  Map.fromListWith
+    Set.union
+    [ (name, Set.singleton (normalizeOccAlias aliasText))
+    | availInfo <- availInfos,
+      greName <- availInfoGreNames availInfo,
+      name <- [GHC.greNameMangledName greName],
+      Just aliasText <- [greNameFieldAliasText greName]
+    ]
+  where
+    normalizeOccAlias aliasText =
+      (parseAndNormalizeName aliasText).occName
+
+availInfoGreNames :: GHC.AvailInfo -> [GHC.GreName]
+availInfoGreNames = \case
+  GHC.Avail greName ->
+    [greName]
+  GHC.AvailTC parentName subordinateNames ->
+    GHC.NormalGreName parentName : subordinateNames
+
+greNameFieldAliasText :: GHC.GreName -> Maybe T.Text
+greNameFieldAliasText = \case
+  GHC.FieldGreName fieldLabel ->
+    Just (fieldLabelAliasText fieldLabel)
+  GHC.NormalGreName _ ->
+    Nothing
+
+fieldLabelAliasText :: GHC.FieldLabel -> T.Text
+fieldLabelAliasText fieldLabel =
+  T.pack (GHC.getOccString (GHC.FieldLabel.fieldLabelPrintableName fieldLabel))
 
 buildSymbolsIndex :: [ModuleSymbolsResult] -> SymbolsIndex
 buildSymbolsIndex moduleSymbols =
   SymbolsIndex (mapToSymbols <$> foldl' insertModuleSymbols Map.empty moduleSymbols)
   where
     insertModuleSymbols acc = \case
-      ModuleSymbolsLoaded _ symbols ->
-        foldl' insertSymbol acc symbols
+      ModuleSymbolsLoaded _ symbols occAliasesByName ->
+        foldl' (insertSymbol occAliasesByName) acc symbols
       ModuleSymbolsMissing _ ->
         acc
       ModuleSymbolsFailed _ ->
         acc
 
-    insertSymbol acc symbol =
-      Map.insertWith
-        (Map.unionWith Set.union)
-        (extractAndNormalizeOccName symbol.name)
-        (Map.singleton symbol.name (exportedFromSet symbol.visibility))
+    insertSymbol occAliasesByName acc symbol =
+      foldl'
+        ( \mapAcc key ->
+            Map.insertWith
+              (Map.unionWith Set.union)
+              key
+              (Map.singleton symbol.name (exportedFromSet symbol.visibility))
+              mapAcc
+        )
         acc
+        (Set.toList (symbolLookupKeys occAliasesByName symbol.name))
+
+    symbolLookupKeys occAliasesByName symbolName =
+      Set.insert
+        (extractAndNormalizeOccName symbolName)
+        (Map.findWithDefault Set.empty symbolName occAliasesByName)
 
     exportedFromSet = \case
       Symbol'ExportedFrom modules_ -> modules_
@@ -265,3 +388,7 @@ logPreparedSymbolsIndex scope (SymbolsIndex symbolsMap) = do
   let symbolsCount = sum (map length (Map.elems symbolsMap))
   Log.debug $ "Collected " <> show symbolsCount <> " symbols from " <> scope <> "."
   Log.debug $ "Prepared symbols map with " <> show (Map.size symbolsMap) <> " unique symbol names for " <> scope <> "."
+
+moduleDisplayName :: GHC.Module -> String
+moduleDisplayName =
+  GHC.moduleNameString . GHC.moduleName

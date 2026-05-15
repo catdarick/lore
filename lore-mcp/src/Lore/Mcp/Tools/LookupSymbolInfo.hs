@@ -12,7 +12,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Lore (MonadLore, Symbol (..), SymbolInfo (..), findMatchingSymbolsRoots, listDirectInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName)
+import Lore (MonadLore, Symbol (..), SymbolInfo (..), findMatchingSymbols, listDirectInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Render
   ( ListMarker (..),
@@ -61,7 +61,7 @@ lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol, skip} = do
     Nothing ->
       pure "Targets have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
-      symbolInfos <- lookupRootSymbolInfos symbol
+      symbolInfos <- lookupExactSymbolInfos symbol
       detailedSymbolInfos <- mapM mkDetailedSymbolInfo symbolInfos
       let toRender =
             mkRenderedBody detailedSymbolInfos
@@ -102,10 +102,10 @@ quoteText :: Text -> Text
 quoteText value =
   "\"" <> value <> "\""
 
-lookupRootSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
-lookupRootSymbolInfos query = do
-  rootSymbols <- Set.toList <$> findMatchingSymbolsRoots (parseAndNormalizeName query)
-  catMaybes <$> mapM (lookupSymbolInfo . (.name)) rootSymbols
+lookupExactSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
+lookupExactSymbolInfos query = do
+  matchedSymbols <- Set.toList <$> findMatchingSymbols (parseAndNormalizeName query)
+  catMaybes <$> mapM (lookupSymbolInfo . (.name)) matchedSymbols
 
 mkDetailedSymbolInfo :: (MonadLore m) => SymbolInfo -> m DetailedSymbolInfo
 mkDetailedSymbolInfo symbolInfo = do

@@ -20,11 +20,15 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
 import qualified Data.Set as Set
+import Data.Text (Text)
+import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Data.Bag as Bag
 import qualified GHC.Data.Strict as Strict
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
+import qualified GHC.Types.Avail as GHC
+import qualified GHC.Types.FieldLabel as GHC.FieldLabel
 import qualified GHC.Types.TypeEnv as GHC.TypeEnv
 import Lore.Internal.Definition.RequiredImports
   ( buildImportCandidates,
@@ -102,6 +106,7 @@ buildMinimalTypedModuleFacts ::
 buildMinimalTypedModuleFacts definingModule tcg =
   MinimalTypedModuleFacts
     { typedDefinitionNames = collectDefinitionCandidateNames definingModule tcg,
+      typedDefinitionOccAliases = collectDefinitionOccAliases definingModule tcg,
       typedSourceImports = collectMinimalTypedImports tcg,
       typedOccurrences = collectMinimalTypedOccurrences tcg
     }
@@ -339,7 +344,7 @@ buildUsedInstancesByBinder interestingBinders coreBinds =
 
 collectDefinitionCandidateNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
 collectDefinitionCandidateNames homeModule tcg =
-  nubOrd (topLevelNames <> instanceNames)
+  nubOrd (topLevelNames <> localGreNames <> fieldSelectorNames <> instanceNames)
   where
     belongsToModule name =
       GHC.nameModule_maybe name == Just homeModule
@@ -348,10 +353,41 @@ collectDefinitionCandidateNames homeModule tcg =
       filter belongsToModule $
         map GHC.getName (GHC.TypeEnv.typeEnvElts (GHC.Tc.tcg_type_env tcg))
 
+    localGreNames =
+      filter
+        belongsToModule
+        [ GHC.greNamePrintableName globalRdrElt.gre_name
+        | globalRdrElt <- GHC.globalRdrEnvElts (GHC.Tc.tcg_rdr_env tcg),
+          globalRdrElt.gre_lcl
+        ]
+
+    fieldSelectorNames =
+      filter
+        belongsToModule
+        [ GHC.flSelector fieldLabel
+        | fieldLabels <- GHC.nonDetNameEnvElts (GHC.Tc.tcg_field_env tcg),
+          fieldLabel <- fieldLabels
+        ]
+
     instanceNames =
       filter belongsToModule $
         map GHC.getName (GHC.Tc.tcg_insts tcg)
           <> map GHC.getName (GHC.Tc.tcg_fam_insts tcg)
+
+collectDefinitionOccAliases :: GHC.Module -> GHC.Tc.TcGblEnv -> Map.Map GHC.Name (Set.Set Text)
+collectDefinitionOccAliases homeModule tcg =
+  Map.fromListWith
+    Set.union
+    [ (selectorName, Set.singleton (fieldLabelAliasText fieldLabel))
+    | fieldLabels <- GHC.nonDetNameEnvElts (GHC.Tc.tcg_field_env tcg),
+      fieldLabel <- fieldLabels,
+      let selectorName = GHC.flSelector fieldLabel,
+      GHC.nameModule_maybe selectorName == Just homeModule
+    ]
+
+fieldLabelAliasText :: GHC.FieldLabel -> Text
+fieldLabelAliasText fieldLabel =
+  T.pack (GHC.getOccString (GHC.FieldLabel.fieldLabelPrintableName fieldLabel))
 
 collectMinimalTypedImports :: GHC.Tc.TcGblEnv -> [MinimalTypedImport]
 collectMinimalTypedImports tcg =

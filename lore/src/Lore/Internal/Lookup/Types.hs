@@ -8,7 +8,6 @@ module Lore.Internal.Lookup.Types
     Symbol (..),
     SymbolVisibility (..),
     symbolExportedFrom,
-    isSymbolNameMatching,
   )
 where
 
@@ -17,8 +16,8 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC
 import GHC.Generics (Generic)
-import qualified GHC.Plugins as GHC
-import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, normalizeName)
+import qualified GHC.Types.Name.Env as NameEnv
+import Lore.Internal.Lookup.Name (NormalizedOccName)
 
 newtype SymbolsIndex = SymbolsIndex
   { unSymbolsIndex :: Map.Map NormalizedOccName (Set.Set Symbol)
@@ -34,7 +33,7 @@ newtype ModSummaries = ModSummaries
   }
 
 newtype NameToInstancesIndex = NameToInstancesIndex
-  { unNameToInstancesIndex :: GHC.NameEnv ([GHC.ClsInst], [GHC.FamInst])
+  { unNameToInstancesIndex :: NameEnv.NameEnv ([GHC.ClsInst], [GHC.FamInst])
   }
 
 data Symbol = Symbol
@@ -53,15 +52,3 @@ symbolExportedFrom symbol =
   case symbol.visibility of
     Symbol'ExportedFrom modules_ -> modules_
     Symbol'Unexported -> Set.empty
-
-isSymbolNameMatching :: NormalizedName -> Symbol -> Bool
-isSymbolNameMatching name symbol =
-  let symbolName = normalizeName symbol.name
-      definingModuleName = maybe Set.empty Set.singleton symbolName.moduleName
-      exportingModuleNames = Set.map extractAndNormalizeModuleName (symbolExportedFrom symbol)
-      symbolAssociatedModules = definingModuleName <> exportingModuleNames
-   in case name.moduleName of
-        Nothing -> symbolName.occName == name.occName
-        Just hintedModule ->
-          symbolName.occName == name.occName
-            && hintedModule `Set.member` symbolAssociatedModules
