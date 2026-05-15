@@ -59,7 +59,7 @@ buildOccurrences fixture@DefinitionIndexFixture {..} =
   buildDefinitionOccurrences fixtureModule fixtureParsedFacts fixtureTypedFacts bindings memberIndexesById importCandidatesById
   where
     bindings = buildBindings fixture
-    memberIndexesById = buildDefinitionMemberIndexes fixtureParsedFacts bindings
+    memberIndexesById = buildDefinitionMemberIndexes fixtureParsedFacts fixtureTypedFacts bindings
     importCandidates = map minimalImportToImportCandidate (Def.typedSourceImports fixtureTypedFacts)
     importCandidatesById =
       Map.fromList
@@ -72,7 +72,7 @@ buildDeps fixture@DefinitionIndexFixture {..} =
   buildDependencies bindings memberIndexesById (buildOccurrences fixture) fixtureCoreFacts
   where
     bindings = buildBindings fixture
-    memberIndexesById = buildDefinitionMemberIndexes fixtureParsedFacts bindings
+    memberIndexesById = buildDefinitionMemberIndexes fixtureParsedFacts fixtureTypedFacts bindings
 
 buildImports :: DefinitionIndexFixture -> Map.Map Def.DefinitionId [Def.RequiredImport]
 buildImports fixture@DefinitionIndexFixture {..} =

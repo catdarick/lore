@@ -624,6 +624,34 @@ spec = do
                                           )
                                         ]
 
+    it "recurses from a directly requested record field through only that field's type dependencies" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "DirectRecordField.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile directRecordFieldDependencyFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.DirectRecordField.alphaField"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.DirectRecordField.alphaField")
+                pure
+                (findFixtureSymbolInModule "TestClosure.DirectRecordField" "alphaField" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.DirectRecordField",
+                                            [ "data Alpha = Alpha",
+                                              "data Record = Record\n  { alphaField :: !Alpha,\n    betaField :: !Beta\n  }"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
     it "recurses through dependencies of class methods declared in one shared signature" do
       withFixtureCopy \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
@@ -1433,6 +1461,23 @@ directClassMethodDependencyFixtureModuleSource =
       "  buildBeta ::",
       "    a ->",
       "    BetaResult"
+    ]
+
+directRecordFieldDependencyFixtureModuleSource :: T.Text
+directRecordFieldDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.DirectRecordField",
+      "  ( alphaField,",
+      "  ) where",
+      "",
+      "data Alpha = Alpha",
+      "",
+      "data Beta = Beta",
+      "",
+      "data Record = Record",
+      "  { alphaField :: !Alpha,",
+      "    betaField :: !Beta",
+      "  }"
     ]
 
 sharedClassMethodDependencyFixtureModuleSource :: T.Text

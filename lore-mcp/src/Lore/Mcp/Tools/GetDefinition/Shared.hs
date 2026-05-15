@@ -30,7 +30,7 @@ import Lore
     NamedDefinitionSource (..),
     Symbol (..),
     SymbolInfo (..),
-    findMatchingSymbolsRoots,
+    findMatchingSymbols,
     getMinifiedImportsForDefinition,
     lookupLastLoadTargetsResult,
     lookupSymbolInfo,
@@ -122,7 +122,7 @@ resolveRequestedSymbols symbols = do
 
 resolveRequestedSymbol :: (MonadLore m) => Text -> m (Either AmbiguousQuery ResolvedQuery)
 resolveRequestedSymbol symbol = do
-  symbolInfos <- lookupRootSymbolInfos symbol
+  symbolInfos <- lookupRequestedSymbolInfos symbol
   pure $
     case symbolInfos of
       [] ->
@@ -146,10 +146,10 @@ allDefinedInSameModule symbolInfos =
     firstSymbolInfo : restSymbolInfos ->
       all ((== firstSymbolInfo.definedIn) . (.definedIn)) restSymbolInfos
 
-lookupRootSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
-lookupRootSymbolInfos query = do
-  rootSymbols <- Set.toList <$> findMatchingSymbolsRoots (parseAndNormalizeName query)
-  catMaybes <$> mapM (lookupSymbolInfo . (.name)) rootSymbols
+lookupRequestedSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
+lookupRequestedSymbolInfos query = do
+  matchingSymbols <- Set.toList <$> findMatchingSymbols (parseAndNormalizeName query)
+  catMaybes <$> mapM (lookupSymbolInfo . (.name)) matchingSymbols
 
 resolveSymbolDefinitions :: (MonadLore m) => Int -> SymbolInfo -> m [NamedDefinitionSource]
 resolveSymbolDefinitions recursionDepth symbolInfo
@@ -474,7 +474,7 @@ quoteText value =
   "\"" <> value <> "\""
 
 maxRenderedDefinitionResults :: Int
-maxRenderedDefinitionResults = 3000
+maxRenderedDefinitionResults = 30
 
 maxRenderedOmittedSymbolsPerModule :: Int
 maxRenderedOmittedSymbolsPerModule = 10

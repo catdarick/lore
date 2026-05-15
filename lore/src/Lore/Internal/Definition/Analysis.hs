@@ -172,10 +172,7 @@ buildDefinitionOccurrences definingModule parsedFacts typedModuleFacts bindings 
   where
     mkOccurrences source =
       let memberIndex =
-            Map.findWithDefault
-              (resolveDefinitionMemberIndex source parsedFacts.parsedDefinitionMembersById)
-              source.definitionSourceId
-              memberIndexesById
+            memberIndexesById Map.! source.definitionSourceId
        in collectDefinitionOccurrenceFacts
             definingModule
             source.definitionSourceSpans
@@ -186,11 +183,17 @@ buildDefinitionOccurrences definingModule parsedFacts typedModuleFacts bindings 
 
 buildDefinitionMemberIndexes ::
   ParsedModuleFacts ->
+  MinimalTypedModuleFacts ->
   DefinitionBindings ->
   Map.Map DefinitionId DefinitionMemberIndex
-buildDefinitionMemberIndexes parsedFacts bindings =
+buildDefinitionMemberIndexes parsedFacts typedModuleFacts bindings =
   Map.map
-    (\source -> resolveDefinitionMemberIndex source parsedFacts.parsedDefinitionMembersById)
+    ( \source ->
+        resolveDefinitionMemberIndex
+          source
+          parsedFacts.parsedDefinitionMembersById
+          typedModuleFacts.typedDefinitionOccAliases
+    )
     bindings.bindingDefinitionsById
 
 buildReferenceHitsByOccKey ::
@@ -309,7 +312,7 @@ buildDefinitionModuleIndex definingModule parsedFacts typedModuleFacts maybeCore
       buildDefinitionBindings definingModule parsedFacts typedModuleFacts
 
     memberIndexesById =
-      buildDefinitionMemberIndexes parsedFacts bindings
+      buildDefinitionMemberIndexes parsedFacts typedModuleFacts bindings
 
     importCandidates =
       buildImportCandidates typedModuleFacts.typedSourceImports
@@ -511,7 +514,7 @@ signatureMatches targetOcc = \case
 
 collectParsedDefinitionMembers :: GHC.LHsDecl GHC.GhcPs -> [ParsedDefinitionMember]
 collectParsedDefinitionMembers decl =
-  dedupeParsedDefinitionMembers (constructorMembers <> classMethodMembers)
+  dedupeParsedDefinitionMembers (constructorMembers <> recordFieldMembers <> classMethodMembers)
   where
     declarationSpan =
       GHC.getLocA decl
@@ -532,6 +535,17 @@ collectParsedDefinitionMembers decl =
           }
       | (constructorDecl, constructorMemberSpan) <- zip constructorDecls constructorMemberSpans,
         constructorName <- constructorDeclaredNames (GHC.unLoc constructorDecl)
+      ]
+
+    recordFieldMembers =
+      [ ParsedDefinitionMember
+          { parsedMemberOccKey = rdrNameOccKey (GHC.unLoc fieldName),
+            parsedMemberSpan = GHC.getLocA (GHC.cd_fld_type (GHC.unLoc fieldDecl))
+          }
+      | constructorDecl <- constructorDecls,
+        fieldDecl <- constructorRecordFields (GHC.unLoc constructorDecl),
+        fieldOcc <- GHC.cd_fld_names (GHC.unLoc fieldDecl),
+        let fieldName = GHC.foLabel (GHC.unLoc fieldOcc)
       ]
 
     signatureDecls =
@@ -585,6 +599,15 @@ constructorDeclaredNames = \case
     [con_name]
   GHC.ConDeclGADT {con_names} ->
     NE.toList con_names
+
+constructorRecordFields :: GHC.ConDecl GHC.GhcPs -> [GHC.LConDeclField GHC.GhcPs]
+constructorRecordFields = \case
+  GHC.ConDeclH98 {con_args = GHC.RecCon fields} ->
+    GHC.unLoc fields
+  GHC.ConDeclGADT {con_g_args = GHC.RecConGADT fields _} ->
+    GHC.unLoc fields
+  _ ->
+    []
 
 constructorDeclStartSpan :: GHC.LConDecl GHC.GhcPs -> GHC.SrcSpan
 constructorDeclStartSpan conDecl =
@@ -658,8 +681,9 @@ spanStartSortKey = \case
 resolveDefinitionMemberIndex ::
   DefinitionSource ->
   Map.Map DefinitionId [ParsedDefinitionMember] ->
+  Map.Map GHC.Name (Set.Set Text) ->
   DefinitionMemberIndex
-resolveDefinitionMemberIndex source parsedMembersById =
+resolveDefinitionMemberIndex source parsedMembersById definitionOccAliases =
   DefinitionMemberIndex
     { rootMemberNames = rootNames,
       scopedMembers = scopedMembers
@@ -684,9 +708,16 @@ resolveDefinitionMemberIndex source parsedMembersById =
     namesByOccKey =
       Map.fromListWith
         (<>)
-        [ (nameOccKey definitionName, [definitionName])
-        | definitionName <- Set.toList source.definitionSourceNames
+        [ (occKey, [definitionName])
+        | definitionName <- Set.toList source.definitionSourceNames,
+          occKey <- definitionNameOccKeys definitionName
         ]
+
+    definitionNameOccKeys definitionName =
+      nameOccKey definitionName
+        : [ OccKey alias
+          | alias <- Set.toList (Map.findWithDefault Set.empty definitionName definitionOccAliases)
+          ]
 
     resolveParsedMember parsedMember =
       [ DefinitionMember definitionName parsedMember.parsedMemberSpan
@@ -711,8 +742,7 @@ resolveDefinitionMemberIndex source parsedMembersById =
     sourceSpannedAliasMembers parsedMember =
       [ definitionName
       | definitionName <- Set.toList source.definitionSourceNames,
-        let definitionOccKey = nameOccKey definitionName,
-        not (definitionOccKey `Set.member` parsedMemberOccKeys),
+        Set.null (Set.fromList (definitionNameOccKeys definitionName) `Set.intersection` parsedMemberOccKeys),
         GHC.nameSrcSpan definitionName `GHC.isSubspanOf` parsedMember.parsedMemberSpan
       ]
 
@@ -781,14 +811,12 @@ chooseOccurrenceOwners ::
   GHC.SrcSpan ->
   Set.Set GHC.Name
 chooseOccurrenceOwners memberIndex maybeParent occurrenceSpan
-  | not (Set.null narrowParentOwners) =
-      narrowParentOwners
   | not (Set.null narrowestOwners) =
       if not (Set.null narrowedParentOwners)
         then narrowedParentOwners
         else narrowestOwners
-  | not (Set.null parentOwners) =
-      parentOwners
+  | not (Set.null rootParentOwners) =
+      rootParentOwners
   | otherwise =
       memberIndex.rootMemberNames
   where
@@ -803,8 +831,8 @@ chooseOccurrenceOwners memberIndex maybeParent occurrenceSpan
           parentName `Set.member` allDeclarationNames
         ]
 
-    narrowParentOwners =
-      Set.difference parentOwners memberIndex.rootMemberNames
+    rootParentOwners =
+      Set.intersection parentOwners memberIndex.rootMemberNames
 
     containingMembers =
       [ member

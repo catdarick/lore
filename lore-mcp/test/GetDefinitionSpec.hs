@@ -148,6 +148,20 @@ spec = do
         definitionResult `shouldContainText` "mkRight :: Int -> Int"
         definitionResult `shouldContainText` "seedValue :: Int"
 
+    it "follows record-field-specific recursive dependencies without root-resolving the field to its record" do
+      withFixtureCopy \fixtureRoot -> do
+        addRecordFieldDependencyFixture fixtureRoot
+        definitionResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureTargets
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.RecordFieldDeps.alphaField"] 1 Nothing)
+
+        definitionResult `shouldContainText` "data Record = Record"
+        definitionResult `shouldContainText` "alphaField :: !Alpha"
+        definitionResult `shouldContainText` "betaField :: !Beta"
+        definitionResult `shouldContainText` "data Alpha = Alpha"
+        definitionResult `shouldNotContainText` "data Beta = Beta"
+
     it "returns all same-module matches for a duplicated qualified symbol name (regression for resolveRequestedSymbols)" do
       withFixtureCopy \fixtureRoot -> do
         addSameModuleDuplicateSymbolFixture fixtureRoot
@@ -158,7 +172,7 @@ spec = do
             definitionResult <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Demo.AmbiguousId"] 0 Nothing)
             pure (lookupResult, definitionResult)
 
-        lookupResult `shouldContainText` "Found 2 symbol candidates:"
+        lookupResult `shouldContainText` "Found 3 symbol candidates:"
         definitionResult `shouldContainText` "type AmbiguousId = Int"
         definitionResult `shouldContainText` "data instance AmbiguousField AmbiguousRec AmbiguousId = AmbiguousId"
         definitionResult `shouldNotContainText` "is ambiguous. More qualification is required"
@@ -300,6 +314,13 @@ addSharedTopLevelDependencyFixture fixtureRoot = do
   createDirectoryIfMissing True moduleDir
   TIO.writeFile moduleFile sharedTopLevelDependencyFixtureModuleSource
 
+addRecordFieldDependencyFixture :: FilePath -> IO ()
+addRecordFieldDependencyFixture fixtureRoot = do
+  let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+      moduleFile = moduleDir </> "RecordFieldDeps.hs"
+  createDirectoryIfMissing True moduleDir
+  TIO.writeFile moduleFile recordFieldDependencyFixtureModuleSource
+
 addRecordFieldLookupFixture :: FilePath -> IO ()
 addRecordFieldLookupFixture fixtureRoot = do
   let demoFile = fixtureRoot </> "src" </> "Demo.hs"
@@ -419,6 +440,23 @@ sharedTopLevelDependencyFixtureModuleSource =
       "pairLeft, pairRight :: Int",
       "(pairLeft, pairRight) =",
       "  (mkLeft seedValue, mkRight seedValue)"
+    ]
+
+recordFieldDependencyFixtureModuleSource :: Text
+recordFieldDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.RecordFieldDeps",
+      "  ( alphaField",
+      "  ) where",
+      "",
+      "data Alpha = Alpha",
+      "",
+      "data Beta = Beta",
+      "",
+      "data Record = Record",
+      "  { alphaField :: !Alpha,",
+      "    betaField :: !Beta",
+      "  }"
     ]
 
 recordFieldLookupExportAnchor :: Text
