@@ -689,19 +689,35 @@ resolveDefinitionMemberIndex source parsedMembersById =
         ]
 
     resolveParsedMember parsedMember =
+      [ DefinitionMember definitionName parsedMember.parsedMemberSpan
+      | definitionName <- memberNamesForParsedMember parsedMember
+      ]
+
+    memberNamesForParsedMember parsedMember =
+      dedupeExactNames $
+        explicitlyNamedMembers parsedMember
+          <> sourceSpannedAliasMembers parsedMember
+
+    explicitlyNamedMembers parsedMember =
       case Map.findWithDefault [] parsedMember.parsedMemberOccKey namesByOccKey of
         [] ->
           []
         [definitionName] ->
-          [DefinitionMember definitionName parsedMember.parsedMemberSpan]
+          [definitionName]
         candidateNames ->
-          [ DefinitionMember definitionName parsedMember.parsedMemberSpan
-          | definitionName <-
-              dedupeExactNames
-                ( let namesWithinSpan = namesWithinMemberSpan candidateNames parsedMember.parsedMemberSpan
-                   in if null namesWithinSpan then candidateNames else namesWithinSpan
-                )
-          ]
+          let namesWithinSpan = namesWithinMemberSpan candidateNames parsedMember.parsedMemberSpan
+           in if null namesWithinSpan then candidateNames else namesWithinSpan
+
+    sourceSpannedAliasMembers parsedMember =
+      [ definitionName
+      | definitionName <- Set.toList source.definitionSourceNames,
+        let definitionOccKey = nameOccKey definitionName,
+        not (definitionOccKey `Set.member` parsedMemberOccKeys),
+        GHC.nameSrcSpan definitionName `GHC.isSubspanOf` parsedMember.parsedMemberSpan
+      ]
+
+    parsedMemberOccKeys =
+      Set.fromList (map parsedMemberOccKey parsedMembers)
 
     namesWithinMemberSpan candidateNames memberSpan =
       [ candidateName

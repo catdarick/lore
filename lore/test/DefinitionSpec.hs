@@ -540,6 +540,90 @@ spec = do
                                           )
                                         ]
 
+    it "recurses from a directly requested GADT constructor through only that constructor's dependencies" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "DirectGadtConstructor.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile directGadtConstructorDependencyFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.DirectGadtConstructor.SomeMinimalTypedModuleFacts"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.DirectGadtConstructor.SomeMinimalTypedModuleFacts")
+                pure
+                (findFixtureSymbolInModule "TestClosure.DirectGadtConstructor" "SomeMinimalTypedModuleFacts" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 1 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.DirectGadtConstructor",
+                                            [ "data MinimalTypedModuleFacts = MinimalTypedModuleFacts",
+                                              "data SomeGADT a where\n  SomeParsedModuleFacts :: ParsedModuleFacts -> SomeGADT ParsedModuleFacts\n  SomeMinimalTypedModuleFacts :: MinimalTypedModuleFacts -> SomeGADT MinimalTypedModuleFacts"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
+    it "recurses from a directly requested regular constructor through only that constructor's dependencies" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "DirectRegularConstructor.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile directRegularConstructorDependencyFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.DirectRegularConstructor.EitherBar"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.DirectRegularConstructor.EitherBar")
+                pure
+                (findFixtureSymbolInModule "TestClosure.DirectRegularConstructor" "EitherBar" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 1 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.DirectRegularConstructor",
+                                            [ "data Bar = Bar",
+                                              "data EitherFooOrBar\n  = EitherFoo\n      Foo\n  | EitherBar\n      Bar"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
+    it "recurses from a directly requested class method through only that method's dependencies" do
+      withFixtureCopy \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "DirectClassMethod.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile directClassMethodDependencyFixtureModuleSource
+
+        closure <-
+          fixtureLoreAt fixtureRoot do
+            loadTargets defaultLoadTargetsOptions
+            exportedSymbols <- findSymbols "TestClosure.DirectClassMethod.buildAlpha"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.DirectClassMethod.buildAlpha")
+                pure
+                (findFixtureSymbolInModule "TestClosure.DirectClassMethod" "buildAlpha" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 1 targetName
+            renderDefinitionClosureSlices namedSources
+
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.DirectClassMethod",
+                                            [ "data AlphaResult = AlphaResult",
+                                              "class BuildResult a where\n  buildAlpha ::\n    a ->\n    AlphaResult\n  buildBeta ::\n    a ->\n    BetaResult"
+                                            ],
+                                            []
+                                          )
+                                        ]
+
     it "recurses through dependencies of class methods declared in one shared signature" do
       withFixtureCopy \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
@@ -1293,6 +1377,62 @@ sharedGadtConstructorDependencyFixtureModuleSource =
       "",
       "useB :: T",
       "useB = B Foo"
+    ]
+
+directGadtConstructorDependencyFixtureModuleSource :: T.Text
+directGadtConstructorDependencyFixtureModuleSource =
+  T.unlines
+    [ "{-# LANGUAGE GADTs #-}",
+      "",
+      "module TestClosure.DirectGadtConstructor",
+      "  ( SomeGADT (SomeMinimalTypedModuleFacts),",
+      "  ) where",
+      "",
+      "data ParsedModuleFacts = ParsedModuleFacts",
+      "",
+      "data MinimalTypedModuleFacts = MinimalTypedModuleFacts",
+      "",
+      "data SomeGADT a where",
+      "  SomeParsedModuleFacts :: ParsedModuleFacts -> SomeGADT ParsedModuleFacts",
+      "  SomeMinimalTypedModuleFacts :: MinimalTypedModuleFacts -> SomeGADT MinimalTypedModuleFacts"
+    ]
+
+directRegularConstructorDependencyFixtureModuleSource :: T.Text
+directRegularConstructorDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.DirectRegularConstructor",
+      "  ( EitherFooOrBar (EitherBar),",
+      "  ) where",
+      "",
+      "data Foo = Foo",
+      "",
+      "data Bar = Bar",
+      "",
+      "data EitherFooOrBar",
+      "  = EitherFoo",
+      "      Foo",
+      "  | EitherBar",
+      "      Bar"
+    ]
+
+directClassMethodDependencyFixtureModuleSource :: T.Text
+directClassMethodDependencyFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.DirectClassMethod",
+      "  ( BuildResult (buildAlpha),",
+      "  ) where",
+      "",
+      "data AlphaResult = AlphaResult",
+      "",
+      "data BetaResult = BetaResult",
+      "",
+      "class BuildResult a where",
+      "  buildAlpha ::",
+      "    a ->",
+      "    AlphaResult",
+      "  buildBeta ::",
+      "    a ->",
+      "    BetaResult"
     ]
 
 sharedClassMethodDependencyFixtureModuleSource :: T.Text
