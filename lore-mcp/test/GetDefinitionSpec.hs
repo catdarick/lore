@@ -177,6 +177,15 @@ spec = do
         ambiguousDefinitionResult `shouldContainText` "Demo.AmbiguousId"
 
   describe "lookupSymbolInfo" do
+    it "deduplicates same-root candidates and keeps the closest-to-root symbol" do
+      indexedLookup <-
+        fixtureLoreMcp do
+          loadFixtureTargets
+          callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Indexed")
+
+      indexedLookup `shouldContainText` "Found 1 symbol candidates:"
+      indexedLookup `shouldContainText` "Indexed"
+
     it "resolves exported and unexported record fields from DuplicateRecordFields modules" do
       withFixtureCopy \fixtureRoot -> do
         addRecordFieldLookupFixture fixtureRoot

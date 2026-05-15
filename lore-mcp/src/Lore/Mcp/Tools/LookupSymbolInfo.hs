@@ -4,15 +4,18 @@ module Lore.Mcp.Tools.LookupSymbolInfo
 where
 
 import qualified Data.Aeson as J
+import Data.List (foldl')
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Lore (MonadLore, Symbol (..), SymbolInfo (..), SymbolSuggestion (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName)
+import qualified GHC.Plugins as Plugins
+import Lore (MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), SymbolSuggestion (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName, resolvePathToRoot)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Render
   ( ListMarker (..),
@@ -146,7 +149,37 @@ renderMissingSymbol query suggestions =
 lookupExactSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
 lookupExactSymbolInfos query = do
   matchedSymbols <- Set.toList <$> findMatchingSymbols (parseAndNormalizeName query)
-  catMaybes <$> mapM (lookupSymbolInfo . (.name)) matchedSymbols
+  preferredSymbolsByRoot <- pickClosestSymbolsToRoot matchedSymbols
+  catMaybes <$> mapM (lookupSymbolInfo . (.name)) preferredSymbolsByRoot
+
+pickClosestSymbolsToRoot :: (MonadLore m) => [Symbol] -> m [Symbol]
+pickClosestSymbolsToRoot symbols = do
+  symbolsWithPath <- mapM resolveSymbolPathToRoot symbols
+  pure $
+    map (\(symbol, _, _) -> symbol) $
+      Map.elems $
+        foldl' keepClosestByRoot Map.empty symbolsWithPath
+  where
+    keepClosestByRoot acc current@(_, pathToRoot, _) =
+      Map.insertWith
+        preferClosestToRoot
+        (rootDedupKey (NE.last pathToRoot))
+        current
+        acc
+
+    preferClosestToRoot new@(_, _, newDistance) old@(_, _, oldDistance)
+      | oldDistance <= newDistance = old
+      | otherwise = new
+
+    rootDedupKey name =
+      ( fmap (Plugins.moduleNameString . Plugins.moduleName) (Plugins.nameModule_maybe name),
+        Plugins.getOccString name
+      )
+
+resolveSymbolPathToRoot :: (MonadLore m) => Symbol -> m (Symbol, NE.NonEmpty Plugins.Name, Int)
+resolveSymbolPathToRoot symbol = do
+  PathToRoot pathToRoot <- resolvePathToRoot symbol.name
+  pure (symbol, pathToRoot, max 0 (length pathToRoot - 1))
 
 mkDetailedSymbolInfo :: (MonadLore m) => SymbolInfo -> m DetailedSymbolInfo
 mkDetailedSymbolInfo symbolInfo = do
