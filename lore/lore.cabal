@@ -29,7 +29,6 @@ library
       Lore.Definition
       Lore.Definition.RenderSlice
       Lore.Definition.Rendering
-      Lore.Directory
       Lore.Diagnostics
       Lore.Interpreter
       Lore.Logger
@@ -288,7 +287,6 @@ benchmark lore-bench
       Lore.Definition.Rendering
       Lore.Definition.RenderSlice
       Lore.Diagnostics
-      Lore.Directory
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
       Lore.Internal.AutoRefactor.ImportDecl
@@ -462,7 +460,6 @@ benchmark lore-memory-bench
       Lore.Definition.Rendering
       Lore.Definition.RenderSlice
       Lore.Diagnostics
-      Lore.Directory
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
       Lore.Internal.AutoRefactor.ImportDecl
