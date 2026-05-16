@@ -12,7 +12,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), setGhcOptionsAndExtensions)
-import Lore.Internal.Package (ComponentData (..), defaultExtensions)
+import Lore.Internal.Package (ComponentData (..), commonSetIntersection, defaultExtensions)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 
@@ -72,10 +72,6 @@ commonComponentLanguage [] = Nothing
 commonComponentLanguage (component : restComponents)
   | all ((== component.language) . (.language)) restComponents = component.language
   | otherwise = Nothing
-
-commonSetIntersection :: (Ord a) => [Set.Set a] -> Set.Set a
-commonSetIntersection [] = Set.empty
-commonSetIntersection sets = foldr1 Set.intersection sets
 
 mergeModuleComponentOptions ::
   (MonadLore m) =>

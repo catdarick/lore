@@ -5,6 +5,8 @@ module Lore.Internal.Package
   ( ComponentData (..),
     PackageData (..),
     prepareComponentsData,
+    discoverProject,
+    commonSetIntersection,
     extractDependencies,
     extractSourceDirs,
   )
@@ -27,7 +29,8 @@ import Lore.Monad (MonadLore)
 import System.FilePath (takeDirectory, (</>))
 
 data ComponentData = ComponentData
-  { mainModulePath :: Maybe FilePath,
+  { componentName :: String,
+    mainModulePath :: Maybe FilePath,
     language :: Maybe Language,
     ghcOptions :: Set.Set GhcOption,
     defaultExtensions :: Set.Set Extension,
@@ -38,10 +41,12 @@ data ComponentData = ComponentData
   deriving (Show)
 
 data PackageData = PackageData
-  { packageRoot :: FilePath,
+  { packageYamlPath :: FilePath,
+    packageRoot :: FilePath,
     packageName :: String,
     components :: [ComponentData]
   }
+  deriving (Show)
 
 prepareComponentsData :: (MonadLore m) => m [PackageData]
 prepareComponentsData = do
@@ -69,35 +74,39 @@ prepareComponentsData = do
           pure $
             Right
               PackageData
-                { packageRoot = takeDirectory packageFile,
+                { packageYamlPath = packageFile,
+                  packageRoot = takeDirectory packageFile,
                   packageName = extractPackageName pkg,
                   components = extractPackageComponents pkg
                 }
 
     extractPackageComponents :: Hpack.Package -> [ComponentData]
     extractPackageComponents pkg =
-      let libs = maybeToList (Hpack.packageLibrary pkg) <> Map.elems (Hpack.packageInternalLibraries pkg)
-          exes = Map.elems (Hpack.packageExecutables pkg) <> Map.elems (Hpack.packageTests pkg) <> Map.elems (Hpack.packageBenchmarks pkg)
-       in map (extractComponentData extractLibraryModules (const Nothing)) libs
-            <> map (extractComponentData extractExecutableModules Hpack.executableMain) exes
+      let libs = maybeToList (("library",) <$> Hpack.packageLibrary pkg) <> map (\(name, section) -> ("library:" <> name, section)) (Map.toList (Hpack.packageInternalLibraries pkg))
+          exes = map (\(name, section) -> ("executable:" <> name, section)) (Map.toList (Hpack.packageExecutables pkg))
+          tests = map (\(name, section) -> ("test:" <> name, section)) (Map.toList (Hpack.packageTests pkg))
+          benches = map (\(name, section) -> ("benchmark:" <> name, section)) (Map.toList (Hpack.packageBenchmarks pkg))
+       in map (uncurry (extractComponentData extractLibraryModules (const Nothing))) libs
+            <> map (uncurry (extractComponentData extractExecutableModules Hpack.executableMain)) (exes <> tests <> benches)
 
     extractPackageName :: Hpack.Package -> String
     extractPackageName = Hpack.packageName
 
-    extractComponentData :: (a -> Set.Set GHC.ModuleName) -> (a -> Maybe FilePath) -> Hpack.Section a -> ComponentData
-    extractComponentData moduleExtractor extractMainModule section =
+    extractComponentData :: (a -> Set.Set GHC.ModuleName) -> (a -> Maybe FilePath) -> String -> Hpack.Section a -> ComponentData
+    extractComponentData moduleExtractor extractMainModule name section =
       ComponentData
-        { mainModulePath = extractMainModule (Hpack.sectionData section),
+        { componentName = name,
+          mainModulePath = extractMainModule (Hpack.sectionData section),
           language = (\(Hpack.Language lang) -> Language lang) <$> Hpack.sectionLanguage section,
           ghcOptions = Set.fromList $ map GhcOption $ Hpack.sectionGhcOptions section,
           defaultExtensions = Set.fromList $ map Extension $ Hpack.sectionDefaultExtensions section,
-          dependencies = getSectionDependencies section,
+          dependencies = extractSectionDependencies section,
           sourceDirs = Set.fromList $ Hpack.sectionSourceDirs section,
           modules = moduleExtractor (Hpack.sectionData section)
         }
 
-    getSectionDependencies :: Hpack.Section a -> Set.Set String
-    getSectionDependencies section = Set.fromList $ Map.keys $ Hpack.unDependencies $ Hpack.sectionDependencies section
+    extractSectionDependencies :: Hpack.Section a -> Set.Set String
+    extractSectionDependencies section = Set.fromList $ Map.keys $ Hpack.unDependencies $ Hpack.sectionDependencies section
 
     extractLibraryModules :: Hpack.Library -> Set.Set GHC.ModuleName
     extractLibraryModules lib =
@@ -126,6 +135,14 @@ prepareComponentsData = do
     shouldDropModule :: Hpack.Module -> Bool
     shouldDropModule (Hpack.Module modName) =
       isPrefixOf "Paths_" modName || modName == "Main"
+
+discoverProject :: (MonadLore m) => m [PackageData]
+discoverProject =
+  prepareComponentsData
+
+commonSetIntersection :: (Ord a) => [Set.Set a] -> Set.Set a
+commonSetIntersection [] = Set.empty
+commonSetIntersection sets = foldr1 Set.intersection sets
 
 extractDependencies :: [ComponentData] -> Set.Set String
 extractDependencies components =

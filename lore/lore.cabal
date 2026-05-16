@@ -35,6 +35,7 @@ library
       Lore.Lookup
       Lore.Lookup.Search
       Lore.Monad
+      Lore.Project
       Lore.Refactor.Imports
       Lore.Refactor.ImportCleanup.Internal
       Lore.Session
@@ -42,6 +43,7 @@ library
       Lore.TemporalModules
       Lore.Targets
   other-modules:
+      Lore.Directory
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
       Lore.Internal.AutoRefactor.ImportDecl
@@ -63,6 +65,7 @@ library
       Lore.Internal.Definition.SourceTree
       Lore.Internal.Definition.Timing
       Lore.Internal.Definition.Types
+      Lore.Internal.Directory
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
@@ -108,6 +111,7 @@ library
       Lore.Lib.Force
       Lore.Lib.Text
       Lore.Module
+      Lore.PackageDirectory
       Paths_lore
   autogen-modules:
       Paths_lore
@@ -285,6 +289,7 @@ benchmark lore-bench
       Lore.Definition.Rendering
       Lore.Definition.RenderSlice
       Lore.Diagnostics
+      Lore.Directory
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
       Lore.Internal.AutoRefactor.ImportDecl
@@ -306,6 +311,7 @@ benchmark lore-bench
       Lore.Internal.Definition.SourceTree
       Lore.Internal.Definition.Timing
       Lore.Internal.Definition.Types
+      Lore.Internal.Directory
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
@@ -356,6 +362,8 @@ benchmark lore-bench
       Lore.Lookup.Search
       Lore.Module
       Lore.Monad
+      Lore.PackageDirectory
+      Lore.Project
       Lore.Refactor.ImportCleanup.Internal
       Lore.Refactor.Imports
       Lore.Session
@@ -456,6 +464,7 @@ benchmark lore-memory-bench
       Lore.Definition.Rendering
       Lore.Definition.RenderSlice
       Lore.Diagnostics
+      Lore.Directory
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
       Lore.Internal.AutoRefactor.ImportDecl
@@ -477,6 +486,7 @@ benchmark lore-memory-bench
       Lore.Internal.Definition.SourceTree
       Lore.Internal.Definition.Timing
       Lore.Internal.Definition.Types
+      Lore.Internal.Directory
       Lore.Internal.File
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
@@ -527,6 +537,8 @@ benchmark lore-memory-bench
       Lore.Lookup.Search
       Lore.Module
       Lore.Monad
+      Lore.PackageDirectory
+      Lore.Project
       Lore.Refactor.ImportCleanup.Internal
       Lore.Refactor.Imports
       Lore.Session

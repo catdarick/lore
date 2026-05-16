@@ -11,6 +11,7 @@ import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConf
 import Lore.Mcp.Monad (newLoreMcpContext, runLoreMcp)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
 import Lore.Mcp.Tools.CreateTemporalModule (createTemporalModuleTool)
+import Lore.Mcp.Tools.DiscoverProject (discoverProjectTool)
 import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
 import Lore.Mcp.Tools.Feedback (feedbackTool)
 import Lore.Mcp.Tools.FindReferences (findReferencesTool)
@@ -57,7 +58,8 @@ runLoreMcpServer = do
               searchSymbolsTool,
               listExportedSymbolsTool,
               lookupInstancesTool,
-              findReferencesTool
+              findReferencesTool,
+              discoverProjectTool
             ]
               <> definitionKnowledgeTools
               <> feedbackTools

@@ -1,6 +1,7 @@
 module Lore.Internal.File
   ( defaultIgnoreList,
     findFilesByNameRecursively,
+    shouldIgnoreDirectory,
   )
 where
 
@@ -22,11 +23,13 @@ findFilesByNameRecursively ignoreList root targetName = do
     isDir <- doesDirectoryExist path
     if isDir
       then
-        if shouldIgnore entry
+        if shouldIgnoreDirectory ignoreList entry
           then pure []
           else findFilesByNameRecursively ignoreList path targetName
       else pure [path | takeFileName path == targetName]
-  where
-    shouldIgnore dir = case ignoreList of
-      Just (DirectoryIgnoreList ignoreSet) -> any (`Set.member` ignoreSet) (splitDirectories dir)
-      Nothing -> False
+
+shouldIgnoreDirectory :: Maybe DirectoryIgnoreList -> FilePath -> Bool
+shouldIgnoreDirectory ignoreList dir =
+  case ignoreList of
+    Just (DirectoryIgnoreList ignoreSet) -> any (`Set.member` ignoreSet) (splitDirectories dir)
+    Nothing -> False

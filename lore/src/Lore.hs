@@ -64,6 +64,12 @@ module Lore
     executeStatement,
     getTypeOfExpression,
     createTemporalModule,
+    GhcOption (..),
+    Extension (..),
+    PackageData (..),
+    ComponentData (..),
+    discoverProject,
+    projectRootPath,
     LoggerHandle (..),
     LogLevel (..),
     LogMessage (..),
@@ -79,6 +85,7 @@ import Lore.Logger
 import Lore.Lookup
 import Lore.Module
 import Lore.Monad (LoreMonadT, MonadLore)
+import Lore.Project
 import Lore.Session
 import Lore.Targets
 import Lore.TemporalModules
