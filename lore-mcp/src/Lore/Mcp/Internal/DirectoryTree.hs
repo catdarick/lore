@@ -164,6 +164,22 @@ data DirectoryTreeOmittedEntries = DirectoryTreeOmittedEntries
   }
   deriving stock (Eq, Show)
 
+instance Semigroup DirectoryTreeOmittedEntries where
+  left <> right =
+    DirectoryTreeOmittedEntries
+      { directoryTreeOmittedDirectories =
+          left.directoryTreeOmittedDirectories + right.directoryTreeOmittedDirectories,
+        directoryTreeOmittedFiles =
+          left.directoryTreeOmittedFiles + right.directoryTreeOmittedFiles
+      }
+
+instance Monoid DirectoryTreeOmittedEntries where
+  mempty =
+    DirectoryTreeOmittedEntries
+      { directoryTreeOmittedDirectories = 0,
+        directoryTreeOmittedFiles = 0
+      }
+
 discoverDirectory ::
   (MonadLore m) =>
   DirectoryTreeDiscoveryOptions ->
@@ -217,14 +233,15 @@ discoveryBudget options =
       defaultDirectoryTreeDiscoveryBudget
       (directoryTreeBudget options)
 
-data PlannedDirectory = PlannedDirectory
-  { plannedDirectoryOpened :: Bool,
-    plannedDirectoryEntries :: [PlannedEntry],
-    plannedDirectoryOmittedInsertAt :: Int,
-    plannedDirectoryInlineOmitted :: DirectoryTreeOmittedEntries,
-    plannedDirectoryStats :: Maybe DirectoryTreeStats,
-    plannedDirectoryChildOmitted :: DirectoryTreeOmittedEntries
-  }
+data PlannedDirectory
+  = PlannedOpenedDirectory [PlannedEntry] PlannedDirectoryOmission
+  | PlannedClosedDirectory DirectoryTreeStats
+  deriving stock (Eq, Show)
+
+data PlannedDirectoryOmission
+  = PlannedDirectoryNoOmission
+  | PlannedDirectoryInlineOmission DirectoryTreeOmittedEntries
+  | PlannedDirectoryChildOmission Int DirectoryTreeOmittedEntries
   deriving stock (Eq, Show)
 
 data PlannedEntry
@@ -246,6 +263,11 @@ data PlannedFileEntry = PlannedFileEntry
 
 type DirectoryPlan = Map.Map FilePath PlannedDirectory
 
+data PlannedChildDirectory
+  = PlannedChildDirectoryOpened FilePath
+  | PlannedChildDirectoryClosed FilePath DirectoryTreeStats
+  deriving stock (Eq, Show)
+
 planDirectoryTree ::
   Int ->
   FilePath ->
@@ -261,7 +283,9 @@ planDirectoryTree budget rootPath focusPaths noisyOptions gitignoredMatchers =
       canonicalDirectoryPath <- canonicalizePath (rootPath </> relativePath)
 
       if canonicalDirectoryPath `Set.member` visited
-        then go visited remaining queue plan
+        then do
+          plan' <- ensureClosedDirectoryPlan relativePath plan
+          go visited remaining queue plan'
         else do
           rawEntries <- listVisibleDirectoryEntries (rootPath </> relativePath)
           let noisySelection =
@@ -279,26 +303,20 @@ planDirectoryTree budget rootPath focusPaths noisyOptions gitignoredMatchers =
               remaining' = remaining - length renderedEntries
               noisyOmitted = countDirectoryEntries noisySelection.omittedEntries
               budgetOmitted = countPlannedEntries omittedEntries
-              omitted =
-                mergeOmittedEntries noisyOmitted budgetOmitted
-              omittedInsertAt =
-                min
-                  (length renderedEntries)
-                  noisySelection.selectedHeadEntriesCount
-              shouldKeepOmittedAsChild =
-                relativePath == "."
-                  || (not (isEmptyOmittedEntries noisyOmitted) && not (null renderedEntries))
-              (inlineOmitted, childOmitted) =
-                if shouldKeepOmittedAsChild
-                  then (emptyOmittedEntries, omitted)
-                  else (omitted, emptyOmittedEntries)
+              omission =
+                planDirectoryOmission
+                  relativePath
+                  noisySelection
+                  renderedEntries
+                  noisyOmitted
+                  (noisyOmitted <> budgetOmitted)
 
               renderedDirectories =
                 [ directoryEntry
                 | PlannedEntryDirectory directoryEntry <- renderedEntries
                 ]
 
-          closedDirectoryPlans <-
+          childDirectoryPlans <-
             forM renderedDirectories \directoryEntry -> do
               let childRelativePath =
                     plannedDirectoryEntryRelativePath directoryEntry
@@ -307,52 +325,70 @@ planDirectoryTree budget rootPath focusPaths noisyOptions gitignoredMatchers =
                 focusPaths
                 childRelativePath
                 gitignoredMatchers
-                then pure Nothing
+                then pure (PlannedChildDirectoryOpened childRelativePath)
                 else do
                   stats <- summarizeDirectory (rootPath </> childRelativePath)
                   pure $
-                    Just
-                      ( childRelativePath,
-                        PlannedDirectory
-                          { plannedDirectoryOpened = False,
-                            plannedDirectoryEntries = [],
-                            plannedDirectoryOmittedInsertAt = 0,
-                            plannedDirectoryInlineOmitted = emptyOmittedEntries,
-                            plannedDirectoryStats = Just stats,
-                            plannedDirectoryChildOmitted = emptyOmittedEntries
-                          }
-                      )
+                    PlannedChildDirectoryClosed childRelativePath stats
 
           let openedDirectoryPaths =
                 [ childRelativePath
-                | directoryEntry <- renderedDirectories,
-                  let childRelativePath =
-                        plannedDirectoryEntryRelativePath directoryEntry,
-                  shouldOpenDirectory
-                    focusPaths
-                    childRelativePath
-                    gitignoredMatchers
+                | PlannedChildDirectoryOpened childRelativePath <- childDirectoryPlans
                 ]
 
               currentPlan =
-                PlannedDirectory
-                  { plannedDirectoryOpened = True,
-                    plannedDirectoryEntries = renderedEntries,
-                    plannedDirectoryOmittedInsertAt = omittedInsertAt,
-                    plannedDirectoryInlineOmitted = inlineOmitted,
-                    plannedDirectoryStats = Nothing,
-                    plannedDirectoryChildOmitted = childOmitted
-                  }
+                PlannedOpenedDirectory renderedEntries omission
 
               plan' =
                 foldr
-                  (uncurry Map.insert)
+                  insertChildDirectoryPlan
                   (Map.insert relativePath currentPlan plan)
-                  (mapMaybe id closedDirectoryPlans)
+                  childDirectoryPlans
 
               visited' = Set.insert canonicalDirectoryPath visited
 
           go visited' remaining' (queue <> openedDirectoryPaths) plan'
+    ensureClosedDirectoryPlan relativePath plan
+      | Map.member relativePath plan = pure plan
+      | otherwise = do
+          stats <- summarizeDirectory (rootPath </> relativePath)
+          pure $
+            Map.insert
+              relativePath
+              (PlannedClosedDirectory stats)
+              plan
+
+insertChildDirectoryPlan :: PlannedChildDirectory -> DirectoryPlan -> DirectoryPlan
+insertChildDirectoryPlan = \case
+  PlannedChildDirectoryOpened _ ->
+    id
+  PlannedChildDirectoryClosed childRelativePath stats ->
+    Map.insert
+      childRelativePath
+      (PlannedClosedDirectory stats)
+
+planDirectoryOmission ::
+  FilePath ->
+  NoisySelection ->
+  [PlannedEntry] ->
+  DirectoryTreeOmittedEntries ->
+  DirectoryTreeOmittedEntries ->
+  PlannedDirectoryOmission
+planDirectoryOmission relativePath noisySelection renderedEntries noisyOmitted omitted
+  | isEmptyOmittedEntries omitted = PlannedDirectoryNoOmission
+  | shouldKeepOmittedAsChild =
+      PlannedDirectoryChildOmission omittedInsertAt omitted
+  | otherwise =
+      PlannedDirectoryInlineOmission omitted
+  where
+    omittedInsertAt =
+      min
+        (length renderedEntries)
+        noisySelection.selectedHeadEntriesCount
+
+    shouldKeepOmittedAsChild =
+      relativePath == "."
+        || (not (isEmptyOmittedEntries noisyOmitted) && not (null renderedEntries))
 
 -- | Collapse a raw filesystem entry into one rendered entry.
 --
@@ -437,27 +473,37 @@ materializeDirectory ::
   DirectoryPlan ->
   DirectoryTreeNode
 materializeDirectory rootRelativePath displayName relativePath plan =
-  DirectoryTreeNode
-    { directoryTreeNodeName = displayName,
-      directoryTreeNodeRelativePath = displayRelativePath rootRelativePath relativePath,
-      directoryTreeNodeOpened = plannedDirectoryOpened planned,
-      directoryTreeNodeStats = plannedDirectoryStats planned,
-      directoryTreeNodeInlineOmitted =
-        toNonEmptyOmittedEntries planned.plannedDirectoryInlineOmitted,
-      directoryTreeNodeChildren =
-        if plannedDirectoryOpened planned
-          then
-            take omittedInsertAt renderedChildren
-              <> omittedChildren
-              <> drop omittedInsertAt renderedChildren
-          else []
-    }
+  case Map.lookup relativePath plan of
+    Nothing ->
+      missingDirectoryPlan relativePath
+    Just planned ->
+      case planned of
+        PlannedClosedDirectory stats ->
+          directoryNode
+            False
+            (Just stats)
+            Nothing
+            []
+        PlannedOpenedDirectory plannedDirectoryEntries plannedDirectoryOmission ->
+          let renderedChildren =
+                map materializeChild plannedDirectoryEntries
+              (nodeInlineOmitted, nodeChildren) =
+                materializeOmission plannedDirectoryOmission renderedChildren
+           in directoryNode
+                True
+                Nothing
+                nodeInlineOmitted
+                nodeChildren
   where
-    planned =
-      Map.findWithDefault
-        fallbackClosedDirectory
-        relativePath
-        plan
+    directoryNode opened stats nodeInlineOmitted children =
+      DirectoryTreeNode
+        { directoryTreeNodeName = displayName,
+          directoryTreeNodeRelativePath = displayRelativePath rootRelativePath relativePath,
+          directoryTreeNodeOpened = opened,
+          directoryTreeNodeStats = stats,
+          directoryTreeNodeInlineOmitted = nodeInlineOmitted,
+          directoryTreeNodeChildren = children
+        }
 
     materializeChild = \case
       PlannedEntryDirectory directoryEntry ->
@@ -477,81 +523,64 @@ materializeDirectory rootRelativePath displayName relativePath plan =
                   (plannedFileEntryRelativePath fileEntry)
             }
 
-    renderedChildren =
-      map materializeChild (plannedDirectoryEntries planned)
+missingDirectoryPlan :: FilePath -> a
+missingDirectoryPlan relativePath =
+  error $
+    "Internal directory-tree invariant violated: missing plan for "
+      <> relativePath
 
-    omittedInsertAt =
-      max 0 (min planned.plannedDirectoryOmittedInsertAt (length renderedChildren))
-
-    omitted = plannedDirectoryChildOmitted planned
-
-    omittedChildren =
-      [ DirectoryTreeChildOmitted omitted
-      | directoryTreeOmittedDirectories omitted > 0
-          || directoryTreeOmittedFiles omitted > 0
-      ]
-
-fallbackClosedDirectory :: PlannedDirectory
-fallbackClosedDirectory =
-  PlannedDirectory
-    { plannedDirectoryOpened = False,
-      plannedDirectoryEntries = [],
-      plannedDirectoryOmittedInsertAt = 0,
-      plannedDirectoryInlineOmitted = emptyOmittedEntries,
-      plannedDirectoryStats = Nothing,
-      plannedDirectoryChildOmitted = emptyOmittedEntries
-    }
-
-emptyOmittedEntries :: DirectoryTreeOmittedEntries
-emptyOmittedEntries =
-  DirectoryTreeOmittedEntries
-    { directoryTreeOmittedDirectories = 0,
-      directoryTreeOmittedFiles = 0
-    }
+materializeOmission ::
+  PlannedDirectoryOmission ->
+  [DirectoryTreeChild] ->
+  (Maybe DirectoryTreeOmittedEntries, [DirectoryTreeChild])
+materializeOmission omission children =
+  case omission of
+    PlannedDirectoryChildOmission insertAt omitted ->
+      let safeInsertAt = max 0 (min insertAt (length children))
+       in ( Nothing,
+            take safeInsertAt children
+              <> [DirectoryTreeChildOmitted omitted]
+              <> drop safeInsertAt children
+          )
+    PlannedDirectoryNoOmission ->
+      (Nothing, children)
+    PlannedDirectoryInlineOmission omitted ->
+      (Just omitted, children)
 
 countPlannedEntries :: [PlannedEntry] -> DirectoryTreeOmittedEntries
-countPlannedEntries entries =
-  DirectoryTreeOmittedEntries
-    { directoryTreeOmittedDirectories =
-        length
-          [ ()
-          | PlannedEntryDirectory _ <- entries
-          ],
-      directoryTreeOmittedFiles =
-        length
-          [ ()
-          | PlannedEntryFile _ <- entries
-          ]
-    }
+countPlannedEntries =
+  countOmittedEntries plannedEntryOmittedEntries
 
 countDirectoryEntries :: [DirectoryEntry] -> DirectoryTreeOmittedEntries
-countDirectoryEntries entries =
-  DirectoryTreeOmittedEntries
-    { directoryTreeOmittedDirectories =
-        length
-          [ ()
-          | DirectoryEntry {directoryEntryType = DirectoryEntryDirectory} <- entries
-          ],
-      directoryTreeOmittedFiles =
-        length
-          [ ()
-          | DirectoryEntry {directoryEntryType = DirectoryEntryFile} <- entries
-          ]
-    }
+countDirectoryEntries =
+  countOmittedEntries directoryEntryOmittedEntries
 
-mergeOmittedEntries :: DirectoryTreeOmittedEntries -> DirectoryTreeOmittedEntries -> DirectoryTreeOmittedEntries
-mergeOmittedEntries left right =
-  DirectoryTreeOmittedEntries
-    { directoryTreeOmittedDirectories =
-        left.directoryTreeOmittedDirectories + right.directoryTreeOmittedDirectories,
-      directoryTreeOmittedFiles =
-        left.directoryTreeOmittedFiles + right.directoryTreeOmittedFiles
-    }
+countOmittedEntries :: (entry -> DirectoryTreeOmittedEntries) -> [entry] -> DirectoryTreeOmittedEntries
+countOmittedEntries toOmittedEntries =
+  mconcat . map toOmittedEntries
 
-toNonEmptyOmittedEntries :: DirectoryTreeOmittedEntries -> Maybe DirectoryTreeOmittedEntries
-toNonEmptyOmittedEntries omitted
-  | isEmptyOmittedEntries omitted = Nothing
-  | otherwise = Just omitted
+plannedEntryOmittedEntries :: PlannedEntry -> DirectoryTreeOmittedEntries
+plannedEntryOmittedEntries = \case
+  PlannedEntryDirectory _ ->
+    oneOmittedDirectory
+  PlannedEntryFile _ ->
+    oneOmittedFile
+
+directoryEntryOmittedEntries :: DirectoryEntry -> DirectoryTreeOmittedEntries
+directoryEntryOmittedEntries entry =
+  case directoryEntryType entry of
+    DirectoryEntryDirectory ->
+      oneOmittedDirectory
+    DirectoryEntryFile ->
+      oneOmittedFile
+
+oneOmittedDirectory :: DirectoryTreeOmittedEntries
+oneOmittedDirectory =
+  mempty {directoryTreeOmittedDirectories = 1}
+
+oneOmittedFile :: DirectoryTreeOmittedEntries
+oneOmittedFile =
+  mempty {directoryTreeOmittedFiles = 1}
 
 isEmptyOmittedEntries :: DirectoryTreeOmittedEntries -> Bool
 isEmptyOmittedEntries omitted =
