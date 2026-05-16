@@ -58,6 +58,7 @@ tests:
     - test
     - src
     other-modules:
+    - CreateTemporalModuleSpec
     - FindReferencesSpec
     - GetDefinitionSpec
     - LookupInstancesSpec
@@ -75,6 +76,7 @@ tests:
     - Lore.Mcp.Protocol.Server
     - Lore.Mcp.Server
     - Lore.Mcp.Tools.ExecuteCode
+    - Lore.Mcp.Tools.CreateTemporalModule
     - Lore.Mcp.Tools.Feedback
     - Lore.Mcp.Tools.FindReferences
     - Lore.Mcp.Tools.GetDefinition.Cached

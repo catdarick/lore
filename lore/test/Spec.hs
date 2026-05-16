@@ -16,6 +16,7 @@ import qualified LookupSpec
 import qualified RedundantImportsSpec
 import qualified SourceEditSpec
 import qualified TargetsSpec
+import qualified TemporalModulesSpec
 import Test.Hspec
 
 main :: IO ()
@@ -34,3 +35,4 @@ main =
     RedundantImportsSpec.spec
     SourceEditSpec.spec
     TargetsSpec.spec
+    TemporalModulesSpec.spec

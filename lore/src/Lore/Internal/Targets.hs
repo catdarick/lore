@@ -26,8 +26,10 @@ import Lore.Internal.Targets.AutoRefactorLoop (loadTargetsWithAutoRefactorRetrie
 import Lore.Internal.Targets.LoadAttempt (LoadAttempt (..), countLoadedModules, mkModuleTarget)
 import Lore.Internal.Targets.Plan (TargetsPlan (..), prepareTargetsPlan)
 import Lore.Internal.Targets.Result (LoadTargetsResult (..))
+import Lore.Internal.TemporalModules (TemporalModule (..), listExistingTemporalModules)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
+import System.FilePath (takeDirectory)
 
 data LoadTargetsOptions = LoadTargetsOptions
   { enableAutoRefactor :: Bool
@@ -62,8 +64,11 @@ loadTargets options = do
       dependencies = extractDependencies allComponents
       dependenciesToAdd = dependencies Set.\\ localPackageNames
       sourceDirs = Set.unions (map extractSourceDirs packages)
+  temporalModules <- listExistingTemporalModules
+  let temporalSourceDirs = Set.fromList (map (takeDirectory . modulePath) temporalModules)
+      combinedSourceDirs = sourceDirs <> temporalSourceDirs
   targetsPlan <- prepareTargetsPlan allComponents
-  logTargetPlanDetails sourceDirs dependenciesToAdd targetsPlan
+  logTargetPlanDetails combinedSourceDirs dependenciesToAdd targetsPlan
   invalidateCachesForTargetConfigurationChange
   setSymbolsDependencySetCache dependenciesToAdd
   modifySessionDynFlagsM
@@ -71,11 +76,13 @@ loadTargets options = do
         targetsPlan.commonLanguage
         (Set.toList targetsPlan.commonGhcOptions)
         (Set.toList targetsPlan.commonExtensions)
-        . setGhcSourceDirs (Set.toList sourceDirs)
+        . setGhcSourceDirs (Set.toList combinedSourceDirs)
         . setDependencies (Set.toList dependenciesToAdd)
     )
 
-  let targetModules = Map.keysSet targetsPlan.modulesWithComponentOptions
+  let targetModules =
+        Map.keysSet targetsPlan.modulesWithComponentOptions
+          <> Set.fromList (map moduleName temporalModules)
       targets = map (mkModuleTarget homeUnitId) (Set.toList targetModules)
       totalModulesCount = Set.size targetModules
   GHC.setTargets targets

@@ -10,6 +10,7 @@ import qualified Data.Text as T
 import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConfig (..), noLogHandle, prettyLoggerHandle)
 import Lore.Mcp.Monad (newLoreMcpContext, runLoreMcp)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
+import Lore.Mcp.Tools.CreateTemporalModule (createTemporalModuleTool)
 import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
 import Lore.Mcp.Tools.Feedback (feedbackTool)
 import Lore.Mcp.Tools.FindReferences (findReferencesTool)
@@ -48,6 +49,7 @@ runLoreMcpServer = do
           initialize = pure (),
           tools =
             [ reloadHomeModulesTool,
+              createTemporalModuleTool,
               executeCodeTool,
               getTypeOfExpressionTool,
               lookupSymbolInfoTool,

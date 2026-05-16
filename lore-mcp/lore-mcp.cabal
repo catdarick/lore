@@ -35,6 +35,7 @@ executable lore-mcp
       Lore.Mcp.Protocol.Request
       Lore.Mcp.Protocol.Server
       Lore.Mcp.Server
+      Lore.Mcp.Tools.CreateTemporalModule
       Lore.Mcp.Tools.ExecuteCode
       Lore.Mcp.Tools.Feedback
       Lore.Mcp.Tools.FindReferences
@@ -125,6 +126,7 @@ test-suite lore-mcp-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      CreateTemporalModuleSpec
       FindReferencesSpec
       GetDefinitionSpec
       LookupInstancesSpec
@@ -142,6 +144,7 @@ test-suite lore-mcp-test
       Lore.Mcp.Protocol.Server
       Lore.Mcp.Server
       Lore.Mcp.Tools.ExecuteCode
+      Lore.Mcp.Tools.CreateTemporalModule
       Lore.Mcp.Tools.Feedback
       Lore.Mcp.Tools.FindReferences
       Lore.Mcp.Tools.GetDefinition.Cached

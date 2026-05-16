@@ -1,6 +1,7 @@
 module Lore.Internal.Session.Cache.Types
   ( InterpreterContextCache (..),
     LastLoadTargetsResultCache (..),
+    TemporalModulesRegistry (..),
   )
 where
 
@@ -13,4 +14,9 @@ newtype InterpreterContextCache = InterpreterContextCache
 
 newtype LastLoadTargetsResultCache = LastLoadTargetsResultCache
   { cachedLastLoadTargetsResult :: Maybe LoadTargetsResult
+  }
+
+data TemporalModulesRegistry = TemporalModulesRegistry
+  { temporalModulesDirectory :: Maybe FilePath,
+    registeredTemporalModulePaths :: [FilePath]
   }

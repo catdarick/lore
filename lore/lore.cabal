@@ -39,6 +39,7 @@ library
       Lore.Refactor.ImportCleanup.Internal
       Lore.Session
       Lore.SourceEdit
+      Lore.TemporalModules
       Lore.Targets
   other-modules:
       Lore.Internal.AutoRefactor
@@ -102,6 +103,7 @@ library
       Lore.Internal.Targets.ModuleGraphPatch
       Lore.Internal.Targets.Plan
       Lore.Internal.Targets.Result
+      Lore.Internal.TemporalModules
       Lore.Lib.Force
       Lore.Lib.Text
       Lore.Module
@@ -192,6 +194,7 @@ test-suite lore-test
       RedundantImportsSpec
       SourceEditSpec
       TargetsSpec
+      TemporalModulesSpec
       TestSupport
       SomeModule
   hs-source-dirs:
@@ -342,6 +345,7 @@ benchmark lore-bench
       Lore.Internal.Targets.ModuleGraphPatch
       Lore.Internal.Targets.Plan
       Lore.Internal.Targets.Result
+      Lore.Internal.TemporalModules
       Lore.Interpreter
       Lore.Lib.Force
       Lore.Lib.Text
@@ -355,6 +359,7 @@ benchmark lore-bench
       Lore.Session
       Lore.SourceEdit
       Lore.Targets
+      Lore.TemporalModules
       Paths_lore
   autogen-modules:
       Paths_lore
@@ -510,6 +515,7 @@ benchmark lore-memory-bench
       Lore.Internal.Targets.ModuleGraphPatch
       Lore.Internal.Targets.Plan
       Lore.Internal.Targets.Result
+      Lore.Internal.TemporalModules
       Lore.Interpreter
       Lore.Lib.Force
       Lore.Lib.Text
@@ -523,6 +529,7 @@ benchmark lore-memory-bench
       Lore.Session
       Lore.SourceEdit
       Lore.Targets
+      Lore.TemporalModules
       Paths_lore
   autogen-modules:
       Paths_lore

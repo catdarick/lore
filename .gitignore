@@ -9,3 +9,4 @@ lore-mcp-debug.sh
 lore/bench-results/
 .mcp.json
 dist-newstyle/cache
+.lore-work

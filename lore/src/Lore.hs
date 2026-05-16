@@ -63,6 +63,7 @@ module Lore
     loadInterpreterContext,
     executeStatement,
     getTypeOfExpression,
+    createTemporalModule,
     LoggerHandle (..),
     LogLevel (..),
     LogMessage (..),
@@ -80,3 +81,4 @@ import Lore.Module
 import Lore.Monad (LoreMonadT, MonadLore)
 import Lore.Session
 import Lore.Targets
+import Lore.TemporalModules

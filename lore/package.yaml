@@ -70,6 +70,7 @@ library:
   - Lore.Refactor.ImportCleanup.Internal
   - Lore.Session
   - Lore.SourceEdit
+  - Lore.TemporalModules
   - Lore.Targets
 
 
@@ -91,6 +92,7 @@ tests:
     - RedundantImportsSpec
     - SourceEditSpec
     - TargetsSpec
+    - TemporalModulesSpec
     - TestSupport
     - SomeModule
     ghc-options:

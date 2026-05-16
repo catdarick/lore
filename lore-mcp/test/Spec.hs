@@ -3,6 +3,7 @@ module Main
   )
 where
 
+import qualified CreateTemporalModuleSpec
 import qualified FindReferencesSpec
 import qualified GetDefinitionSpec
 import qualified LookupInstancesSpec
@@ -13,6 +14,7 @@ main :: IO ()
 main =
   hspec do
     GetDefinitionSpec.spec
+    CreateTemporalModuleSpec.spec
     FindReferencesSpec.spec
     LookupInstancesSpec.spec
     ProtocolRequestSpec.spec

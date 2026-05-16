@@ -18,11 +18,12 @@ import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
 import Lore.Internal.Lookup.Cache.Types (ExternalSymbolsIndexCache (..), HomeSymbolsIndexCache (..), ModSummariesCache (..), NameToInstancesIndexCache (..), SymbolsDependencySetCache (..))
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
-import Lore.Internal.Session.Cache.Types (InterpreterContextCache (..), LastLoadTargetsResultCache (..))
+import Lore.Internal.Session.Cache.Types (InterpreterContextCache (..), LastLoadTargetsResultCache (..), TemporalModulesRegistry (..))
 import Lore.Logger (LoggerHandle, noLogHandle)
 
 data SessionContext = SessionContext
   { projectRoot :: FilePath,
+    sessionGhcWorkDir :: FilePath,
     packageFiles :: [FilePath],
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
@@ -39,7 +40,8 @@ data SessionContext = SessionContext
     coreModuleFactsCacheVar :: MVar CoreModuleFactsCache,
     parsedModuleFactsCacheVar :: MVar ParsedModuleFactsCache,
     interpreterContextCacheVar :: MVar InterpreterContextCache,
-    lastLoadTargetsResultCacheVar :: MVar LastLoadTargetsResultCache
+    lastLoadTargetsResultCacheVar :: MVar LastLoadTargetsResultCache,
+    temporalModulesRegistryVar :: MVar TemporalModulesRegistry
   }
 
 data SessionConfig = SessionConfig
@@ -61,7 +63,7 @@ defaultSessionConfig =
     }
 
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
-prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} = do
+prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, loggerHandle, customPrelude} = do
   packageFiles <- findFilesByNameRecursively (Just defaultIgnoreList) projectRoot "package.yaml"
   eiPackageDbPaths <- resolvePackageDbPaths projectRoot
   ifaceCache <- GHC.newIfaceCache
@@ -77,6 +79,7 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
   parsedModuleFactsCacheVar <- GHC.newMVar (ParsedModuleFactsCache Map.empty)
   interpreterContextCacheVar <- GHC.newMVar (InterpreterContextCache Nothing)
   lastLoadTargetsResultCacheVar <- GHC.newMVar (LastLoadTargetsResultCache Nothing)
+  temporalModulesRegistryVar <- GHC.newMVar (TemporalModulesRegistry Nothing [])
   case eiPackageDbPaths of
     Left err -> pure $ Left $ "Failed to resolve package database paths: " <> err
     Right packageDbPaths -> do
@@ -84,6 +87,7 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
         Right
           SessionContext
             { projectRoot,
+              sessionGhcWorkDir = _ghcWorkDir,
               packageFiles,
               loggerHandle,
               customPrelude,
@@ -100,5 +104,6 @@ prepareSessionContext SessionConfig {projectRoot, loggerHandle, customPrelude} =
               coreModuleFactsCacheVar,
               parsedModuleFactsCacheVar,
               interpreterContextCacheVar,
-              lastLoadTargetsResultCacheVar
+              lastLoadTargetsResultCacheVar,
+              temporalModulesRegistryVar
             }
