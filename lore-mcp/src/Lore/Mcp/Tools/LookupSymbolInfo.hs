@@ -15,7 +15,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as Plugins
-import Lore (MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), SymbolSuggestion (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName, resolvePathToRoot)
+import Lore (MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName, resolvePathToRoot)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Render
   ( ListMarker (..),
@@ -27,8 +27,8 @@ import Lore.Mcp.Internal.Render
   )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared.DetailedSymbolInfo (DetailedSymbolInfo (..))
-import Lore.Mcp.Tools.Shared.Outputable (renderOutputable)
 import Lore.Mcp.Tools.Shared.PartialLoadWarning (mkPartialWarning)
+import Lore.Mcp.Tools.Shared.SymbolSuggestions (renderMissingSymbol, symbolSuggestionFetchLimit)
 
 data LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
   { symbol ::
@@ -74,7 +74,7 @@ lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol, skip} = do
       renderedBody <-
         case NE.nonEmpty symbolInfos of
           Nothing -> do
-            suggestions <- findSimilarSymbols maxRenderedSymbolSuggestions (parseAndNormalizeName symbol)
+            suggestions <- findSimilarSymbols symbolSuggestionFetchLimit (parseAndNormalizeName symbol)
             pure (renderMissingSymbol symbol suggestions)
           Just nonEmptySymbolInfos -> do
             detailedSymbolInfos <- mapM mkDetailedSymbolInfo nonEmptySymbolInfos
@@ -89,9 +89,6 @@ lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol, skip} = do
 
     renderResolvedSymbols detailedSymbolInfos =
       renderText (renderSymbolCandidatesList resolvedSkip detailedSymbolInfos)
-
-maxRenderedSymbolSuggestions :: Int
-maxRenderedSymbolSuggestions = 10
 
 renderSymbolCandidatesList :: Int -> NonEmpty DetailedSymbolInfo -> RenderList
 renderSymbolCandidatesList skip detailedSymbolInfos =
@@ -112,39 +109,6 @@ renderSymbolCandidatesList skip detailedSymbolInfos =
     }
   where
     maxRenderedSymbolCandidates = 5
-
-quoteText :: Text -> Text
-quoteText value =
-  "\"" <> value <> "\""
-
-newtype RenderedSymbolSuggestion = RenderedSymbolSuggestion SymbolSuggestion
-
-instance Renderable RenderedSymbolSuggestion where
-  renderText (RenderedSymbolSuggestion suggestion) =
-    let lookupName = suggestion.suggestedLookupName
-        symbolName = renderOutputable suggestion.suggestedSymbol.name
-     in if lookupName == symbolName
-          then symbolName
-          else lookupName <> " (" <> symbolName <> ")"
-
-renderMissingSymbol :: Text -> [SymbolSuggestion] -> Text
-renderMissingSymbol query suggestions =
-  case NE.nonEmpty (map RenderedSymbolSuggestion suggestions) of
-    Nothing ->
-      noSymbolsFound
-    Just nonEmptySuggestions ->
-      renderText $
-        RenderList
-          { renderHeader = \_ -> Just $ noSymbolsFound <> " Maybe you meant one of these?",
-            contentIndentWidth = 0,
-            markerStyle = NumberMarker,
-            itemsList = nonEmptySuggestions,
-            skip = 0,
-            truncation = Nothing
-          }
-  where
-    noSymbolsFound =
-      "No symbols found for " <> quoteText query <> "."
 
 lookupExactSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
 lookupExactSymbolInfos query = do

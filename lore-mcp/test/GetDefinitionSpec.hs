@@ -233,6 +233,7 @@ spec = do
       supportValuesLookup `shouldContainText` "No symbols found for \"supportVlaues\"."
       supportValuesLookup `shouldContainText` "Maybe you meant one of these?"
       supportValuesLookup `shouldContainText` "supportValues"
+      supportValuesLookup `shouldContainText` "Demo.Support.supportValues"
 
     it "suggests each lookup occurrence once and hides generated symbols" do
       withFixtureCopy \fixtureRoot -> do

@@ -22,6 +22,7 @@ import Lore.Mcp.Tools.LookupInstances (lookupInstancesTool)
 import Lore.Mcp.Tools.LookupSymbolInfo (lookupSymbolInfoTool)
 import Lore.Mcp.Tools.NotifyKnowledgeReset (notifyKnowledgeResetTool)
 import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
+import Lore.Mcp.Tools.SearchSymbols (searchSymbolsTool)
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
 
@@ -53,6 +54,7 @@ runLoreMcpServer = do
               executeCodeTool,
               getTypeOfExpressionTool,
               lookupSymbolInfoTool,
+              searchSymbolsTool,
               listExportedSymbolsTool,
               lookupInstancesTool,
               findReferencesTool

@@ -8,6 +8,7 @@ import qualified FindReferencesSpec
 import qualified GetDefinitionSpec
 import qualified LookupInstancesSpec
 import qualified ProtocolRequestSpec
+import qualified SearchSymbolsSpec
 import Test.Hspec
 
 main :: IO ()
@@ -17,4 +18,5 @@ main =
     CreateTemporalModuleSpec.spec
     FindReferencesSpec.spec
     LookupInstancesSpec.spec
+    SearchSymbolsSpec.spec
     ProtocolRequestSpec.spec

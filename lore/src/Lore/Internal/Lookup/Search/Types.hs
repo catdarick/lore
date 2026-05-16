@@ -5,6 +5,7 @@ module Lore.Internal.Lookup.Search.Types
     IndexedOccurrence (..),
     TokenSearchIndex (..),
     QueryTokenMatch (..),
+    TokenMatchKind (..),
     SearchResult (..),
   )
 where
@@ -37,10 +38,18 @@ data TokenSearchIndex key value = TokenSearchIndex
 data QueryTokenMatch = QueryTokenMatch
   { queryToken :: SearchToken,
     matchedToken :: SearchToken,
+    tokenMatchKind :: TokenMatchKind,
     tokenDistance :: Int,
     tokenWeight :: Double
   }
   deriving stock (Eq, Show)
+
+data TokenMatchKind
+  = TokenMatchExact
+  | TokenMatchCanonical
+  | TokenMatchSynonym
+  | TokenMatchFuzzy
+  deriving stock (Eq, Ord, Show)
 
 data SearchResult key value = SearchResult
   { searchResultKey :: key,

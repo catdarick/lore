@@ -78,3 +78,89 @@ spec =
             "Lookup"
           ]
           `shouldBe` ["Lookup", "lookup"]
+
+      it "uses canonical plural forms and synonym sets when ranking similar symbols" do
+        rankSearchTexts
+          3
+          "loadPictureFromDatabase"
+          [ "loadPictureFromDB",
+            "getPicturesFromDB",
+            "loadAuthorsFromDB"
+          ]
+          `shouldBe` ["loadPictureFromDB", "getPicturesFromDB", "loadAuthorsFromDB"]
+
+      it "matches plural and singular forms as equivalent tokens" do
+        take
+          1
+          ( rankSearchTexts
+              3
+              "getPictureFromDB"
+              [ "getPicturesFromDB",
+                "getAuthorsFromDB",
+                "loadPictureFromDB"
+              ]
+          )
+          `shouldBe` ["getPicturesFromDB"]
+
+      it "matches irregular plural forms like indices and analyses" do
+        take
+          1
+          ( rankSearchTexts
+              3
+              "loadIndicesFromDatabase"
+              [ "loadIndexFromDB",
+                "loadAuthorsFromDB",
+                "getAuthorsFromDB"
+              ]
+          )
+          `shouldBe` ["loadIndexFromDB"]
+
+        take
+          1
+          ( rankSearchTexts
+              3
+              "runAnalyses"
+              [ "runAnalysis",
+                "runAuthor",
+                "loadAnalyses"
+              ]
+          )
+          `shouldBe` ["runAnalysis"]
+
+      it "prefers exact token matches over synonym-only rare tokens" do
+        rankSearchTexts
+          3
+          "map"
+          [ "convert",
+            "transform",
+            "mapMaybe"
+          ]
+          `shouldBe` ["mapMaybe", "convert", "transform"]
+
+      it "keeps exact full symbol match ahead of extended near-matches" do
+        take
+          1
+          ( rankSearchTexts
+              4
+              "lookupSymbolInfo"
+              [ "lookupExactSymbolInfos",
+                "lookupSymbolInfo",
+                "lookupRootSymbolInfo",
+                "lookupSymbolInfoArgs"
+              ]
+          )
+          `shouldBe` ["lookupSymbolInfo"]
+
+      it "keeps exact token-complete match ahead of extended near-matches for spaced queries" do
+        take
+          1
+          ( rankSearchTexts
+              4
+              "lookup symbol info"
+              [ "lookupExactSymbolInfos",
+                "lookupSymbolInfo",
+                "lookupRootSymbolInfo",
+                "lookupSymbolInfoArgs"
+              ]
+          )
+          `shouldBe` ["lookupSymbolInfo"]

@@ -64,6 +64,7 @@ tests:
     - LookupInstancesSpec
     - McpTestSupport
     - ProtocolRequestSpec
+    - SearchSymbolsSpec
     - Lore.JsonRpc.Server
     - Lore.Mcp.Internal.Annotated
     - Lore.Mcp.Internal.List
@@ -88,6 +89,7 @@ tests:
     - Lore.Mcp.Tools.LookupSymbolInfo
     - Lore.Mcp.Tools.NotifyKnowledgeReset
     - Lore.Mcp.Tools.ReloadHomeModules
+    - Lore.Mcp.Tools.SearchSymbols
     - Lore.Mcp.Tools.Shared
     - Lore.Mcp.Tools.Shared.CompactClassInstance
     - Lore.Mcp.Tools.Shared.DefinitionLocation
@@ -95,6 +97,7 @@ tests:
     - Lore.Mcp.Tools.Shared.Diagnostics
     - Lore.Mcp.Tools.Shared.Outputable
     - Lore.Mcp.Tools.Shared.PartialLoadWarning
+    - Lore.Mcp.Tools.Shared.SymbolSuggestions
     - Lore.Mcp.Tools.Shared.SymbolResolution
     ghc-options:
     - -threaded

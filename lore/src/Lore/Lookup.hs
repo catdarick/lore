@@ -28,10 +28,11 @@ module Lore.Lookup
 where
 
 import Control.Monad (filterM, forM)
-import Data.List (foldl', isInfixOf)
+import Data.List (foldl', isInfixOf, sortOn)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
+import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified GHC
@@ -76,23 +77,38 @@ findMatchingSymbols targetName = do
 findSimilarSymbols :: (MonadLore m) => Int -> NormalizedName -> m [SymbolSuggestion]
 findSimilarSymbols suggestionLimit targetName = do
   candidates <- findSimilarSymbolsInMap suggestionLimit targetName <$> SymbolsMap.getCachedSymbolsMap
-  pure (mapMaybe mkSymbolSuggestion candidates)
+  pure $
+    take suggestionLimit $
+      sortOn suggestionSortKey $
+        Map.elems $
+          foldl' collectBestSuggestion Map.empty (concatMap candidateSuggestions candidates)
+  where
+    suggestionSortKey suggestion =
+      ( Down suggestion.suggestionScore,
+        suggestion.suggestedLookupName,
+        suggestion.suggestedSymbol.name
+      )
 
-mkSymbolSuggestion :: SymbolSuggestionCandidate -> Maybe SymbolSuggestion
-mkSymbolSuggestion candidate = do
-  symbol <- pickSuggestedSymbol candidate.suggestionCandidateSymbols
-  pure
-    SymbolSuggestion
-      { suggestedSymbol = symbol,
-        suggestedLookupName = candidate.suggestionCandidateLookupName,
-        suggestionScore = candidate.suggestionCandidateScore
-      }
+    candidateSuggestions candidate =
+      [ SymbolSuggestion
+          { suggestedSymbol = symbol,
+            suggestedLookupName = candidate.suggestionCandidateLookupName,
+            suggestionScore = candidate.suggestionCandidateScore
+          }
+      | symbol <- Set.toList candidate.suggestionCandidateSymbols
+      ]
 
-pickSuggestedSymbol :: Set.Set Symbol -> Maybe Symbol
-pickSuggestedSymbol symbols =
-  case Set.toList symbols of
-    [] -> Nothing
-    symbol : _ -> Just symbol
+    collectBestSuggestion suggestionsByName suggestion =
+      Map.insertWith
+        pickBetterSuggestion
+        suggestion.suggestedSymbol.name
+        suggestion
+        suggestionsByName
+
+    pickBetterSuggestion newSuggestion oldSuggestion
+      | newSuggestion.suggestionScore > oldSuggestion.suggestionScore = newSuggestion
+      | newSuggestion.suggestionScore < oldSuggestion.suggestionScore = oldSuggestion
+      | otherwise = oldSuggestion
 
 findMatchingSymbolsRoots :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
 findMatchingSymbolsRoots targetName = do
