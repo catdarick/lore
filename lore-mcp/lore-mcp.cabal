@@ -26,6 +26,8 @@ executable lore-mcp
   other-modules:
       Lore.JsonRpc.Server
       Lore.Mcp.Internal.Annotated
+      Lore.Mcp.Internal.Directory
+      Lore.Mcp.Internal.DirectoryTree
       Lore.Mcp.Internal.List
       Lore.Mcp.Internal.Render
       Lore.Mcp.Internal.SourceSpan
@@ -36,6 +38,7 @@ executable lore-mcp
       Lore.Mcp.Protocol.Server
       Lore.Mcp.Server
       Lore.Mcp.Tools.CreateTemporalModule
+      Lore.Mcp.Tools.DiscoverDirectory
       Lore.Mcp.Tools.DiscoverProject
       Lore.Mcp.Tools.ExecuteCode
       Lore.Mcp.Tools.Feedback
@@ -119,6 +122,7 @@ executable lore-mcp
     , lore
     , mtl
     , openapi3
+    , process
     , text
     , time
     , unliftio
@@ -130,6 +134,7 @@ test-suite lore-mcp-test
   main-is: Spec.hs
   other-modules:
       CreateTemporalModuleSpec
+      DiscoverDirectorySpec
       DiscoverProjectSpec
       FindReferencesSpec
       GetDefinitionSpec
@@ -139,6 +144,8 @@ test-suite lore-mcp-test
       SearchSymbolsSpec
       Lore.JsonRpc.Server
       Lore.Mcp.Internal.Annotated
+      Lore.Mcp.Internal.Directory
+      Lore.Mcp.Internal.DirectoryTree
       Lore.Mcp.Internal.List
       Lore.Mcp.Internal.Render
       Lore.Mcp.Internal.SourceSpan
@@ -150,6 +157,7 @@ test-suite lore-mcp-test
       Lore.Mcp.Server
       Lore.Mcp.Tools.ExecuteCode
       Lore.Mcp.Tools.CreateTemporalModule
+      Lore.Mcp.Tools.DiscoverDirectory
       Lore.Mcp.Tools.DiscoverProject
       Lore.Mcp.Tools.Feedback
       Lore.Mcp.Tools.FindReferences
@@ -230,6 +238,7 @@ test-suite lore-mcp-test
     , lore
     , mtl
     , openapi3
+    , process
     , text
     , time
     , unliftio

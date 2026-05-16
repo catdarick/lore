@@ -3,6 +3,7 @@ module Lore.Mcp.Tools.DiscoverProject
   )
 where
 
+import Control.Monad.RWS (asks)
 import Data.List (intercalate, isPrefixOf, isSuffixOf, sortOn)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -14,9 +15,9 @@ import Lore
     MonadLore,
     PackageData (..),
     discoverProject,
-    projectRootPath,
   )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithoutArgs (..))
+import Lore.Session (SessionContext (..))
 import System.FilePath (dropTrailingPathSeparator, makeRelative, normalise, splitDirectories, (</>))
 
 discoverProjectTool :: (MonadLore m) => SomeTool m
@@ -30,7 +31,7 @@ discoverProjectTool =
 
 discoverProjectHandler :: (MonadLore m) => m Text
 discoverProjectHandler = do
-  rootPath <- projectRootPath
+  rootPath <- asks projectRoot
   packages <- discoverProject
   pure (renderDiscoverProject rootPath (sortOn packageYamlPath packages))
 

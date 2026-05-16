@@ -69,7 +69,6 @@ module Lore
     PackageData (..),
     ComponentData (..),
     discoverProject,
-    projectRootPath,
     LoggerHandle (..),
     LogLevel (..),
     LogMessage (..),

@@ -4,6 +4,7 @@ module Main
 where
 
 import qualified CreateTemporalModuleSpec
+import qualified DiscoverDirectorySpec
 import qualified DiscoverProjectSpec
 import qualified FindReferencesSpec
 import qualified GetDefinitionSpec
@@ -17,6 +18,7 @@ main =
   hspec do
     GetDefinitionSpec.spec
     CreateTemporalModuleSpec.spec
+    DiscoverDirectorySpec.spec
     DiscoverProjectSpec.spec
     FindReferencesSpec.spec
     LookupInstancesSpec.spec

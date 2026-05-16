@@ -28,6 +28,7 @@ dependencies:
 - vector 
 - unliftio
 - mtl
+- process
 
 ghc-options:
 - -Werror
@@ -59,6 +60,7 @@ tests:
     - src
     other-modules:
     - CreateTemporalModuleSpec
+    - DiscoverDirectorySpec
     - DiscoverProjectSpec
     - FindReferencesSpec
     - GetDefinitionSpec
@@ -68,6 +70,8 @@ tests:
     - SearchSymbolsSpec
     - Lore.JsonRpc.Server
     - Lore.Mcp.Internal.Annotated
+    - Lore.Mcp.Internal.Directory
+    - Lore.Mcp.Internal.DirectoryTree
     - Lore.Mcp.Internal.List
     - Lore.Mcp.Internal.Render
     - Lore.Mcp.Internal.SourceSpan
@@ -79,6 +83,7 @@ tests:
     - Lore.Mcp.Server
     - Lore.Mcp.Tools.ExecuteCode
     - Lore.Mcp.Tools.CreateTemporalModule
+    - Lore.Mcp.Tools.DiscoverDirectory
     - Lore.Mcp.Tools.DiscoverProject
     - Lore.Mcp.Tools.Feedback
     - Lore.Mcp.Tools.FindReferences

@@ -29,6 +29,7 @@ library
       Lore.Definition
       Lore.Definition.RenderSlice
       Lore.Definition.Rendering
+      Lore.Directory
       Lore.Diagnostics
       Lore.Interpreter
       Lore.Logger
@@ -43,7 +44,6 @@ library
       Lore.TemporalModules
       Lore.Targets
   other-modules:
-      Lore.Directory
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
       Lore.Internal.AutoRefactor.ImportDecl
@@ -111,7 +111,6 @@ library
       Lore.Lib.Force
       Lore.Lib.Text
       Lore.Module
-      Lore.PackageDirectory
       Paths_lore
   autogen-modules:
       Paths_lore
@@ -362,7 +361,6 @@ benchmark lore-bench
       Lore.Lookup.Search
       Lore.Module
       Lore.Monad
-      Lore.PackageDirectory
       Lore.Project
       Lore.Refactor.ImportCleanup.Internal
       Lore.Refactor.Imports
@@ -537,7 +535,6 @@ benchmark lore-memory-bench
       Lore.Lookup.Search
       Lore.Module
       Lore.Monad
-      Lore.PackageDirectory
       Lore.Project
       Lore.Refactor.ImportCleanup.Internal
       Lore.Refactor.Imports

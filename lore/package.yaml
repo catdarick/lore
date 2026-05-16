@@ -60,6 +60,7 @@ library:
   - Lore.Definition
   - Lore.Definition.RenderSlice
   - Lore.Definition.Rendering
+  - Lore.Directory
   - Lore.Diagnostics
   - Lore.Interpreter
   - Lore.Logger
