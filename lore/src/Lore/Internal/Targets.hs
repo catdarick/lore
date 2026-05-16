@@ -23,8 +23,8 @@ import Lore.Internal.Session.Cache.Types (LastLoadTargetsResultCache (..))
 import Lore.Internal.Session.CacheInvalidation (invalidateCachesForTargetConfigurationChange)
 import Lore.Internal.SourceText (relativeSourcePath)
 import Lore.Internal.Targets.AutoRefactorLoop (loadTargetsWithAutoRefactorRetries)
-import Lore.Internal.Targets.LoadAttempt (LoadAttempt (..), countLoadedModules, mkModuleTarget)
-import Lore.Internal.Targets.Plan (TargetsPlan (..), prepareTargetsPlan)
+import Lore.Internal.Targets.LoadAttempt (LoadAttempt (..), countLoadedTargets, mkFileTarget, mkModuleTarget)
+import Lore.Internal.Targets.Plan (TargetKey (..), TargetsPlan (..), prepareTargetsPlan)
 import Lore.Internal.Targets.Result (LoadTargetsResult (..))
 import Lore.Internal.TemporalModules (TemporalModule (..), listExistingTemporalModules)
 import qualified Lore.Logger as Log
@@ -67,7 +67,7 @@ loadTargets options = do
   temporalModules <- listExistingTemporalModules
   let temporalSourceDirs = Set.fromList (map (takeDirectory . modulePath) temporalModules)
       combinedSourceDirs = sourceDirs <> temporalSourceDirs
-  targetsPlan <- prepareTargetsPlan allComponents
+  targetsPlan <- prepareTargetsPlan packages
   logTargetPlanDetails combinedSourceDirs dependenciesToAdd targetsPlan
   invalidateCachesForTargetConfigurationChange
   setSymbolsDependencySetCache dependenciesToAdd
@@ -80,11 +80,23 @@ loadTargets options = do
         . setDependencies (Set.toList dependenciesToAdd)
     )
 
-  let targetModules =
-        Map.keysSet targetsPlan.modulesWithComponentOptions
-          <> Set.fromList (map moduleName temporalModules)
-      targets = map (mkModuleTarget homeUnitId) (Set.toList targetModules)
-      totalModulesCount = Set.size targetModules
+  let targetKeys = Map.keysSet targetsPlan.targetsWithComponentOptions
+      plannedTargetModules =
+        Set.fromList
+          [ modName
+          | TargetModuleName modName <- Set.toList targetKeys
+          ]
+      plannedTargetSourceFiles =
+        Set.fromList
+          [ sourcePath
+          | TargetSourceFile sourcePath <- Set.toList targetKeys
+          ]
+      temporalTargetModules = Set.fromList (map moduleName temporalModules)
+      targetModules = plannedTargetModules <> temporalTargetModules
+      targets =
+        map (mkModuleTarget homeUnitId) (Set.toList targetModules)
+          <> map (mkFileTarget homeUnitId) (Set.toList plannedTargetSourceFiles)
+      totalModulesCount = Set.size targetModules + Set.size plannedTargetSourceFiles
   GHC.setTargets targets
 
   LoadAttempt
@@ -96,7 +108,7 @@ loadTargets options = do
     loadTargetsWithAutoRefactorRetries options.enableAutoRefactor targetsPlan
 
   refreshInterpreterContext
-  loadedModulesCount <- countLoadedModules targetModules
+  loadedModulesCount <- countLoadedTargets targetModules plannedTargetSourceFiles
   projectRootPath <- asks projectRoot
   let failedModulesCount = totalModulesCount - loadedModulesCount
       displayPath = relativeSourcePath projectRootPath

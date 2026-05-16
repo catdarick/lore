@@ -2,9 +2,10 @@ module Lore.Internal.Targets.LoadAttempt
   ( LoadAttempt (..),
     loadTargetsOnce,
     collectLoadedModules,
-    countLoadedModules,
+    countLoadedTargets,
     logDiagnosticsSummary,
     mkModuleTarget,
+    mkFileTarget,
   )
 where
 
@@ -89,14 +90,29 @@ collectLoadedModules moduleGraph = do
           Just _ -> Just mod'
           Nothing -> Nothing
 
-countLoadedModules :: (MonadLore m) => Set.Set GHC.ModuleName -> m Int
-countLoadedModules targetModules = do
+countLoadedTargets :: (MonadLore m) => Set.Set GHC.ModuleName -> Set.Set FilePath -> m Int
+countLoadedTargets targetModules targetSourceFiles = do
+  normalizedTargetSourceFiles <- Set.fromList <$> mapM normalizeSourceFilePathM (Set.toList targetSourceFiles)
   ModSummaries modSummaries <- getCachedModSummaries
-  let targetMods =
+  let moduleFromTargetSourceFile (mod', summary) =
+        case GHC.ml_hs_file (GHC.ms_location summary) of
+          Nothing ->
+            pure Nothing
+          Just sourceFile -> do
+            normalizedSourceFile <- normalizeSourceFilePathM sourceFile
+            pure $
+              if normalizedSourceFile `Set.member` normalizedTargetSourceFiles
+                then Just mod'
+                else Nothing
+  targetModsFromFiles <- mapMaybeM moduleFromTargetSourceFile (Map.toList modSummaries)
+  let targetModsFromNames =
         [ mod'
         | mod' <- Map.keys modSummaries,
           GHC.moduleName mod' `Set.member` targetModules
         ]
+      targetMods =
+        Set.toList $
+          Set.fromList (targetModsFromNames <> targetModsFromFiles)
   length <$> mapMaybeM GHC.getModuleInfo targetMods
 
 logDiagnosticsSummary :: (MonadLore m) => [Diagnostic] -> m ()
@@ -122,6 +138,15 @@ mkModuleTarget :: GHC.UnitId -> GHC.ModuleName -> GHC.Target
 mkModuleTarget unitId modName =
   GHC.Target
     { GHC.targetId = GHC.TargetModule modName,
+      GHC.targetAllowObjCode = True,
+      GHC.targetUnitId = unitId,
+      GHC.targetContents = Nothing
+    }
+
+mkFileTarget :: GHC.UnitId -> FilePath -> GHC.Target
+mkFileTarget unitId sourceFile =
+  GHC.Target
+    { GHC.targetId = GHC.TargetFile sourceFile Nothing,
       GHC.targetAllowObjCode = True,
       GHC.targetUnitId = unitId,
       GHC.targetContents = Nothing

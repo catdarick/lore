@@ -6,6 +6,7 @@ module Lore.Internal.Package
     PackageData (..),
     prepareComponentsData,
     discoverProject,
+    componentMainModulePathCandidates,
     commonSetIntersection,
     extractDependencies,
     extractSourceDirs,
@@ -16,7 +17,7 @@ import Control.Monad (forM, unless)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.RWS (asks)
 import Data.Either (partitionEithers)
-import Data.List (intercalate, isPrefixOf)
+import Data.List (intercalate, isPrefixOf, nub)
 import qualified Data.Map as Map
 import Data.Maybe (maybeToList)
 import qualified Data.Set as Set
@@ -26,7 +27,7 @@ import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..)
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath (dropTrailingPathSeparator, normalise, splitDirectories, takeDirectory, (</>))
 
 data ComponentData = ComponentData
   { componentName :: String,
@@ -139,6 +140,43 @@ prepareComponentsData = do
 discoverProject :: (MonadLore m) => m [PackageData]
 discoverProject =
   prepareComponentsData
+
+componentMainModulePathCandidates :: FilePath -> ComponentData -> [FilePath]
+componentMainModulePathCandidates packageRoot component =
+  case component.mainModulePath of
+    Nothing -> []
+    Just mainPath ->
+      nub (preferredMainPath : fallbackCandidates)
+      where
+        preferredMainPath = packageRoot </> normalizedMainPathFromRoot
+        sourceDirs = Set.toAscList component.sourceDirs
+        normalizedMainPath = normalizeRelativePath mainPath
+        normalizedMainPathFromRoot =
+          if any (`isAncestorPath` normalizedMainPath) sourceDirs
+            then normalizedMainPath
+            else case sourceDirs of
+              [singleSourceDir] -> normalizeRelativePath (singleSourceDir </> normalizedMainPath)
+              _ -> normalizedMainPath
+        fallbackCandidates =
+          map resolveThroughSourceDir sourceDirs
+            <> [packageRoot </> normalizedMainPath]
+
+        resolveThroughSourceDir sourceDir
+          | sourceDir `isAncestorPath` normalizedMainPath =
+              packageRoot </> normalizedMainPath
+          | otherwise =
+              packageRoot </> normalizeRelativePath (sourceDir </> normalizedMainPath)
+
+normalizeRelativePath :: FilePath -> FilePath
+normalizeRelativePath path =
+  case dropTrailingPathSeparator (normalise path) of
+    "" -> "."
+    normalized -> normalized
+
+isAncestorPath :: FilePath -> FilePath -> Bool
+isAncestorPath ancestor path =
+  splitDirectories (normalizeRelativePath ancestor)
+    `isPrefixOf` splitDirectories (normalizeRelativePath path)
 
 commonSetIntersection :: (Ord a) => [Set.Set a] -> Set.Set a
 commonSetIntersection [] = Set.empty

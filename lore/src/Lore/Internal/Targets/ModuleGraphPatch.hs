@@ -4,6 +4,7 @@ module Lore.Internal.Targets.ModuleGraphPatch
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust)
@@ -13,7 +14,8 @@ import qualified GHC.Driver.Config.Parser as GHC
 import qualified GHC.Driver.Session as GHC
 import qualified GHC.Parser.Header as GHC
 import qualified GHC.Unit.Module.Graph as GHC
-import Lore.Internal.Targets.Plan (ComponentSpecificOptions (..), TargetsPlan (..))
+import Lore.Internal.SourcePath (normalizeSourceFilePathM)
+import Lore.Internal.Targets.Plan (ComponentSpecificOptions (..), TargetKey (..), TargetsPlan (..))
 import Lore.Monad (MonadLore)
 
 applyModuleScopedArgs ::
@@ -21,7 +23,7 @@ applyModuleScopedArgs ::
   TargetsPlan ->
   GHC.ModuleGraph ->
   m GHC.ModuleGraph
-applyModuleScopedArgs TargetsPlan {modulesWithComponentOptions} modGraph = do
+applyModuleScopedArgs TargetsPlan {targetsWithComponentOptions} modGraph = do
   patchedNodes <- mapM patchNode (GHC.mgModSummaries' modGraph)
   pure (GHC.mkModuleGraph patchedNodes)
   where
@@ -32,20 +34,24 @@ applyModuleScopedArgs TargetsPlan {modulesWithComponentOptions} modGraph = do
         _ ->
           pure node
 
-    patchSummary summary =
+    patchSummary summary = do
       let summaryFile =
             fromMaybe
               (GHC.ms_hspp_file summary)
               (GHC.ml_hs_file (GHC.ms_location summary))
           moduleName = GHC.moduleName (GHC.ms_mod summary)
-       in case Map.lookup moduleName modulesWithComponentOptions of
-            Just componentOptions
-              | isJust componentOptions.language
-                  || length componentOptions.ghcOptions + length componentOptions.extensions > 0 -> do
-                  dynFlags <- applySourcePragmas summary componentOptions summaryFile
-                  pure summary {GHC.ms_hspp_opts = dynFlags}
-            _ ->
-              pure summary
+      normalizedSummaryFile <- normalizeSourceFilePathM summaryFile
+      let maybeComponentOptions =
+            Map.lookup (TargetSourceFile normalizedSummaryFile) targetsWithComponentOptions
+              <|> Map.lookup (TargetModuleName moduleName) targetsWithComponentOptions
+      case maybeComponentOptions of
+        Just componentOptions
+          | isJust componentOptions.language
+              || length componentOptions.ghcOptions + length componentOptions.extensions > 0 -> do
+              dynFlags <- applySourcePragmas summary componentOptions summaryFile
+              pure summary {GHC.ms_hspp_opts = dynFlags}
+        _ ->
+          pure summary
 
 applySourcePragmas ::
   (MonadLore m) =>

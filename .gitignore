@@ -10,3 +10,4 @@ lore/bench-results/
 .mcp.json
 dist-newstyle/cache
 .lore-work
+.lore-work-test

@@ -18,7 +18,7 @@ import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
 import Lore.Internal.Lookup.Cache.Types (ExternalSymbolsIndexCache (..), HomeSymbolsIndexCache (..), ModSummariesCache (..), NameToInstancesIndexCache (..), SymbolsDependencySetCache (..))
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
-import Lore.Internal.Session.Cache.Types (InterpreterContextCache (..), LastLoadTargetsResultCache (..), TemporalModulesRegistry (..))
+import Lore.Internal.Session.Cache.Types (GeneratedMainTargetsRegistry (..), InterpreterContextCache (..), LastLoadTargetsResultCache (..), TemporalModulesRegistry (..))
 import Lore.Logger (LoggerHandle, noLogHandle)
 
 data SessionContext = SessionContext
@@ -41,6 +41,7 @@ data SessionContext = SessionContext
     parsedModuleFactsCacheVar :: MVar ParsedModuleFactsCache,
     interpreterContextCacheVar :: MVar InterpreterContextCache,
     lastLoadTargetsResultCacheVar :: MVar LastLoadTargetsResultCache,
+    generatedMainTargetsRegistryVar :: MVar GeneratedMainTargetsRegistry,
     temporalModulesRegistryVar :: MVar TemporalModulesRegistry
   }
 
@@ -79,6 +80,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, logg
   parsedModuleFactsCacheVar <- GHC.newMVar (ParsedModuleFactsCache Map.empty)
   interpreterContextCacheVar <- GHC.newMVar (InterpreterContextCache Nothing)
   lastLoadTargetsResultCacheVar <- GHC.newMVar (LastLoadTargetsResultCache Nothing)
+  generatedMainTargetsRegistryVar <- GHC.newMVar (GeneratedMainTargetsRegistry Map.empty)
   temporalModulesRegistryVar <- GHC.newMVar (TemporalModulesRegistry Nothing [])
   case eiPackageDbPaths of
     Left err -> pure $ Left $ "Failed to resolve package database paths: " <> err
@@ -105,5 +107,6 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, logg
               parsedModuleFactsCacheVar,
               interpreterContextCacheVar,
               lastLoadTargetsResultCacheVar,
+              generatedMainTargetsRegistryVar,
               temporalModulesRegistryVar
             }
