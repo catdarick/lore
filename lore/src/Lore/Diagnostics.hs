@@ -190,12 +190,11 @@ withDiagnosticsCapturing action = do
   diagsVar <- liftIO $ MVar.newMVar []
 
   let customLogAction :: LogAction -> LogAction
-      customLogAction oldLogAction logFlags msgClass srcSpan sdoc = do
+      customLogAction _oldLogAction _logFlags msgClass srcSpan sdoc = do
         let diagnostic = ghcMessageToDiagnostic msgClass srcSpan sdoc
         liftIO $
           MVar.modifyMVar_ diagsVar \diags ->
             pure (diagnostic : diags)
-        oldLogAction logFlags msgClass srcSpan sdoc
 
   GHC.pushLogHookM customLogAction
   r <- action `finally` GHC.popLogHookM
