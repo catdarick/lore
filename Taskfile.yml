@@ -12,6 +12,10 @@ tasks:
       - stack build lore-mcp
       - |
         HOST=0.0.0.0 \
+        HSPEC_FORMAT=failed-examples \
+        HSPEC_COLOR=no \
+        LORE_MCP_LOG_LEVEL=debug \
+        LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE=true \
         ALLOWED_ORIGINS="http://localhost:6274,http://127.0.0.1:6274${MCP_HOST_IP:+,http://$MCP_HOST_IP:6274}" \
         npx @modelcontextprotocol/inspector \
           --config "$PWD/mcp.json" \
