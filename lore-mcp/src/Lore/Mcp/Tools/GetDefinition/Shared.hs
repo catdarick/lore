@@ -55,8 +55,8 @@ type RenderDefinitionsStrategy m =
   [NamedDefinitionSource] ->
   m FilteredDefinitions
 
-getDefinitionHandlerWithStrategy :: (MonadLore m) => CommonGetDefinitionArgs -> RenderDefinitionsStrategy m -> m Text
-getDefinitionHandlerWithStrategy CommonGetDefinitionArgs {symbols, skip, recursionDepth} renderDefinitions = do
+getDefinitionHandlerWithStrategy :: (MonadLore m) => Bool -> CommonGetDefinitionArgs -> RenderDefinitionsStrategy m -> m Text
+getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint CommonGetDefinitionArgs {symbols, skip, recursionDepth} renderDefinitions = do
   maybeLoadResult <- lookupLastLoadTargetsResult
   case maybeLoadResult of
     Nothing ->
@@ -71,7 +71,7 @@ getDefinitionHandlerWithStrategy CommonGetDefinitionArgs {symbols, skip, recursi
                 resolvedQueries
           definitionEntries <- concat <$> mapM (resolveSymbolDefinitions resolvedRecursionDepth) resolvedSymbolInfos
           filteredDefinitions <- renderDefinitions resolvedSkip definitionEntries
-          pure (renderDefinitionResult symbols filteredDefinitions)
+          pure (renderDefinitionResult shouldRenderNotifyKnowledgeResetHint symbols filteredDefinitions)
       pure (appendPartialLoadWarning loadResult "Definition results may be incomplete." renderedBody)
   where
     resolvedSkip =
@@ -89,32 +89,32 @@ resolveSymbolDefinitions recursionDepth symbolInfo
   | otherwise =
       resolveDefinitionClosureSourcesNamed recursionDepth symbolInfo.symbolName
 
-renderDefinitionResult :: [Text] -> FilteredDefinitions -> Text
-renderDefinitionResult symbols renderedDefinitions =
-  T.intercalate "\n\n" (renderDefinitionSections symbols renderedDefinitions)
+renderDefinitionResult :: Bool -> [Text] -> FilteredDefinitions -> Text
+renderDefinitionResult shouldRenderNotifyKnowledgeResetHint symbols renderedDefinitions =
+  T.intercalate "\n\n" (renderDefinitionSections shouldRenderNotifyKnowledgeResetHint symbols renderedDefinitions)
 
-renderDefinitionSections :: [Text] -> FilteredDefinitions -> [Text]
-renderDefinitionSections symbols filteredDefinitions =
+renderDefinitionSections :: Bool -> [Text] -> FilteredDefinitions -> [Text]
+renderDefinitionSections shouldRenderNotifyKnowledgeResetHint symbols filteredDefinitions =
   case filteredDefinitions.renderedDefinitions of
     Nothing
       | filteredDefinitions.omittedKnownDefinitionCount > 0 ->
-          allDefinitionsOmittedSection filteredDefinitions
+          allDefinitionsOmittedSection shouldRenderNotifyKnowledgeResetHint filteredDefinitions
       | otherwise ->
           ["No definitions found for " <> quoteTexts symbols <> "."]
     Just paginatedDefinitions ->
       definitionResultsSection paginatedDefinitions
-        <> omittedDefinitionsSection filteredDefinitions
+        <> omittedDefinitionsSection shouldRenderNotifyKnowledgeResetHint filteredDefinitions
 
-allDefinitionsOmittedSection :: FilteredDefinitions -> [Text]
-allDefinitionsOmittedSection filteredDefinitions =
+allDefinitionsOmittedSection :: Bool -> FilteredDefinitions -> [Text]
+allDefinitionsOmittedSection shouldRenderNotifyKnowledgeResetHint filteredDefinitions =
   [ T.intercalate "\n" $
       [ "All matching definitions in this call were already returned earlier in this MCP session and were omitted now:"
       ]
-        <> omittedDefinitionsDetailLines filteredDefinitions
+        <> omittedDefinitionsDetailLines shouldRenderNotifyKnowledgeResetHint filteredDefinitions
   ]
 
-omittedDefinitionsSection :: FilteredDefinitions -> [Text]
-omittedDefinitionsSection filteredDefinitions
+omittedDefinitionsSection :: Bool -> FilteredDefinitions -> [Text]
+omittedDefinitionsSection shouldRenderNotifyKnowledgeResetHint filteredDefinitions
   | filteredDefinitions.omittedKnownDefinitionCount <= 0 =
       []
   | otherwise =
@@ -125,13 +125,20 @@ omittedDefinitionsSection filteredDefinitions
               <> pluralSuffix filteredDefinitions.omittedKnownDefinitionCount
               <> " that were already returned earlier in this MCP session:"
           ]
-            <> omittedDefinitionsDetailLines filteredDefinitions
+            <> omittedDefinitionsDetailLines shouldRenderNotifyKnowledgeResetHint filteredDefinitions
       ]
 
-omittedDefinitionsDetailLines :: FilteredDefinitions -> [Text]
-omittedDefinitionsDetailLines filteredDefinitions =
+omittedDefinitionsDetailLines :: Bool -> FilteredDefinitions -> [Text]
+omittedDefinitionsDetailLines shouldRenderNotifyKnowledgeResetHint filteredDefinitions =
   omittedDefinitionLines filteredDefinitions.omittedKnownDefinitions
-    <> ["Use `notifyKnowledgeReset` tool to let the server know that client knowledge has been reset to make all the definitions available by default."]
+    <> notifyKnowledgeResetHintLines shouldRenderNotifyKnowledgeResetHint
+
+notifyKnowledgeResetHintLines :: Bool -> [Text]
+notifyKnowledgeResetHintLines shouldRenderNotifyKnowledgeResetHint
+  | shouldRenderNotifyKnowledgeResetHint =
+      ["Use `notifyKnowledgeReset` tool to let the server know that client knowledge has been reset to make all the definitions available by default."]
+  | otherwise =
+      []
 
 omittedDefinitionLines :: [GHC.Name] -> [Text]
 omittedDefinitionLines omittedDefinitions =

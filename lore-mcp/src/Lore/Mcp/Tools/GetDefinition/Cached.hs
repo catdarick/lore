@@ -58,18 +58,18 @@ instance J.FromJSON (GetDefinitionArgs 'ValueType)
 
 instance ToSchema (GetDefinitionArgs 'MetadataType)
 
-cachedGetDefinitionTool :: (MonadLoreMcp m) => SomeTool m
-cachedGetDefinitionTool =
+cachedGetDefinitionTool :: (MonadLoreMcp m) => Bool -> SomeTool m
+cachedGetDefinitionTool shouldRenderNotifyKnowledgeResetHint =
   SomeToolWithArgs
     ToolWithArgs
       { name = "getDefinition",
         description = Just "Render source definitions for one or more exported symbols when source is available. In cached mode, repeated definitions are omitted unless force=true. Use recursionDepth to include referenced definitions. Returned imports are minified and may not exactly match original module import formatting. This can still succeed usefully during partial load if the requested definition is available.",
-        handler = cachedGetDefinitionHandler
+        handler = cachedGetDefinitionHandler shouldRenderNotifyKnowledgeResetHint
       }
 
-cachedGetDefinitionHandler :: (MonadLoreMcp m) => GetDefinitionArgs 'ValueType -> m Text
-cachedGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} =
-  getDefinitionHandlerWithStrategy commonArgs renderWithKnowledgeCache
+cachedGetDefinitionHandler :: (MonadLoreMcp m) => Bool -> GetDefinitionArgs 'ValueType -> m Text
+cachedGetDefinitionHandler shouldRenderNotifyKnowledgeResetHint GetDefinitionArgs {symbols, skip, recursionDepth} =
+  getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint commonArgs renderWithKnowledgeCache
   where
     commonArgs =
       CommonGetDefinitionArgs

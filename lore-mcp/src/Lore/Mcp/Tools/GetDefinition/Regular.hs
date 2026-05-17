@@ -56,7 +56,7 @@ regularGetDefinitionTool =
 
 regularGetDefinitionHandler :: (MonadLore m) => GetDefinitionArgs 'ValueType -> m Text
 regularGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} =
-  getDefinitionHandlerWithStrategy commonArgs renderWithoutKnowledgeCache
+  getDefinitionHandlerWithStrategy False commonArgs renderWithoutKnowledgeCache
   where
     commonArgs =
       CommonGetDefinitionArgs

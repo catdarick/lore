@@ -32,9 +32,9 @@ spec = do
       (firstCall, secondCall, forcedCall) <-
         fixtureLoreMcpWithCache True do
           loadFixtureTargets
-          firstCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
-          secondCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
-          forcedCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgs ["lookupOrZero"] 0 (Just True))
+          firstCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
+          secondCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
+          forcedCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] 0 (Just True))
           pure (firstCall, secondCall, forcedCall)
 
       firstCall `shouldContainText` "lookupOrZero"
@@ -46,8 +46,8 @@ spec = do
       (recursiveCall, directCall) <-
         fixtureLoreMcpWithCache True do
           loadFixtureTargets
-          recursiveCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgs ["derivedValue"] 2 Nothing)
-          directCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgs ["bumpWithSeed"] 0 Nothing)
+          recursiveCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["derivedValue"] 2 Nothing)
+          directCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["bumpWithSeed"] 0 Nothing)
           pure (recursiveCall, directCall)
 
       recursiveCall `shouldContainText` "bumpWithSeed :: Int -> Int"
@@ -58,15 +58,25 @@ spec = do
       (cachedCall, resetCall, afterResetCall) <-
         fixtureLoreMcpWithCache True do
           loadFixtureTargets
-          _ <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
-          cachedCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
+          _ <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
+          cachedCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
           resetCall <- callToolWithoutArgs notifyKnowledgeResetTool
-          afterResetCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
+          afterResetCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
           pure (cachedCall, resetCall, afterResetCall)
 
       cachedCall `shouldContainText` "already returned earlier in this MCP session"
       resetCall `shouldContainText` "Knowledge reset acknowledged. Cleared "
       afterResetCall `shouldContainText` "lookupOrOne"
+
+    it "hides notifyKnowledgeReset hint when the tool is disabled" do
+      secondCall <-
+        fixtureLoreMcpWithCache True do
+          loadFixtureTargets
+          _ <- callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
+          callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
+
+      secondCall `shouldContainText` "already returned earlier in this MCP session"
+      secondCall `shouldNotContainText` "Use `notifyKnowledgeReset` tool"
 
     it "keeps non-rendered paginated definitions uncached until they are actually shown" do
       withFixtureCopy \fixtureRoot -> do
@@ -74,8 +84,8 @@ spec = do
         (firstPageCall, secondPageCall) <-
           fixtureLoreMcpAtWithCache True fixtureRoot do
             loadFixtureTargets
-            firstPageCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 0) 0 Nothing)
-            secondPageCall <- callToolWithArgs cachedGetDefinitionTool (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 30) 0 Nothing)
+            firstPageCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 0) 0 Nothing)
+            secondPageCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 30) 0 Nothing)
             pure (firstPageCall, secondPageCall)
 
         firstPageCall `shouldContainText` "pageDef30 :: Int"
