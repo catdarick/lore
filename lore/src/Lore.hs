@@ -71,6 +71,7 @@ module Lore
     GhcOption (..),
     Extension (..),
     PackageData (..),
+    ComponentKind (..),
     ComponentData (..),
     discoverProject,
     LoggerHandle (..),

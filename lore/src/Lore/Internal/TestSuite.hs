@@ -10,14 +10,14 @@ import qualified Control.Concurrent.MVar as MVar
 import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
-import Data.List (isPrefixOf, sortOn)
+import Data.List (sortOn)
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified GHC
 import Lore.Diagnostics (Diagnostic)
 import Lore.Internal.Interpreter (executeStatementRaw)
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummariesByFile)
-import Lore.Internal.Package (ComponentData (..), PackageData (..), componentMainModulePathCandidates, firstExistingPath, prepareComponentsData)
+import Lore.Internal.Package (ComponentData (..), ComponentKind (..), PackageData (..), componentMainModulePathCandidates, firstExistingPath, prepareComponentsData)
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.Session.Cache.Types (GeneratedMainTarget (..), GeneratedMainTargetKey (..), GeneratedMainTargetsRegistry (..))
 import Lore.Internal.SourcePath (normalizeSourceFilePathM)
@@ -51,7 +51,7 @@ runTestSuite RunTestSuiteOptions {packageName = packageFilter, testArguments} = 
         | pkg <- sortOn (.packageName) packages,
           packageMatches packageFilter pkg.packageName,
           component <- sortOn (.componentName) pkg.components,
-          "test:" `isPrefixOf` component.componentName
+          component.componentKind == ComponentKindTest
         ]
   forM testComponents \(pkgName, pkgRoot, component) -> do
     maybeMainPath <- firstExistingPath (componentMainModulePathCandidates pkgRoot component)

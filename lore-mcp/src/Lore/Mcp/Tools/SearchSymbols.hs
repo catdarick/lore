@@ -39,7 +39,7 @@ searchSymbolsTool =
       { name = "searchSymbols",
         description =
           Just
-            "Fuzzy search for Haskell symbols in the current session. Accepts exact names, partial names, or natural-language queries. \
+            "Fuzzy search for Haskell symbols (functions, types, classes, record selectors etc.) in the current session. Accepts exact names, partial names, or natural-language queries. \
             \Note on ranking: Capitalization of the core symbol name (ignoring module prefixes) guides the results. Uppercase queries bias toward types, classes, and constructors; lowercase queries bias toward functions and values.",
         handler = searchSymbolsHandler
       }

@@ -2,7 +2,8 @@
 
 {-# HLINT ignore "Move filter" #-}
 module Lore.Internal.Package
-  ( ComponentData (..),
+  ( ComponentKind (..),
+    ComponentData (..),
     PackageData (..),
     prepareComponentsData,
     discoverProject,
@@ -32,7 +33,8 @@ import System.Directory (doesFileExist)
 import System.FilePath (dropTrailingPathSeparator, normalise, splitDirectories, takeDirectory, (</>))
 
 data ComponentData = ComponentData
-  { componentName :: String,
+  { componentKind :: ComponentKind,
+    componentName :: String,
     mainModulePath :: Maybe FilePath,
     language :: Maybe Language,
     ghcOptions :: Set.Set GhcOption,
@@ -42,6 +44,14 @@ data ComponentData = ComponentData
     modules :: Set.Set GHC.ModuleName
   }
   deriving (Show)
+
+data ComponentKind
+  = ComponentKindLibrary
+  | ComponentKindInternalLibrary
+  | ComponentKindExecutable
+  | ComponentKindTest
+  | ComponentKindBenchmark
+  deriving (Eq, Ord, Show)
 
 data PackageData = PackageData
   { packageYamlPath :: FilePath,
@@ -85,20 +95,23 @@ prepareComponentsData = do
 
     extractPackageComponents :: Hpack.Package -> [ComponentData]
     extractPackageComponents pkg =
-      let libs = maybeToList (("library",) <$> Hpack.packageLibrary pkg) <> map (\(name, section) -> ("library:" <> name, section)) (Map.toList (Hpack.packageInternalLibraries pkg))
-          exes = map (\(name, section) -> ("executable:" <> name, section)) (Map.toList (Hpack.packageExecutables pkg))
-          tests = map (\(name, section) -> ("test:" <> name, section)) (Map.toList (Hpack.packageTests pkg))
-          benches = map (\(name, section) -> ("benchmark:" <> name, section)) (Map.toList (Hpack.packageBenchmarks pkg))
-       in map (uncurry (extractComponentData extractLibraryModules (const Nothing))) libs
-            <> map (uncurry (extractComponentData extractExecutableModules Hpack.executableMain)) (exes <> tests <> benches)
+      let libs =
+            maybeToList ((ComponentKindLibrary,"library",) <$> Hpack.packageLibrary pkg)
+              <> map (\(name, section) -> (ComponentKindInternalLibrary, "library:" <> name, section)) (Map.toList (Hpack.packageInternalLibraries pkg))
+          exes = map (\(name, section) -> (ComponentKindExecutable, "executable:" <> name, section)) (Map.toList (Hpack.packageExecutables pkg))
+          tests = map (\(name, section) -> (ComponentKindTest, "test:" <> name, section)) (Map.toList (Hpack.packageTests pkg))
+          benches = map (\(name, section) -> (ComponentKindBenchmark, "benchmark:" <> name, section)) (Map.toList (Hpack.packageBenchmarks pkg))
+       in map (\(kind, name, section) -> extractComponentData kind extractLibraryModules (const Nothing) name section) libs
+            <> map (\(kind, name, section) -> extractComponentData kind extractExecutableModules Hpack.executableMain name section) (exes <> tests <> benches)
 
     extractPackageName :: Hpack.Package -> String
     extractPackageName = Hpack.packageName
 
-    extractComponentData :: (a -> Set.Set GHC.ModuleName) -> (a -> Maybe FilePath) -> String -> Hpack.Section a -> ComponentData
-    extractComponentData moduleExtractor extractMainModule name section =
+    extractComponentData :: ComponentKind -> (a -> Set.Set GHC.ModuleName) -> (a -> Maybe FilePath) -> String -> Hpack.Section a -> ComponentData
+    extractComponentData kind moduleExtractor extractMainModule name section =
       ComponentData
-        { componentName = name,
+        { componentKind = kind,
+          componentName = name,
           mainModulePath = extractMainModule (Hpack.sectionData section),
           language = (\(Hpack.Language lang) -> Language lang) <$> Hpack.sectionLanguage section,
           ghcOptions = Set.fromList $ map GhcOption $ Hpack.sectionGhcOptions section,
