@@ -108,25 +108,22 @@ renderDefinitionSections shouldRenderNotifyKnowledgeResetHint symbols filteredDe
 allDefinitionsOmittedSection :: Bool -> FilteredDefinitions -> [Text]
 allDefinitionsOmittedSection shouldRenderNotifyKnowledgeResetHint filteredDefinitions =
   [ T.intercalate "\n" $
-      [ "All matching definitions in this call were already returned earlier in this MCP session and were omitted now:"
+      [ "All matching definitions are completely UNCHANGED and were omitted from this tool response to optimize token usage. They are already fresh and valid inside your current context window:"
       ]
         <> omittedDefinitionsDetailLines shouldRenderNotifyKnowledgeResetHint filteredDefinitions
   ]
 
 omittedDefinitionsSection :: Bool -> FilteredDefinitions -> [Text]
 omittedDefinitionsSection shouldRenderNotifyKnowledgeResetHint filteredDefinitions
-  | filteredDefinitions.omittedKnownDefinitionCount <= 0 =
-      []
+  | count <= 0 = []
   | otherwise =
       [ T.intercalate "\n" $
-          [ "Omitted "
-              <> T.pack (show filteredDefinitions.omittedKnownDefinitionCount)
-              <> " definition"
-              <> pluralSuffix filteredDefinitions.omittedKnownDefinitionCount
-              <> " that were already returned earlier in this MCP session:"
+          [ "The following definitions are completely UNCHANGED and were omitted from this tool response to optimize token usage. They are already fresh and valid inside your current context window:"
           ]
             <> omittedDefinitionsDetailLines shouldRenderNotifyKnowledgeResetHint filteredDefinitions
       ]
+  where
+    count = filteredDefinitions.omittedKnownDefinitionCount
 
 omittedDefinitionsDetailLines :: Bool -> FilteredDefinitions -> [Text]
 omittedDefinitionsDetailLines shouldRenderNotifyKnowledgeResetHint filteredDefinitions =
@@ -136,7 +133,7 @@ omittedDefinitionsDetailLines shouldRenderNotifyKnowledgeResetHint filteredDefin
 notifyKnowledgeResetHintLines :: Bool -> [Text]
 notifyKnowledgeResetHintLines shouldRenderNotifyKnowledgeResetHint
   | shouldRenderNotifyKnowledgeResetHint =
-      ["Use `notifyKnowledgeReset` tool to let the server know that client knowledge has been reset to make all the definitions available by default."]
+      ["IF AND ONLY IF your active conversation history was just wiped, or you have suffered a total memory reset and literally cannot see these definitions in your previous turns, you should execute the `notifyKnowledgeReset` tool to resync the server cache."]
   | otherwise =
       []
 
@@ -309,11 +306,6 @@ definitionSourceSortKey definitionEntry =
 definitionIdSortKey :: DefinitionId -> Text
 definitionIdSortKey definitionId =
   T.pack (show definitionId.definitionIdSpanKey)
-
-pluralSuffix :: Int -> Text
-pluralSuffix count
-  | count == 1 = ""
-  | otherwise = "s"
 
 quoteTexts :: [Text] -> Text
 quoteTexts values =
