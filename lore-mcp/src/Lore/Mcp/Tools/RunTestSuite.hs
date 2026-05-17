@@ -10,7 +10,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Lore
-  ( MonadLore,
+  ( Diagnostic (..),
+    MonadLore,
     RunTestSuiteOptions (..),
     TestSuiteComponentResult (..),
     TestSuiteComponentStatus (..),
@@ -110,7 +111,7 @@ renderComponentResult TestSuiteComponentResult {packageName, componentName, modu
       ]
         <> case diagnostics of
           [] -> ["- no diagnostics"]
-          _ -> map T.unpack (map renderDiagnosticSummary diagnostics)
+          _ -> concatMap renderExecutionDiagnostic diagnostics
     TestSuiteComponentExecutionSuccess output ->
       [ "",
         "[PASS] " <> packageName <> "/" <> componentName <> maybe "" (\name -> " (" <> name <> ")") moduleName
@@ -186,3 +187,17 @@ data ParserState = ParserState
     currentArg :: String,
     mode :: ParserMode
   }
+
+renderExecutionDiagnostic :: Diagnostic -> [String]
+renderExecutionDiagnostic diagnostic@Diagnostic {diagnosticReason, diagnosticHints} =
+  T.unpack (renderDiagnosticSummary diagnostic)
+    : reasonLines
+      <> hintLines
+  where
+    reasonLines =
+      case diagnosticReason of
+        Nothing -> []
+        Just reasonText -> ["  reason: " <> T.unpack reasonText]
+
+    hintLines =
+      map (\hintText -> "  hint: " <> T.unpack hintText) diagnosticHints

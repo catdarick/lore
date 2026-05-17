@@ -10,19 +10,21 @@ import qualified Control.Concurrent.MVar as MVar
 import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
-import Data.List (sortOn)
+import Data.List (intercalate, sortOn)
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified GHC
-import Lore.Diagnostics (Diagnostic)
+import Lore.Diagnostics (Diagnostic (..))
 import Lore.Internal.Interpreter (executeStatementRaw)
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummariesByFile)
 import Lore.Internal.Package (ComponentData (..), ComponentKind (..), PackageData (..), componentMainModulePathCandidates, firstExistingPath, prepareComponentsData)
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.Session.Cache.Types (GeneratedMainTarget (..), GeneratedMainTargetKey (..), GeneratedMainTargetsRegistry (..))
 import Lore.Internal.SourcePath (normalizeSourceFilePathM)
+import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
-import System.FilePath (normalise)
+import System.FilePath (isRelative, normalise, (</>))
+import qualified UnliftIO.Directory as Dir
 
 data RunTestSuiteOptions = RunTestSuiteOptions
   { packageName :: Maybe String,
@@ -43,6 +45,8 @@ data TestSuiteComponentResult = TestSuiteComponentResult
 
 runTestSuite :: (MonadLore m) => RunTestSuiteOptions -> m [TestSuiteComponentResult]
 runTestSuite RunTestSuiteOptions {packageName = packageFilter, testArguments} = do
+  sessionProjectRoot <- asks projectRoot
+  absoluteSessionProjectRoot <- liftIO (Dir.makeAbsolute sessionProjectRoot)
   packages <- prepareComponentsData
   generatedMainTargetsByKey <- lookupGeneratedMainTargetsByKey
   modSummariesByFile <- getCachedModSummariesByFile
@@ -76,19 +80,22 @@ runTestSuite RunTestSuiteOptions {packageName = packageFilter, testArguments} = 
                   status = TestSuiteComponentSetupFailure reason
                 }
           Right entryModuleName -> do
-            let statement = renderRunStatement entryModuleName testArguments
+            let executionDir = resolveExecutionDir absoluteSessionProjectRoot pkgRoot
+                statement = renderRunStatement executionDir entryModuleName testArguments
             runResult <- executeStatementRaw (T.pack statement)
+            componentStatus <-
+              case runResult of
+                Left runDiagnostics -> do
+                  logExecutionFailure pkgName component.componentName entryModuleName runDiagnostics
+                  pure (TestSuiteComponentExecutionFailure runDiagnostics)
+                Right renderedOutput ->
+                  pure (TestSuiteComponentExecutionSuccess renderedOutput)
             pure
               TestSuiteComponentResult
                 { packageName = pkgName,
                   componentName = component.componentName,
                   moduleName = Just entryModuleName,
-                  status =
-                    case runResult of
-                      Left runDiagnostics ->
-                        TestSuiteComponentExecutionFailure runDiagnostics
-                      Right renderedOutput ->
-                        TestSuiteComponentExecutionSuccess renderedOutput
+                  status = componentStatus
                 }
 
 packageMatches :: Maybe String -> String -> Bool
@@ -147,10 +154,40 @@ lookupGeneratedMainTargetsByKey = do
   GeneratedMainTargetsRegistry generatedMainTargetsByKey <- liftIO (MVar.readMVar registryVar)
   pure generatedMainTargetsByKey
 
-renderRunStatement :: String -> [String] -> String
-renderRunStatement entryModuleName args =
-  "System.Environment.withArgs "
+renderRunStatement :: FilePath -> String -> [String] -> String
+renderRunStatement executionDir entryModuleName args =
+  "Lore.Internal.Directory.withCurrentDirectoryIO "
+    <> show executionDir
+    <> " (System.Environment.withArgs "
     <> show args
     <> " "
     <> entryModuleName
-    <> ".main"
+    <> ".main)"
+
+resolveExecutionDir :: FilePath -> FilePath -> FilePath
+resolveExecutionDir absoluteSessionProjectRoot packageRoot
+  | isRelative packageRoot = normalise (absoluteSessionProjectRoot </> packageRoot)
+  | otherwise = normalise packageRoot
+
+logExecutionFailure :: (MonadLore m) => String -> String -> String -> [Diagnostic] -> m ()
+logExecutionFailure packageName componentName moduleName diagnostics =
+  Log.err $
+    intercalate "\n" $
+      ("Test suite execution failed for " <> packageName <> "/" <> componentName <> " (" <> moduleName <> "):")
+        : map renderDiagnostic diagnostics
+  where
+    renderDiagnostic Diagnostic {diagnosticMessage, diagnosticReason, diagnosticHints} =
+      "- " <> intercalate " | " (messageField : reasonField <> hintsField)
+      where
+        messageField = "message=" <> renderText diagnosticMessage
+        reasonField =
+          case diagnosticReason of
+            Nothing -> []
+            Just reasonText -> ["reason=" <> renderText reasonText]
+        hintsField =
+          case diagnosticHints of
+            [] -> []
+            hints -> ["hints=" <> intercalate " || " (map renderText hints)]
+
+    renderText =
+      T.unpack . T.replace "\r" "\\r" . T.replace "\n" "\\n"

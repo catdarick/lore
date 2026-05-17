@@ -3,6 +3,7 @@ module Lore.Internal.Directory
     DirectoryEntryType (..),
     DirectoryError (..),
     describeDirectoryError,
+    withCurrentDirectoryIO,
     listVisibleDirectoryEntries,
     resolveDirectoryInsideProject,
     relativeProjectPath,
@@ -27,6 +28,7 @@ import System.Directory
     doesFileExist,
     listDirectory,
     makeAbsolute,
+    withCurrentDirectory,
   )
 import System.FilePath
   ( dropTrailingPathSeparator,
@@ -61,6 +63,9 @@ describeDirectoryError = \case
   DirectoryNotFound path -> "Directory does not exist: " <> path
   DirectoryExpectedDirectory path -> "Path is not a directory: " <> path
   DirectoryOutsideProject path -> "Path is outside the project root: " <> path
+
+withCurrentDirectoryIO :: FilePath -> IO a -> IO a
+withCurrentDirectoryIO = withCurrentDirectory
 
 resolveDirectoryInsideProject :: FilePath -> FilePath -> IO (Either DirectoryError FilePath)
 resolveDirectoryInsideProject projectRootPath requestedPath = do

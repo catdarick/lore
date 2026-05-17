@@ -32,7 +32,7 @@ import System.IO.Error (catchIOError)
 import UnliftIO (modifyMVar, readMVar)
 
 data RedirectedExecution = RedirectedExecution
-  { redirectedExecResult :: GHC.ExecResult,
+  { redirectedExecResult :: Either Exception.SomeException GHC.ExecResult,
     redirectedOutput :: String
   }
 
@@ -111,27 +111,37 @@ executeCompiledStatement source =
       ( do
           redirectedExecution <- runStatementWithRedirect (T.unpack source)
           case redirectedExecResult redirectedExecution of
-            GHC.ExecComplete {GHC.execResult = Left runtimeException} ->
-              pure (Left [runtimeExceptionDiagnostic runtimeException])
-            GHC.ExecBreak {} ->
-              pure (Left [unexpectedInterpreterResultDiagnostic "ExecBreak"])
-            GHC.ExecComplete {} ->
-              Right <$> forceExecutionOutput redirectedExecution.redirectedOutput
+            Left runtimeException -> do
+              redirectedOutput <- forceExecutionOutput redirectedExecution.redirectedOutput
+              pure (Left [runtimeExceptionDiagnostic (Just redirectedOutput) runtimeException])
+            Right executionResult ->
+              case executionResult of
+                GHC.ExecComplete {GHC.execResult = Left runtimeException} -> do
+                  redirectedOutput <- forceExecutionOutput redirectedExecution.redirectedOutput
+                  pure (Left [runtimeExceptionDiagnostic (Just redirectedOutput) runtimeException])
+                GHC.ExecBreak {} ->
+                  pure (Left [unexpectedInterpreterResultDiagnostic "ExecBreak"])
+                GHC.ExecComplete {} ->
+                  Right <$> forceExecutionOutput redirectedExecution.redirectedOutput
       )
       [ Handler \sourceError ->
           pure (Left (ghcMessagesToDiagnostics (GHC.SourceError.srcErrorMessages sourceError))),
-        Handler (pure . Left . pure . runtimeExceptionDiagnostic)
+        Handler (pure . Left . pure . runtimeExceptionDiagnostic Nothing)
       ]
 
 runStatementWithRedirect :: (MonadLore m) => String -> m RedirectedExecution
 runStatementWithRedirect statement =
   withTemporaryCaptureFile \capturePath -> do
     _ <- GHC.execStmt renderCaptureRestoreRefBinding GHC.execOptions
-    _ <- GHC.execStmt renderStdoutRestoreStatement GHC.execOptions
-    _ <- GHC.execStmt (renderStdoutRedirectStatement capturePath) GHC.execOptions
+    _ <- GHC.execStmt renderOutputRestoreStatement GHC.execOptions
+    _ <- GHC.execStmt (renderOutputRedirectStatement capturePath) GHC.execOptions
     ( do
-        executionResult <- GHC.execStmt statement GHC.execOptions
+        executionResult <-
+          catches
+            (Right <$> GHC.execStmt statement GHC.execOptions)
+            [Handler (\runtimeException -> pure (Left runtimeException))]
         _ <- GHC.execStmt "System.IO.hFlush System.IO.stdout" GHC.execOptions
+        _ <- GHC.execStmt "System.IO.hFlush System.IO.stderr" GHC.execOptions
         redirectedOutput <- liftIO (readTrimmedCaptureFile capturePath)
         pure
           RedirectedExecution
@@ -139,7 +149,7 @@ runStatementWithRedirect statement =
               redirectedOutput
             }
       )
-      `finally` GHC.execStmt renderStdoutRestoreStatement GHC.execOptions
+      `finally` GHC.execStmt renderOutputRestoreStatement GHC.execOptions
 
 withInterpretExecutionContext :: (MonadLore m) => [GHC.InteractiveImport] -> m a -> m a
 withInterpretExecutionContext extraImports action = do
@@ -170,16 +180,19 @@ withTemporaryCaptureFile action = do
   liftIO $ hClose captureHandle
   action capturePath `finally` liftIO (catchIOError (removeFile capturePath) (const (pure ())))
 
-renderStdoutRedirectStatement :: FilePath -> String
-renderStdoutRedirectStatement capturePath =
+renderOutputRedirectStatement :: FilePath -> String
+renderOutputRedirectStatement capturePath =
   T.unpack $
     T.unlines
       [ "do",
         "  __lore_saved_stdout_handle <- GHC.IO.Handle.hDuplicate System.IO.stdout",
         "  Data.IORef.writeIORef __lore_stdout_restore_ref (Just __lore_saved_stdout_handle)",
+        "  __lore_saved_stderr_handle <- GHC.IO.Handle.hDuplicate System.IO.stderr",
+        "  Data.IORef.writeIORef __lore_stderr_restore_ref (Just __lore_saved_stderr_handle)",
         "  __lore_stdout_handle <- System.IO.openFile " <> renderedCapturePath <> " System.IO.WriteMode",
         "  System.IO.hSetBuffering __lore_stdout_handle System.IO.NoBuffering",
         "  GHC.IO.Handle.hDuplicateTo __lore_stdout_handle System.IO.stdout",
+        "  GHC.IO.Handle.hDuplicateTo __lore_stdout_handle System.IO.stderr",
         "  System.IO.hClose __lore_stdout_handle"
       ]
   where
@@ -191,11 +204,13 @@ renderCaptureRestoreRefBinding =
   T.unpack $
     T.unlines
       [ "let __lore_stdout_restore_ref =",
+        "      (System.IO.Unsafe.unsafePerformIO (Data.IORef.newIORef Nothing) :: Data.IORef.IORef (Maybe System.IO.Handle))",
+        "    __lore_stderr_restore_ref =",
         "      (System.IO.Unsafe.unsafePerformIO (Data.IORef.newIORef Nothing) :: Data.IORef.IORef (Maybe System.IO.Handle))"
       ]
 
-renderStdoutRestoreStatement :: String
-renderStdoutRestoreStatement =
+renderOutputRestoreStatement :: String
+renderOutputRestoreStatement =
   T.unpack $
     T.unlines
       [ "do",
@@ -205,6 +220,13 @@ renderStdoutRestoreStatement =
         "      GHC.IO.Handle.hDuplicateTo __lore_handle System.IO.stdout",
         "      System.IO.hClose __lore_handle",
         "      Data.IORef.writeIORef __lore_stdout_restore_ref Nothing",
+        "    Nothing -> pure ()",
+        "  __lore_saved_stderr_handle <- Data.IORef.readIORef __lore_stderr_restore_ref",
+        "  case __lore_saved_stderr_handle of",
+        "    Just __lore_handle -> do",
+        "      GHC.IO.Handle.hDuplicateTo __lore_handle System.IO.stderr",
+        "      System.IO.hClose __lore_handle",
+        "      Data.IORef.writeIORef __lore_stderr_restore_ref Nothing",
         "    Nothing -> pure ()"
       ]
 
@@ -221,8 +243,8 @@ forceExecutionOutput renderedOutput =
   liftIO do
     Exception.evaluate (force renderedOutput)
 
-runtimeExceptionDiagnostic :: Exception.SomeException -> Diagnostic
-runtimeExceptionDiagnostic runtimeException =
+runtimeExceptionDiagnostic :: Maybe String -> Exception.SomeException -> Diagnostic
+runtimeExceptionDiagnostic maybeCapturedOutput runtimeException =
   Diagnostic
     { diagnosticClass = DiagInteractive,
       diagnosticSeverity = Just GHC.SevError,
@@ -231,8 +253,16 @@ runtimeExceptionDiagnostic runtimeException =
       diagnosticCode = Nothing,
       diagnosticSpan = UnhelpfulDiagnosticSpan "executeStatement",
       diagnosticMessage = T.pack (show runtimeException),
-      diagnosticHints = []
+      diagnosticHints = capturedOutputHints
     }
+  where
+    capturedOutputHints =
+      case maybeCapturedOutput of
+        Just capturedOutput
+          | not (null capturedOutput) ->
+              ["Captured output: " <> T.pack capturedOutput]
+        _ ->
+          []
 
 unexpectedInterpreterResultDiagnostic :: Text -> Diagnostic
 unexpectedInterpreterResultDiagnostic expectedType =
