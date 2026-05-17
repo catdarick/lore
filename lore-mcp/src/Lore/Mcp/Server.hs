@@ -7,6 +7,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (filterM)
 import Data.Char (isAlpha, isAlphaNum, isDigit, isLower, isUpper, toUpper)
 import Data.Maybe (fromMaybe)
+import qualified Data.Set as Set
 import Data.Text (pack)
 import qualified Data.Text as T
 import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConfig (..), noLogHandle, prettyLoggerHandle)
@@ -34,7 +35,8 @@ import Text.Read (readMaybe)
 
 runLoreMcpServer :: IO ()
 runLoreMcpServer = do
-  sessionConfig <- resolveSessionConfig
+  runTestSuiteToolEnabled <- isToolEnabledByName "runTestSuite"
+  sessionConfig <- resolveSessionConfig runTestSuiteToolEnabled
   definitionKnowledgeCacheEnabled <- fromMaybe False <$> lookupOptionalEnvParsed "LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE" parseBool
   notifyKnowledgeResetToolEnabled <- isToolEnabledByName "notifyKnowledgeReset"
   mcpContext <- newLoreMcpContext definitionKnowledgeCacheEnabled
@@ -89,7 +91,14 @@ runLoreMcpServer = do
 
     isToolEnabledByName :: T.Text -> IO Bool
     isToolEnabledByName toolName =
-      fromMaybe True <$> lookupOptionalEnvParsed (toolEnabledEnvVarName toolName) parseBool
+      fromMaybe (defaultToolEnabledByName toolName) <$> lookupOptionalEnvParsed (toolEnabledEnvVarName toolName) parseBool
+
+    defaultToolEnabledByName :: T.Text -> Bool
+    defaultToolEnabledByName toolName =
+      not (toolName `Set.member` disabledByDefaultTools)
+
+    disabledByDefaultTools :: Set.Set T.Text
+    disabledByDefaultTools = Set.fromList ["runTestSuite"]
 
     toolEnabledEnvVarName :: T.Text -> String
     toolEnabledEnvVarName toolName =
@@ -129,9 +138,10 @@ runLoreMcpServer = do
           ghcWorkDir = ".lore-work",
           loggerHandle = noLogHandle,
           customPrelude = Nothing,
-          parallelWorkersLimit = WorkersAsNumProcessors
+          parallelWorkersLimit = WorkersAsNumProcessors,
+          isTestSuiteFunctionalityRequired = False
         }
-    resolveSessionConfig = do
+    resolveSessionConfig runTestSuiteToolEnabled = do
       projectRootOverride <- lookupEnv "LORE_MCP_PROJECT_ROOT"
       ghcWorkDirOverride <- lookupEnv "LORE_MCP_GHC_WORK_DIR"
       customPreludeOverride <- lookupOptionalEnvParsed "LORE_MCP_CUSTOM_PRELUDE" parseCustomPrelude
@@ -143,7 +153,8 @@ runLoreMcpServer = do
             ghcWorkDir = fromMaybe (ghcWorkDir defaultSessionConfig) ghcWorkDirOverride,
             loggerHandle = loggerHandleOverride,
             customPrelude = customPreludeOverride <|> customPrelude defaultSessionConfig,
-            parallelWorkersLimit = fromMaybe (parallelWorkersLimit defaultSessionConfig) parallelWorkersLimitOverride
+            parallelWorkersLimit = fromMaybe (parallelWorkersLimit defaultSessionConfig) parallelWorkersLimitOverride,
+            isTestSuiteFunctionalityRequired = runTestSuiteToolEnabled
           }
 
 lookupOptionalEnvParsed :: String -> (String -> Maybe a) -> IO (Maybe a)

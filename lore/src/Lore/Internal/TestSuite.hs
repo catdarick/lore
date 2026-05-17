@@ -156,7 +156,9 @@ lookupGeneratedMainTargetsByKey = do
 
 renderRunStatement :: FilePath -> String -> [String] -> String
 renderRunStatement executionDir entryModuleName args =
-  "Lore.Internal.Directory.withCurrentDirectoryIO "
+  -- CWD must be switched inside the interpreted statement because execStmt runs
+  -- in the external interpreter process, not in the host process running lore.
+  "System.Directory.withCurrentDirectory "
     <> show executionDir
     <> " (System.Environment.withArgs "
     <> show args

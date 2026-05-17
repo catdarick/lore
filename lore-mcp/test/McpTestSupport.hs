@@ -47,7 +47,8 @@ fixtureLoreMcpAtWithCache cacheEnabled fixtureRoot action =
       defaultSessionConfig
         { projectRoot = fixtureRoot,
           ghcWorkDir = fixtureRoot </> ".lore-work-test-mcp",
-          loggerHandle = noLogHandle
+          loggerHandle = noLogHandle,
+          isTestSuiteFunctionalityRequired = True
         }
 
 withFixtureCopy :: (FilePath -> IO a) -> IO a

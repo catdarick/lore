@@ -32,7 +32,7 @@ Tool enable/disable variables (default enabled):
 
 - Pattern: `LORE_MCP_TOOL_ENABLED_<TOOL_NAME_IN_UPPER_SNAKE_CASE>`
 - Bool parsing supports (case-insensitive): truthy `1`, `true`, `yes`, `on`; falsy `0`, `false`, `no`, `off`
-- If unset: the tool is enabled
+- If unset: the tool is enabled, except for `LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE`
 - Current tool env names:
   - `LORE_MCP_TOOL_ENABLED_RELOAD_HOME_MODULES`
   - `LORE_MCP_TOOL_ENABLED_DISCOVER_PROJECT`
@@ -49,6 +49,14 @@ Tool enable/disable variables (default enabled):
   - `LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE`
   - `LORE_MCP_TOOL_ENABLED_NOTIFY_KNOWLEDGE_RESET` (only relevant when `LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE` enables that tool)
   - `LORE_MCP_TOOL_ENABLED_FEEDBACK` (only relevant when `LORE_MCP_FEEDBACK_FILE` enables that tool)
+
+`runTestSuite` dependency note:
+
+- When `LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE` is enabled, lore adds `directory` to interpreter dependencies before loading targets.
+- `directory` must be available in the package registry/database used by your project (Stack snapshot/package DB or Cabal package DB).
+- If loading fails with a missing `directory` package error, add `directory` to the relevant `dependencies` in your `package.yaml`/`.cabal`, then refresh dependencies and reload:
+  - Stack: update resolver/snapshot as needed, then run `stack build` and `reloadHomeModules`.
+  - Cabal: run `cabal update`, then `cabal build` and `reloadHomeModules`.
 
 ## Definition knowledge cache (optional)
 

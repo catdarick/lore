@@ -24,6 +24,7 @@ import Lore.Logger (LoggerHandle, noLogHandle)
 data SessionContext = SessionContext
   { projectRoot :: FilePath,
     sessionGhcWorkDir :: FilePath,
+    isTestSuiteFunctionalityRequired :: Bool,
     packageFiles :: [FilePath],
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
@@ -50,7 +51,8 @@ data SessionConfig = SessionConfig
     ghcWorkDir :: FilePath,
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
-    parallelWorkersLimit :: ParallelWorkersCount
+    parallelWorkersLimit :: ParallelWorkersCount,
+    isTestSuiteFunctionalityRequired :: Bool
   }
 
 defaultSessionConfig :: SessionConfig
@@ -60,11 +62,12 @@ defaultSessionConfig =
       ghcWorkDir = ".lore-work",
       loggerHandle = noLogHandle,
       customPrelude = Nothing,
-      parallelWorkersLimit = WorkersAsNumProcessors
+      parallelWorkersLimit = WorkersAsNumProcessors,
+      isTestSuiteFunctionalityRequired = False
     }
 
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
-prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, loggerHandle, customPrelude} = do
+prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, loggerHandle, customPrelude, isTestSuiteFunctionalityRequired} = do
   packageFiles <- findFilesByNameRecursively (Just defaultIgnoreList) projectRoot "package.yaml"
   eiPackageDbPaths <- resolvePackageDbPaths projectRoot
   ifaceCache <- GHC.newIfaceCache
@@ -90,6 +93,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, logg
           SessionContext
             { projectRoot,
               sessionGhcWorkDir = _ghcWorkDir,
+              isTestSuiteFunctionalityRequired,
               packageFiles,
               loggerHandle,
               customPrelude,

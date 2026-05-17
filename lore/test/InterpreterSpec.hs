@@ -111,7 +111,8 @@ sessionConfigWithCustomPrelude customPrelude =
       Session.ghcWorkDir = ghcWorkDir,
       Session.loggerHandle = loggerHandle,
       Session.customPrelude = customPrelude,
-      Session.parallelWorkersLimit = parallelWorkersLimit
+      Session.parallelWorkersLimit = parallelWorkersLimit,
+      Session.isTestSuiteFunctionalityRequired = isTestSuiteFunctionalityRequired
     }
   where
     Session.SessionConfig
@@ -119,7 +120,8 @@ sessionConfigWithCustomPrelude customPrelude =
         Session.ghcWorkDir,
         Session.loggerHandle,
         Session.customPrelude = _defaultCustomPrelude,
-        Session.parallelWorkersLimit
+        Session.parallelWorkersLimit,
+        Session.isTestSuiteFunctionalityRequired
       } = defaultSessionConfig
 
 renderType :: GHC.Type -> String

@@ -57,12 +57,17 @@ storeLastLoadTargetsResultCache loadTargetsResult = do
 loadTargets :: (MonadLore m) => LoadTargetsOptions -> m LoadTargetsResult
 loadTargets options = do
   dflags <- GHC.getSessionDynFlags
+  testSuiteRequired <- asks isTestSuiteFunctionalityRequired
   let homeUnitId = GHC.homeUnitId_ dflags
   packages <- prepareComponentsData
   let allComponents = concatMap (.components) packages
       localPackageNames = Set.fromList (map (.packageName) packages)
       dependencies = extractDependencies allComponents
-      dependenciesToAdd = dependencies Set.\\ localPackageNames
+      runtimeDependencies =
+        if testSuiteRequired
+          then Set.insert "directory" dependencies
+          else dependencies
+      dependenciesToAdd = runtimeDependencies Set.\\ localPackageNames
       sourceDirs = Set.unions (map extractSourceDirs packages)
   temporalModules <- listExistingTemporalModules
   let temporalSourceDirs = Set.fromList (map (takeDirectory . modulePath) temporalModules)

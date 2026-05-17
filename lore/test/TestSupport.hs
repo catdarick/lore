@@ -66,14 +66,16 @@ sessionConfigWithLogger loggerHandle =
       Session.ghcWorkDir = ghcWorkDir,
       Session.loggerHandle = loggerHandle,
       Session.customPrelude = customPrelude,
-      Session.parallelWorkersLimit = parallelWorkersLimit
+      Session.parallelWorkersLimit = parallelWorkersLimit,
+      Session.isTestSuiteFunctionalityRequired = isTestSuiteFunctionalityRequired
     }
   where
     Session.SessionConfig
       { Session.projectRoot,
         Session.ghcWorkDir,
         Session.customPrelude,
-        Session.parallelWorkersLimit
+        Session.parallelWorkersLimit,
+        Session.isTestSuiteFunctionalityRequired
       } = defaultSessionConfig
 
 withFixtureCopy :: (FilePath -> IO a) -> IO a
