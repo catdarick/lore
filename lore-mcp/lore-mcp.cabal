@@ -21,9 +21,8 @@ source-repository head
   type: git
   location: https://github.com/githubuser/lore
 
-executable lore-mcp
-  main-is: Main.hs
-  other-modules:
+library
+  exposed-modules:
       Lore.JsonRpc.Server
       Lore.Mcp.Internal.Annotated
       Lore.Mcp.Internal.Directory
@@ -63,12 +62,81 @@ executable lore-mcp
       Lore.Mcp.Tools.Shared.PartialLoadWarning
       Lore.Mcp.Tools.Shared.SymbolResolution
       Lore.Mcp.Tools.Shared.SymbolSuggestions
+  other-modules:
+      Paths_lore_mcp
+  autogen-modules:
+      Paths_lore_mcp
+  hs-source-dirs:
+      src
+  default-extensions:
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , directory
+    , exceptions
+    , filepath
+    , ghc
+    , lens
+    , lore
+    , mtl
+    , openapi3
+    , process
+    , text
+    , time
+    , unliftio
+    , vector
+  default-language: Haskell2010
+
+executable lore-mcp
+  main-is: Main.hs
+  other-modules:
       Paths_lore_mcp
   autogen-modules:
       Paths_lore_mcp
   hs-source-dirs:
       app
-      src
   default-extensions:
       RecordWildCards
       NamedFieldPuns
@@ -121,6 +189,7 @@ executable lore-mcp
     , ghc
     , lens
     , lore
+    , lore-mcp
     , mtl
     , openapi3
     , process
@@ -144,48 +213,11 @@ test-suite lore-mcp-test
       ProtocolRequestSpec
       RunTestSuiteSpec
       SearchSymbolsSpec
-      Lore.JsonRpc.Server
-      Lore.Mcp.Internal.Annotated
-      Lore.Mcp.Internal.Directory
-      Lore.Mcp.Internal.DirectoryTree
-      Lore.Mcp.Internal.List
-      Lore.Mcp.Internal.Render
-      Lore.Mcp.Internal.SourceSpan
-      Lore.Mcp.Internal.SourceText
-      Lore.Mcp.Internal.Tool
-      Lore.Mcp.Monad
-      Lore.Mcp.Protocol.Request
-      Lore.Mcp.Protocol.Server
-      Lore.Mcp.Server
-      Lore.Mcp.Tools.ExecuteCode
-      Lore.Mcp.Tools.CreateTemporalModule
-      Lore.Mcp.Tools.DiscoverDirectory
-      Lore.Mcp.Tools.DiscoverProject
-      Lore.Mcp.Tools.Feedback
-      Lore.Mcp.Tools.FindReferences
-      Lore.Mcp.Tools.GetDefinition.Cached
-      Lore.Mcp.Tools.GetDefinition.Regular
-      Lore.Mcp.Tools.GetDefinition.Shared
-      Lore.Mcp.Tools.GetTypeOfExpression
-      Lore.Mcp.Tools.ListExportedSymbols
-      Lore.Mcp.Tools.LookupInstances
-      Lore.Mcp.Tools.LookupSymbolInfo
-      Lore.Mcp.Tools.NotifyKnowledgeReset
-      Lore.Mcp.Tools.ReloadHomeModules
-      Lore.Mcp.Tools.RunTestSuite
-      Lore.Mcp.Tools.SearchSymbols
-      Lore.Mcp.Tools.Shared
-      Lore.Mcp.Tools.Shared.CompactClassInstance
-      Lore.Mcp.Tools.Shared.DefinitionLocation
-      Lore.Mcp.Tools.Shared.DetailedSymbolInfo
-      Lore.Mcp.Tools.Shared.Diagnostics
-      Lore.Mcp.Tools.Shared.Outputable
-      Lore.Mcp.Tools.Shared.PartialLoadWarning
-      Lore.Mcp.Tools.Shared.SymbolSuggestions
-      Lore.Mcp.Tools.Shared.SymbolResolution
+      Paths_lore_mcp
+  autogen-modules:
+      Paths_lore_mcp
   hs-source-dirs:
       test
-      src
   default-extensions:
       RecordWildCards
       NamedFieldPuns
@@ -239,6 +271,7 @@ test-suite lore-mcp-test
     , hspec
     , lens
     , lore
+    , lore-mcp
     , mtl
     , openapi3
     , process

@@ -41,73 +41,27 @@ ghc-options:
 - -Wpartial-fields
 - -Wredundant-constraints
 
+library:
+  source-dirs:
+  - src
+
 executables:
   lore-mcp:
     main:                Main.hs
     source-dirs:
     - app
-    - src
     ghc-options:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    dependencies:
+    - lore-mcp
 
 tests:
   lore-mcp-test:
     main:                Spec.hs
     source-dirs:
     - test
-    - src
-    other-modules:
-    - CreateTemporalModuleSpec
-    - DiscoverDirectorySpec
-    - DiscoverProjectSpec
-    - FindReferencesSpec
-    - GetDefinitionSpec
-    - LookupInstancesSpec
-    - McpTestSupport
-    - ProtocolRequestSpec
-    - RunTestSuiteSpec
-    - SearchSymbolsSpec
-    - Lore.JsonRpc.Server
-    - Lore.Mcp.Internal.Annotated
-    - Lore.Mcp.Internal.Directory
-    - Lore.Mcp.Internal.DirectoryTree
-    - Lore.Mcp.Internal.List
-    - Lore.Mcp.Internal.Render
-    - Lore.Mcp.Internal.SourceSpan
-    - Lore.Mcp.Internal.SourceText
-    - Lore.Mcp.Internal.Tool
-    - Lore.Mcp.Monad
-    - Lore.Mcp.Protocol.Request
-    - Lore.Mcp.Protocol.Server
-    - Lore.Mcp.Server
-    - Lore.Mcp.Tools.ExecuteCode
-    - Lore.Mcp.Tools.CreateTemporalModule
-    - Lore.Mcp.Tools.DiscoverDirectory
-    - Lore.Mcp.Tools.DiscoverProject
-    - Lore.Mcp.Tools.Feedback
-    - Lore.Mcp.Tools.FindReferences
-    - Lore.Mcp.Tools.GetDefinition.Cached
-    - Lore.Mcp.Tools.GetDefinition.Regular
-    - Lore.Mcp.Tools.GetDefinition.Shared
-    - Lore.Mcp.Tools.GetTypeOfExpression
-    - Lore.Mcp.Tools.ListExportedSymbols
-    - Lore.Mcp.Tools.LookupInstances
-    - Lore.Mcp.Tools.LookupSymbolInfo
-    - Lore.Mcp.Tools.NotifyKnowledgeReset
-    - Lore.Mcp.Tools.ReloadHomeModules
-    - Lore.Mcp.Tools.RunTestSuite
-    - Lore.Mcp.Tools.SearchSymbols
-    - Lore.Mcp.Tools.Shared
-    - Lore.Mcp.Tools.Shared.CompactClassInstance
-    - Lore.Mcp.Tools.Shared.DefinitionLocation
-    - Lore.Mcp.Tools.Shared.DetailedSymbolInfo
-    - Lore.Mcp.Tools.Shared.Diagnostics
-    - Lore.Mcp.Tools.Shared.Outputable
-    - Lore.Mcp.Tools.Shared.PartialLoadWarning
-    - Lore.Mcp.Tools.Shared.SymbolSuggestions
-    - Lore.Mcp.Tools.Shared.SymbolResolution
     ghc-options:
     - -threaded
     - -rtsopts
@@ -115,6 +69,7 @@ tests:
     - -Wno-incomplete-patterns
     dependencies:
     - hspec
+    - lore-mcp
 
 language: Haskell2010
 
