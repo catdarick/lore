@@ -7,6 +7,7 @@ module Lore.Internal.Package
     prepareComponentsData,
     discoverProject,
     componentMainModulePathCandidates,
+    firstExistingPath,
     commonSetIntersection,
     extractDependencies,
     extractSourceDirs,
@@ -27,6 +28,7 @@ import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..)
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
+import System.Directory (doesFileExist)
 import System.FilePath (dropTrailingPathSeparator, normalise, splitDirectories, takeDirectory, (</>))
 
 data ComponentData = ComponentData
@@ -177,6 +179,14 @@ isAncestorPath :: FilePath -> FilePath -> Bool
 isAncestorPath ancestor path =
   splitDirectories (normalizeRelativePath ancestor)
     `isPrefixOf` splitDirectories (normalizeRelativePath path)
+
+firstExistingPath :: (MonadLore m) => [FilePath] -> m (Maybe FilePath)
+firstExistingPath [] = pure Nothing
+firstExistingPath (path : rest) = do
+  exists <- liftIO (doesFileExist path)
+  if exists
+    then pure (Just path)
+    else firstExistingPath rest
 
 commonSetIntersection :: (Ord a) => [Set.Set a] -> Set.Set a
 commonSetIntersection [] = Set.empty

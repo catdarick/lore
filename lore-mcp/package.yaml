@@ -67,6 +67,7 @@ tests:
     - LookupInstancesSpec
     - McpTestSupport
     - ProtocolRequestSpec
+    - RunTestSuiteSpec
     - SearchSymbolsSpec
     - Lore.JsonRpc.Server
     - Lore.Mcp.Internal.Annotated
@@ -96,6 +97,7 @@ tests:
     - Lore.Mcp.Tools.LookupSymbolInfo
     - Lore.Mcp.Tools.NotifyKnowledgeReset
     - Lore.Mcp.Tools.ReloadHomeModules
+    - Lore.Mcp.Tools.RunTestSuite
     - Lore.Mcp.Tools.SearchSymbols
     - Lore.Mcp.Tools.Shared
     - Lore.Mcp.Tools.Shared.CompactClassInstance

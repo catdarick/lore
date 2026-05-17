@@ -71,6 +71,7 @@ library:
   - Lore.Refactor.ImportCleanup.Internal
   - Lore.Session
   - Lore.SourceEdit
+  - Lore.TestSuite
   - Lore.TemporalModules
   - Lore.Targets
 

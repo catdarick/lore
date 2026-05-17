@@ -40,6 +40,7 @@ library
       Lore.Refactor.ImportCleanup.Internal
       Lore.Session
       Lore.SourceEdit
+      Lore.TestSuite
       Lore.TemporalModules
       Lore.Targets
   other-modules:
@@ -107,6 +108,7 @@ library
       Lore.Internal.Targets.Plan
       Lore.Internal.Targets.Result
       Lore.Internal.TemporalModules
+      Lore.Internal.TestSuite
       Lore.Lib.Force
       Lore.Lib.Text
       Lore.Module
@@ -351,6 +353,7 @@ benchmark lore-bench
       Lore.Internal.Targets.Plan
       Lore.Internal.Targets.Result
       Lore.Internal.TemporalModules
+      Lore.Internal.TestSuite
       Lore.Interpreter
       Lore.Lib.Force
       Lore.Lib.Text
@@ -366,6 +369,7 @@ benchmark lore-bench
       Lore.SourceEdit
       Lore.Targets
       Lore.TemporalModules
+      Lore.TestSuite
       Paths_lore
   autogen-modules:
       Paths_lore
@@ -524,6 +528,7 @@ benchmark lore-memory-bench
       Lore.Internal.Targets.Plan
       Lore.Internal.Targets.Result
       Lore.Internal.TemporalModules
+      Lore.Internal.TestSuite
       Lore.Interpreter
       Lore.Lib.Force
       Lore.Lib.Text
@@ -539,6 +544,7 @@ benchmark lore-memory-bench
       Lore.SourceEdit
       Lore.Targets
       Lore.TemporalModules
+      Lore.TestSuite
       Paths_lore
   autogen-modules:
       Paths_lore

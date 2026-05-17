@@ -24,6 +24,7 @@ import Lore.Mcp.Tools.LookupInstances (lookupInstancesTool)
 import Lore.Mcp.Tools.LookupSymbolInfo (lookupSymbolInfoTool)
 import Lore.Mcp.Tools.NotifyKnowledgeReset (notifyKnowledgeResetTool)
 import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
+import Lore.Mcp.Tools.RunTestSuite (runTestSuiteTool)
 import Lore.Mcp.Tools.SearchSymbols (searchSymbolsTool)
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
@@ -44,24 +45,27 @@ runLoreMcpServer = do
               []
         definitionKnowledgeTools =
           if definitionKnowledgeCacheEnabled
-            then [cachedGetDefinitionTool, notifyKnowledgeResetTool]
-            else [regularGetDefinitionTool]
+            then [notifyKnowledgeResetTool]
+            else []
+        getDefinitionTool = if definitionKnowledgeCacheEnabled then cachedGetDefinitionTool else regularGetDefinitionTool
     runMcpServer
       McpServer
         { name = "lore",
           initialize = pure (),
           tools =
             [ reloadHomeModulesTool,
-              createTemporalModuleTool,
-              executeCodeTool,
-              getTypeOfExpressionTool,
-              lookupSymbolInfoTool,
-              searchSymbolsTool,
-              listExportedSymbolsTool,
-              lookupInstancesTool,
-              findReferencesTool,
               discoverProjectTool,
-              discoverDirectoryTool
+              discoverDirectoryTool,
+              listExportedSymbolsTool,
+              searchSymbolsTool,
+              lookupSymbolInfoTool,
+              getDefinitionTool,
+              findReferencesTool,
+              lookupInstancesTool,
+              createTemporalModuleTool,
+              getTypeOfExpressionTool,
+              executeCodeTool,
+              runTestSuiteTool
             ]
               <> definitionKnowledgeTools
               <> feedbackTools

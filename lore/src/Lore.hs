@@ -10,6 +10,10 @@ module Lore
     defaultLoadTargetsOptions,
     loadTargets,
     lookupLastLoadTargetsResult,
+    RunTestSuiteOptions (..),
+    TestSuiteComponentStatus (..),
+    TestSuiteComponentResult (..),
+    runTestSuite,
     NormalizedOccName,
     NormalizedModuleName,
     NormalizedName (occName, moduleName, ownerHint),
@@ -88,3 +92,4 @@ import Lore.Project
 import Lore.Session
 import Lore.Targets
 import Lore.TemporalModules
+import Lore.TestSuite

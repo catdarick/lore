@@ -10,6 +10,7 @@ import qualified FindReferencesSpec
 import qualified GetDefinitionSpec
 import qualified LookupInstancesSpec
 import qualified ProtocolRequestSpec
+import qualified RunTestSuiteSpec
 import qualified SearchSymbolsSpec
 import Test.Hspec
 
@@ -23,4 +24,5 @@ main =
     FindReferencesSpec.spec
     LookupInstancesSpec.spec
     SearchSymbolsSpec.spec
+    RunTestSuiteSpec.spec
     ProtocolRequestSpec.spec

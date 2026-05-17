@@ -19,12 +19,12 @@ import Data.Maybe (listToMaybe)
 import qualified Data.Set as Set
 import qualified GHC
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), setGhcOptionsAndExtensions)
-import Lore.Internal.Package (ComponentData (..), PackageData (..), commonSetIntersection, componentMainModulePathCandidates, defaultExtensions)
+import Lore.Internal.Package (ComponentData (..), PackageData (..), commonSetIntersection, componentMainModulePathCandidates, defaultExtensions, firstExistingPath)
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.Session.Cache.Types (GeneratedMainTarget (..), GeneratedMainTargetKey (..), GeneratedMainTargetsRegistry (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory, (</>))
 
 data TargetKey
@@ -105,14 +105,6 @@ targetsForComponent packageName packageRoot component = do
       <> case maybeEntryTarget of
         Nothing -> Set.empty
         Just entrySourcePath -> Set.singleton (TargetSourceFile entrySourcePath)
-
-firstExistingPath :: (MonadLore m) => [FilePath] -> m (Maybe FilePath)
-firstExistingPath [] = pure Nothing
-firstExistingPath (path : rest) = do
-  exists <- liftIO (doesFileExist path)
-  if exists
-    then pure (Just path)
-    else firstExistingPath rest
 
 entryTargetSource :: (MonadLore m) => String -> String -> FilePath -> m FilePath
 entryTargetSource packageName componentName sourcePath = do
