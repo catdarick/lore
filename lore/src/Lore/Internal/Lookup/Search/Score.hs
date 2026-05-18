@@ -58,8 +58,9 @@ searchOccurrences :: (Ord key) => Int -> Text -> TokenSearchIndex key value -> [
 searchOccurrences resultLimit query index =
   take resultLimit $
     List.sortOn resultSortKey $
-      map (scoreOccurrence query index queryTokenMatches) candidateOccurrences
+      map (scoreOccurrence query loweredQuery queryTokens index queryTokenMatches) candidateOccurrences
   where
+    loweredQuery = T.toLower query
     queryTokens = tokenizeSearchText query
     queryTokenMatches = matchQueryTokens index queryTokens
     candidateOccurrences =
@@ -118,8 +119,15 @@ matchQueryTokens index queryTokens =
                       }
                 else Nothing
 
-scoreOccurrence :: Text -> TokenSearchIndex key value -> [QueryTokenMatch] -> IndexedOccurrence key value -> SearchResult key value
-scoreOccurrence query index queryTokenMatches occurrence =
+scoreOccurrence ::
+  Text ->
+  Text ->
+  [SearchToken] ->
+  TokenSearchIndex key value ->
+  [QueryTokenMatch] ->
+  IndexedOccurrence key value ->
+  SearchResult key value
+scoreOccurrence query loweredQuery queryTokens index queryTokenMatches occurrence =
   SearchResult
     { searchResultKey = occurrence.indexedOccurrenceKey,
       searchResultText = occurrence.indexedOccurrenceText,
@@ -129,7 +137,6 @@ scoreOccurrence query index queryTokenMatches occurrence =
     }
   where
     candidateTokenSet = Set.fromList occurrence.indexedOccurrenceTokens
-    queryTokens = tokenizeSearchText query
     bestMatches =
       [ bestMatch
       | queryToken <- queryTokens,
@@ -165,15 +172,17 @@ scoreOccurrence query index queryTokenMatches occurrence =
       sum (map (missingTokenPenalty index) missingQueryTokens)
     extraTokenPenalty =
       0.15 * fromIntegral extraTokenCount
+    loweredOccurrenceText =
+      T.toLower occurrence.indexedOccurrenceText
     wholeDistance =
       EditDistance.restrictedDamerauLevenshteinDistance
         EditDistance.defaultEditCosts
-        (T.unpack (T.toLower query))
-        (T.unpack (T.toLower occurrence.indexedOccurrenceText))
+        (T.unpack loweredQuery)
+        (T.unpack loweredOccurrenceText)
     wholeDistancePenalty =
       0.02 * fromIntegral wholeDistance
     exactTextMatchBonus =
-      if T.toLower query == T.toLower occurrence.indexedOccurrenceText
+      if loweredQuery == loweredOccurrenceText
         then exactTextMatchBonusWeight
         else 0
     capitalizedCandidatePenalty =

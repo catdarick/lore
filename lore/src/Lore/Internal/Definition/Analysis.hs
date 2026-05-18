@@ -105,6 +105,7 @@ buildMinimalTypedModuleFacts ::
 buildMinimalTypedModuleFacts definingModule tcg =
   MinimalTypedModuleFacts
     { typedDefinitionNames = collectDefinitionCandidateNames definingModule tcg,
+      typedInstanceNames = collectInstanceNames definingModule tcg,
       typedDefinitionOccAliases = collectDefinitionOccAliases definingModule tcg,
       typedExportedNames = collectExportedNames definingModule tcg,
       typedExportedOccAliases = collectExportedOccAliases definingModule tcg,
@@ -370,9 +371,16 @@ collectDefinitionCandidateNames homeModule tcg =
         ]
 
     instanceNames =
-      filter belongsToModule $
-        map GHC.getName (GHC.Tc.tcg_insts tcg)
-          <> map GHC.getName (GHC.Tc.tcg_fam_insts tcg)
+      collectInstanceNames homeModule tcg
+
+collectInstanceNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
+collectInstanceNames homeModule tcg =
+  filter belongsToModule $
+    map GHC.getName (GHC.Tc.tcg_insts tcg)
+      <> map GHC.getName (GHC.Tc.tcg_fam_insts tcg)
+  where
+    belongsToModule name =
+      GHC.nameModule_maybe name == Just homeModule
 
 collectDefinitionOccAliases :: GHC.Module -> GHC.Tc.TcGblEnv -> Map.Map GHC.Name (Set.Set Text)
 collectDefinitionOccAliases homeModule tcg =

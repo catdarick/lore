@@ -222,6 +222,7 @@ mkDefinitionIndexFixture definitionCount occurrencesPerDefinition importCount =
     typedFacts =
       Def.MinimalTypedModuleFacts
         { Def.typedDefinitionNames,
+          Def.typedInstanceNames = [],
           Def.typedDefinitionOccAliases = Map.empty,
           Def.typedExportedNames = typedDefinitionNames,
           Def.typedExportedOccAliases = Map.empty,

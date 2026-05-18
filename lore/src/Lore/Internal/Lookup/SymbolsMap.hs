@@ -4,9 +4,11 @@ module Lore.Internal.Lookup.SymbolsMap
   ( HomeSymbolsIndexCache (..),
     ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
+    SimilarSymbolsSearchIndexCache (..),
     SymbolsDependencySetCache (..),
     emptyHomeSymbolsIndexCache,
     emptyExternalSymbolsIndexCache,
+    emptySimilarSymbolsSearchIndexCache,
     emptySymbolsDependencySetCache,
     getCachedSymbolsMap,
     getCachedHomeSymbolsIndex,
@@ -23,7 +25,7 @@ module Lore.Internal.Lookup.SymbolsMap
 where
 
 import Control.DeepSeq (NFData)
-import Control.Monad (filterM, forM, when)
+import Control.Monad (forM, when)
 import Control.Monad.Reader (MonadIO (..), asks)
 import Data.List (foldl')
 import qualified Data.Map as Map
@@ -36,20 +38,21 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.Name as GHC.Name
 import qualified GHC.Types.SrcLoc as GHC.SrcLoc
-import qualified GHC.Types.TyThing as TyThing
 import Lore.Internal.Definition.Cache.TypedModuleFacts (lookupTypedModuleFactsCache)
-import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (typedDefinitionNames, typedDefinitionOccAliases, typedExportedNames, typedExportedOccAliases))
+import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (typedDefinitionNames, typedDefinitionOccAliases, typedExportedNames, typedExportedOccAliases, typedInstanceNames))
 import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfosNameSet, greNameFieldAliasText)
 import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
     HomeSymbolsIndexCache (..),
+    SimilarSymbolsSearchIndex (..),
+    SimilarSymbolsSearchIndexCache (..),
     SymbolsDependencySetCache (..),
   )
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, extractAndNormalizeOccName, normalizeName, parseAndNormalizeName, unNormalizedOccName)
 import Lore.Internal.Lookup.Search.Score (buildSearchIndex, searchOccurrences)
-import Lore.Internal.Lookup.Search.Types (SearchResult (..))
+import Lore.Internal.Lookup.Search.Types (SearchResult (..), TokenSearchIndex)
 import Lore.Internal.Lookup.Types
   ( ModSummaries (..),
     Symbol (..),
@@ -73,6 +76,10 @@ emptyExternalSymbolsIndexCache :: ExternalSymbolsIndexCache
 emptyExternalSymbolsIndexCache =
   ExternalSymbolsIndexCache Nothing
 
+emptySimilarSymbolsSearchIndexCache :: SimilarSymbolsSearchIndexCache
+emptySimilarSymbolsSearchIndexCache =
+  SimilarSymbolsSearchIndexCache Nothing
+
 emptySymbolsDependencySetCache :: SymbolsDependencySetCache
 emptySymbolsDependencySetCache =
   SymbolsDependencySetCache Set.empty
@@ -95,74 +102,31 @@ findMatchingSymbolsInMap targetName SymbolsMap {homeSymbolsMap, externalSymbolsM
       Set.filter (isModuleMatching targetName) (homeMatchingSymbols <> externalMatchingSymbols)
 
 findSimilarSymbolsInMap :: (MonadLore m) => Int -> NormalizedName -> SymbolsMap -> m [SymbolSuggestionCandidate]
-findSimilarSymbolsInMap suggestionLimit targetName symbolsMap =
-  reverse <$> collectCandidates allCandidates [] 0
-  where
-    candidateFetchMultiplier = 64 :: Int
-    initialLimit = max 1 suggestionLimit
-    maxFetchLimit =
-      initialLimit * candidateFetchMultiplier
-    allCandidates =
-      findSimilarSymbolsCandidatesInMap maxFetchLimit targetName symbolsMap
+findSimilarSymbolsInMap suggestionLimit targetName symbolsMap = do
+  SimilarSymbolsSearchIndex cachedSearchIndex <- getCachedSimilarSymbolsSearchIndex symbolsMap
+  pure $ findSimilarSymbolsCandidatesInMap suggestionLimit targetName cachedSearchIndex
 
-    collectCandidates remainingCandidates collectedCandidates collectedCount =
-      case remainingCandidates of
-        [] ->
-          pure collectedCandidates
-        (candidate : rest) ->
-          if collectedCount >= suggestionLimit
-            then pure collectedCandidates
-            else do
-              maybeFilteredCandidate <- filterSuggestionCandidate candidate
-              case maybeFilteredCandidate of
-                Nothing ->
-                  collectCandidates rest collectedCandidates collectedCount
-                Just filteredCandidate -> do
-                  let nextCount =
-                        collectedCount + Set.size filteredCandidate.suggestionCandidateSymbols
-                  collectCandidates rest (filteredCandidate : collectedCandidates) nextCount
-
-    filterSuggestionCandidate candidate = do
-      filteredSymbols <-
-        Set.fromList
-          <$> filterM isUserFacingSuggestionSymbol (Set.toList candidate.suggestionCandidateSymbols)
-      pure $
-        if Set.null filteredSymbols
-          then Nothing
-          else Just candidate {suggestionCandidateSymbols = filteredSymbols}
-
-findSimilarSymbolsCandidatesInMap :: Int -> NormalizedName -> SymbolsMap -> [SymbolSuggestionCandidate]
-findSimilarSymbolsCandidatesInMap suggestionLimit targetName symbolsMap =
-  map mkSymbolSuggestionCandidate $
+findSimilarSymbolsCandidatesInMap ::
+  Int ->
+  NormalizedName ->
+  TokenSearchIndex NormalizedOccName (Set.Set Symbol) ->
+  [SymbolSuggestionCandidate]
+findSimilarSymbolsCandidatesInMap suggestionLimit targetName searchIndex =
+  mapMaybe mkSymbolSuggestionCandidate $
     searchOccurrences suggestionLimit (unNormalizedOccName targetName.occName) searchIndex
   where
-    SymbolsIndex combinedSymbolsIndex = combineSymbolsIndexes symbolsMap
-    searchIndex =
-      buildSearchIndex
-        [ (occName, unNormalizedOccName occName, moduleMatchingSymbols)
-        | (occName, symbols) <- Map.toList combinedSymbolsIndex,
-          let moduleMatchingSymbols = Set.filter (isModuleMatching targetName) symbols,
-          not (Set.null moduleMatchingSymbols)
-        ]
-
     mkSymbolSuggestionCandidate result =
-      SymbolSuggestionCandidate
-        { suggestionCandidateSymbols = result.searchResultValue,
-          suggestionCandidateLookupName = result.searchResultText,
-          suggestionCandidateScore = result.searchResultScore
-        }
-
-isUserFacingSuggestionSymbol :: (MonadLore m) => Symbol -> m Bool
-isUserFacingSuggestionSymbol symbol = do
-  maybeTyThing <- GHC.lookupName symbol.name
-  pure $
-    case maybeTyThing of
-      Nothing -> True
-      Just tyThing ->
-        not (TyThing.isImplicitTyThing tyThing)
-          && case tyThing of
-            TyThing.ACoAxiom {} -> False
-            _ -> True
+      let moduleMatchingSymbols =
+            Set.filter (isModuleMatching targetName) result.searchResultValue
+       in if Set.null moduleMatchingSymbols
+            then Nothing
+            else
+              Just
+                SymbolSuggestionCandidate
+                  { suggestionCandidateSymbols = moduleMatchingSymbols,
+                    suggestionCandidateLookupName = result.searchResultText,
+                    suggestionCandidateScore = result.searchResultScore
+                  }
 
 combineSymbolsIndexes :: SymbolsMap -> SymbolsIndex
 combineSymbolsIndexes SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
@@ -170,6 +134,15 @@ combineSymbolsIndexes SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
   where
     SymbolsIndex homeSymbols = homeSymbolsMap
     SymbolsIndex externalSymbols = externalSymbolsMap
+
+buildSimilarSymbolsSearchIndex :: SymbolsMap -> TokenSearchIndex NormalizedOccName (Set.Set Symbol)
+buildSimilarSymbolsSearchIndex symbolsMap =
+  buildSearchIndex
+    [ (occName, unNormalizedOccName occName, symbols)
+    | (occName, symbols) <- Map.toList combinedSymbolsIndex
+    ]
+  where
+    SymbolsIndex combinedSymbolsIndex = combineSymbolsIndexes symbolsMap
 
 isModuleMatching :: NormalizedName -> Symbol -> Bool
 isModuleMatching targetName symbol =
@@ -188,11 +161,18 @@ invalidateHomeSymbolsIndexCache :: (MonadLore m) => m ()
 invalidateHomeSymbolsIndexCache = do
   cacheVar <- asks homeSymbolsIndexCacheVar
   modifyMVar cacheVar $ \_ -> pure (emptyHomeSymbolsIndexCache, ())
+  invalidateSimilarSymbolsSearchIndexCache
 
 invalidateExternalSymbolsIndexCache :: (MonadLore m) => m ()
 invalidateExternalSymbolsIndexCache = do
   cacheVar <- asks externalSymbolsIndexCacheVar
   modifyMVar cacheVar $ \_ -> pure (emptyExternalSymbolsIndexCache, ())
+  invalidateSimilarSymbolsSearchIndexCache
+
+invalidateSimilarSymbolsSearchIndexCache :: (MonadLore m) => m ()
+invalidateSimilarSymbolsSearchIndexCache = do
+  cacheVar <- asks similarSymbolsSearchIndexCacheVar
+  modifyMVar cacheVar $ \_ -> pure (emptySimilarSymbolsSearchIndexCache, ())
 
 setSymbolsDependencySetCache :: (MonadLore m) => Set.Set String -> m ()
 setSymbolsDependencySetCache dependencies = do
@@ -236,6 +216,18 @@ getCachedExternalSymbolsIndex = do
                   externalSymbolsSnapshotIndex = symbolsMap
                 }
         pure (ExternalSymbolsIndexCache (Just snapshot), symbolsMap)
+
+getCachedSimilarSymbolsSearchIndex :: (MonadLore m) => SymbolsMap -> m SimilarSymbolsSearchIndex
+getCachedSimilarSymbolsSearchIndex symbolsMap = do
+  cacheVar <- asks similarSymbolsSearchIndexCacheVar
+  modifyMVar cacheVar $ \cacheState ->
+    case cacheState.cachedSimilarSymbolsSearchIndex of
+      Just cachedSearchIndex ->
+        pure (cacheState, cachedSearchIndex)
+      Nothing -> do
+        let builtSearchIndex = buildSimilarSymbolsSearchIndex symbolsMap
+            snapshot = SimilarSymbolsSearchIndex builtSearchIndex
+        pure (SimilarSymbolsSearchIndexCache (Just snapshot), snapshot)
 
 prepareHomeSymbolsIndex :: (MonadLore m) => m SymbolsIndex
 prepareHomeSymbolsIndex = do
@@ -327,6 +319,7 @@ getHomeModuleSymbols mdl = do
                     getExportedHomeModuleOccAliases mdl typedModuleFacts
                   definedNameSet =
                     getDefinedHomeModuleNames mdl typedModuleFacts
+                      `Set.difference` Set.fromList (typedInstanceNames typedModuleFacts)
                   definedOccAliases =
                     getDefinedHomeModuleOccAliases mdl typedModuleFacts
                   occAliasesByName =
@@ -357,14 +350,16 @@ buildIndexableSymbolsDetailed occAliasesByName isRawOccurrenceName visibility na
   mapMaybe mkIndexableSymbol (Set.toList names)
   where
     mkIndexableSymbol name =
-      let aliasKeys =
+      let isUserFacingName =
+            isRawOccurrenceName name
+          aliasKeys =
             Map.findWithDefault Set.empty name occAliasesByName
           rawOccurrenceKey =
             if
+              | not isUserFacingName -> Nothing
               | not (Set.null aliasKeys) -> Nothing
-              | isRawOccurrenceName name -> Just (extractAndNormalizeOccName name)
-              | otherwise -> Nothing
-       in if Set.null aliasKeys && rawOccurrenceKey == Nothing
+              | otherwise -> Just (extractAndNormalizeOccName name)
+       in if not isUserFacingName || (Set.null aliasKeys && rawOccurrenceKey == Nothing)
             then Nothing
             else
               Just

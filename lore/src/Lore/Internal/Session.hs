@@ -16,7 +16,14 @@ import GHC.MVar (MVar)
 import Lore.Internal.Definition.Cache.Types (CoreModuleFactsCache (..), DefinitionModuleIndexCache (..), ParsedModuleFactsCache (..), ParsedOccurrenceModuleIndexCache (..), TypedModuleFactsCache (..))
 import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
-import Lore.Internal.Lookup.Cache.Types (ExternalSymbolsIndexCache (..), HomeSymbolsIndexCache (..), ModSummariesCache (..), NameToInstancesIndexCache (..), SymbolsDependencySetCache (..))
+import Lore.Internal.Lookup.Cache.Types
+  ( ExternalSymbolsIndexCache (..),
+    HomeSymbolsIndexCache (..),
+    ModSummariesCache (..),
+    NameToInstancesIndexCache (..),
+    SimilarSymbolsSearchIndexCache (..),
+    SymbolsDependencySetCache (..),
+  )
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
 import Lore.Internal.Session.Cache.Types (GeneratedMainTargetsRegistry (..), InterpreterContextCache (..), LastLoadTargetsResultCache (..), TemporalModulesRegistry (..))
 import Lore.Logger (LoggerHandle, noLogHandle)
@@ -32,6 +39,7 @@ data SessionContext = SessionContext
     ifaceCache :: GHC.ModIfaceCache,
     homeSymbolsIndexCacheVar :: MVar HomeSymbolsIndexCache,
     externalSymbolsIndexCacheVar :: MVar ExternalSymbolsIndexCache,
+    similarSymbolsSearchIndexCacheVar :: MVar SimilarSymbolsSearchIndexCache,
     symbolsDependencySetCacheVar :: MVar SymbolsDependencySetCache,
     modSummariesCacheVar :: MVar ModSummariesCache,
     nameToInstancesIndexCacheVar :: MVar NameToInstancesIndexCache,
@@ -73,6 +81,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, logg
   ifaceCache <- GHC.newIfaceCache
   homeSymbolsIndexCacheVar <- GHC.newMVar (HomeSymbolsIndexCache Nothing)
   externalSymbolsIndexCacheVar <- GHC.newMVar (ExternalSymbolsIndexCache Nothing)
+  similarSymbolsSearchIndexCacheVar <- GHC.newMVar (SimilarSymbolsSearchIndexCache Nothing)
   symbolsDependencySetCacheVar <- GHC.newMVar (SymbolsDependencySetCache Set.empty)
   modSummariesCacheVar <- GHC.newMVar (ModSummariesCache Nothing)
   nameToInstancesIndexCacheVar <- GHC.newMVar (NameToInstancesIndexCache Nothing)
@@ -101,6 +110,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, logg
               ifaceCache,
               homeSymbolsIndexCacheVar,
               externalSymbolsIndexCacheVar,
+              similarSymbolsSearchIndexCacheVar,
               symbolsDependencySetCacheVar,
               modSummariesCacheVar,
               nameToInstancesIndexCacheVar,

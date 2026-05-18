@@ -232,6 +232,7 @@ data MinimalTypedOccurrence = MinimalTypedOccurrence
 
 data MinimalTypedModuleFacts = MinimalTypedModuleFacts
   { typedDefinitionNames :: ![GHC.Name],
+    typedInstanceNames :: ![GHC.Name],
     typedDefinitionOccAliases :: !(Map.Map GHC.Name (Set.Set Text)),
     typedExportedNames :: ![GHC.Name],
     typedExportedOccAliases :: !(Map.Map GHC.Name (Set.Set Text)),
