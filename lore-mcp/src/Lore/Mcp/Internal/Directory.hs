@@ -157,4 +157,4 @@ shouldIgnoreDirectoryByName :: FilePath -> Bool
 shouldIgnoreDirectoryByName dir =
   any (`elem` ignoredDirectories) (splitDirectories dir)
   where
-    ignoredDirectories = [".git", ".stack-work", "dist-newstyle", "dist", ".ghci-work", "bench-fixtures"]
+    ignoredDirectories = [".git", ".stack-work", "dist-newstyle", "dist", ".ghci-work"]
