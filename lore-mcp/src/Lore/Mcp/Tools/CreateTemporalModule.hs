@@ -13,11 +13,24 @@ createTemporalModuleTool =
   SomeToolWithoutArgs
     ToolWithoutArgs
       { name = "createTemporalModule",
-        description = Just "Create a new temporary Haskell module in the session temp directory, persist it in session state, and return the created file path. Temporal modules are added to load targets. Automatically pruned on the system reload.",
+        description =
+          Just
+            "Create a temporary Haskell module attached to the session load targets.\
+            \Persists across reloads for active reuse during debugging. Automatically detached if deleted; pruned on session restart.",
         handler = createTemporalModuleHandler
       }
 
 createTemporalModuleHandler :: (MonadLore m) => m Text
 createTemporalModuleHandler = do
   path <- createTemporalModule
-  pure (T.pack path)
+  pure $
+    T.unlines
+      [ "Temporal module initialized at: " <> T.pack path,
+        "",
+        "Workflow:",
+        "  1. Write custom logic and necessary imports directly into this file.",
+        "  2. Call 'reloadHomeModules' to compile and load it into the session.",
+        "  3. Use 'executeCode' to run your target functions.",
+        "",
+        "Note: Active Haskell extensions set may be different. Reuse this file until your debugging task is done. Delete it when finished to detach."
+      ]
