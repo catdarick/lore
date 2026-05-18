@@ -91,6 +91,20 @@ spec = do
       result `shouldContainText` "map symbolName infos"
       result `shouldNotContainText` "collectSymbolScores infos ="
 
+    it "renders references for imported record selectors used via overloaded record dot" do
+      result <-
+        renderFindReferencesFixtureModules
+          [ ("RecordDotModel", importedRecordDotModelModuleSource),
+            ("RecordDotConsumer", importedRecordDotConsumerModuleSource)
+          ]
+          "TestRefs.RecordDotModel.unPathToRoot"
+
+      shouldContainRecordDotSelectorUsages
+        result
+        "collectPathWithDot path ="
+        "collectPathWithSection path ="
+        "collectPathScore path ="
+
     it "renders references for strict record selectors" do
       result <-
         renderFindReferencesFixture
@@ -101,6 +115,32 @@ spec = do
       result `shouldContainText` "collectScores infos ="
       result `shouldContainText` "map symbolScore infos"
       result `shouldNotContainText` "collectNames infos ="
+
+    it "renders references for record selectors used via overloaded record dot" do
+      result <-
+        renderFindReferencesFixture
+          "RenderedRecordDotField"
+          recordDotFieldReferenceModuleSource
+          "TestRefs.RenderedRecordDotField.unPathToRoot"
+
+      shouldContainRecordDotSelectorUsages
+        result
+        "readPathWithDot path ="
+        "readPathWithSection path ="
+        "readScore path ="
+
+    it "renders references for newtype selectors used via overloaded record dot" do
+      result <-
+        renderFindReferencesFixture
+          "RenderedRecordDotNewtype"
+          recordDotNewtypeReferenceModuleSource
+          "TestRefs.RenderedRecordDotNewtype.unPathToRoot"
+
+      shouldContainRecordDotSelectorUsages
+        result
+        "readPathWithDot path ="
+        "readPathWithSection path ="
+        "renderConstantPath _ ="
 
     it "renders references from modules using DuplicateRecordFields" do
       result <-
@@ -312,6 +352,43 @@ importedSelectorConsumerModuleSource =
       "  map symbolScore infos"
     ]
 
+importedRecordDotModelModuleSource :: Text
+importedRecordDotModelModuleSource =
+  T.unlines
+    [ "module TestRefs.RecordDotModel",
+      "  ( PathToRoot(..) ) where",
+      "",
+      "newtype PathToRoot = PathToRoot",
+      "  { unPathToRoot :: String",
+      "  }"
+    ]
+
+importedRecordDotConsumerModuleSource :: Text
+importedRecordDotConsumerModuleSource =
+  T.unlines
+    [ "{-# LANGUAGE OverloadedRecordDot #-}",
+      "",
+      "module TestRefs.RecordDotConsumer",
+      "  ( collectPathWithDot,",
+      "    collectPathWithSection,",
+      "    collectPathScore",
+      "  ) where",
+      "",
+      "import TestRefs.RecordDotModel (PathToRoot(..))",
+      "",
+      "collectPathWithDot :: PathToRoot -> String",
+      "collectPathWithDot path =",
+      "  path.unPathToRoot",
+      "",
+      "collectPathWithSection :: PathToRoot -> String",
+      "collectPathWithSection path =",
+      "  (.unPathToRoot) path",
+      "",
+      "collectPathScore :: PathToRoot -> Int",
+      "collectPathScore _ =",
+      "  1"
+    ]
+
 strictFieldReferenceModuleSource :: Text
 strictFieldReferenceModuleSource =
   T.unlines
@@ -333,6 +410,70 @@ strictFieldReferenceModuleSource =
       "collectScores :: [SymbolInfo] -> [Double]",
       "collectScores infos =",
       "  map symbolScore infos"
+    ]
+
+recordDotFieldReferenceModuleSource :: Text
+recordDotFieldReferenceModuleSource =
+  T.unlines
+    [ "{-# LANGUAGE OverloadedRecordDot #-}",
+      "",
+      "module TestRefs.RenderedRecordDotField",
+      "  ( PathInfo(..),",
+      "    readPathWithDot,",
+      "    readPathWithSection,",
+      "    readScore",
+      "  ) where",
+      "",
+      "data PathInfo = PathInfo",
+      "  { unPathToRoot :: String,",
+      "    pathScore :: Int",
+      "  }",
+      "",
+      "readPathWithDot :: PathInfo -> String",
+      "readPathWithDot path =",
+      "  path.unPathToRoot",
+      "",
+      "readPathWithSection :: PathInfo -> String",
+      "readPathWithSection path =",
+      "  (.unPathToRoot) path",
+      "",
+      "readScore :: PathInfo -> Int",
+      "readScore path =",
+      "  path.pathScore"
+    ]
+
+recordDotNewtypeReferenceModuleSource :: Text
+recordDotNewtypeReferenceModuleSource =
+  T.unlines
+    [ "{-# LANGUAGE OverloadedRecordDot #-}",
+      "",
+      "module TestRefs.RenderedRecordDotNewtype",
+      "  ( PathToRoot(..),",
+      "    readPathWithDot,",
+      "    readPathWithSection,",
+      "    readPathLength,",
+      "    renderConstantPath",
+      "  ) where",
+      "",
+      "newtype PathToRoot = PathToRoot",
+      "  { unPathToRoot :: String",
+      "  }",
+      "",
+      "readPathWithDot :: PathToRoot -> String",
+      "readPathWithDot path =",
+      "  path.unPathToRoot",
+      "",
+      "readPathWithSection :: PathToRoot -> String",
+      "readPathWithSection path =",
+      "  (.unPathToRoot) path",
+      "",
+      "readPathLength :: PathToRoot -> Int",
+      "readPathLength path =",
+      "  length path.unPathToRoot",
+      "",
+      "renderConstantPath :: PathToRoot -> String",
+      "renderConstantPath _ =",
+      "  \"static\""
     ]
 
 duplicateRecordFieldsReferenceModuleSource :: Text
@@ -436,3 +577,11 @@ shouldContainText actual expected =
 shouldNotContainText :: Text -> Text -> Expectation
 shouldNotContainText actual expected =
   T.unpack actual `shouldNotContain` T.unpack expected
+
+shouldContainRecordDotSelectorUsages :: Text -> Text -> Text -> Text -> Expectation
+shouldContainRecordDotSelectorUsages actual withDotHeader withSectionHeader unrelatedHeader = do
+  actual `shouldContainText` withDotHeader
+  actual `shouldContainText` "path.unPathToRoot"
+  actual `shouldContainText` withSectionHeader
+  actual `shouldContainText` "(.unPathToRoot) path"
+  actual `shouldNotContainText` unrelatedHeader

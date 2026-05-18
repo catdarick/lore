@@ -40,11 +40,7 @@ import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfoNamesWithFields,
 buildParsedModuleFacts :: GHC.Module -> GHC.ParsedSource -> ParsedModuleFacts
 buildParsedModuleFacts definingModule parsedSource =
   ParsedModuleFacts
-    { parsedOccKeys =
-        Set.fromList
-          [ rdrNameOccKey (GHC.unLoc locatedName)
-          | locatedName <- locatedRdrNames
-          ],
+    { parsedOccKeys = collectParsedOccurrenceNames parsedSource,
       parsedDeclarationsById = Map.fromList declarationEntries,
       parsedDefinitionMembersById = Map.fromListWith (<>) definitionMemberEntries,
       parsedOccurrenceSyntaxBySpan =
@@ -54,6 +50,7 @@ buildParsedModuleFacts definingModule parsedSource =
   where
     decls = GHC.hsmodDecls $ GHC.unLoc parsedSource
     locatedRdrNames = collectLocatedRdrNames parsedSource
+    dotFieldOccurrences = collectTyped parsedSource :: [GHC.DotFieldOcc GHC.GhcPs]
 
     declarationEntries =
       [ (definitionIdFromSpans definingModule declarationSpans, declarationSpans)
@@ -78,9 +75,17 @@ buildParsedModuleFacts definingModule parsedSource =
       ]
 
     occurrenceSyntaxEntries =
+      rdrNameSyntaxEntries <> dotFieldSyntaxEntries
+
+    rdrNameSyntaxEntries =
       [ (srcSpanKey span', syntaxForOccurrence (GHC.unLoc locatedName))
       | locatedName <- locatedRdrNames,
         let span' = locatedSpan locatedName
+      ]
+
+    dotFieldSyntaxEntries =
+      [ (srcSpanKey (GHC.getLocA dotFieldOccurrence.dfoLabel), ParsedOccurrenceSyntax Nothing)
+      | dotFieldOccurrence <- dotFieldOccurrences
       ]
 
     syntaxForOccurrence rdrName =
@@ -93,10 +98,17 @@ buildParsedModuleFacts definingModule parsedSource =
 
 collectParsedOccurrenceNames :: GHC.ParsedSource -> Set.Set OccKey
 collectParsedOccurrenceNames parsedSource =
-  Set.fromList
-    [ rdrNameOccKey (GHC.unLoc locatedName)
-    | locatedName <- collectLocatedRdrNames parsedSource
-    ]
+  Set.fromList (rdrNameKeys <> dotFieldKeys)
+  where
+    rdrNameKeys =
+      [ rdrNameOccKey (GHC.unLoc locatedName)
+      | locatedName <- collectLocatedRdrNames parsedSource
+      ]
+
+    dotFieldKeys =
+      [ occNameKey (GHC.rdrNameOcc (dotFieldLabelRdrNamePs dotFieldOccurrence))
+      | dotFieldOccurrence <- collectTyped parsedSource :: [GHC.DotFieldOcc GHC.GhcPs]
+      ]
 
 buildMinimalTypedModuleFacts ::
   GHC.Module ->
@@ -438,33 +450,48 @@ collectMinimalTypedOccurrences tcg =
   case GHC.Tc.tcg_rn_decls tcg of
     Nothing -> []
     Just renamedGroup ->
-      dedupeMinimalTypedOccurrences . mapMaybe toMinimalTypedOccurrence $ collectOccurrenceSeeds renamedGroup
+      dedupeMinimalTypedOccurrences . concatMap toMinimalTypedOccurrences $ collectOccurrenceSeeds renamedGroup
   where
+    globalRdrEnv =
+      GHC.Tc.tcg_rdr_env tcg
+
     collectOccurrenceSeeds renamedGroup =
-      namedOccurrenceSeeds <> fieldOccurrenceSeeds
+      namedOccurrenceSeeds <> fieldOccurrenceSeeds <> dotFieldOccurrenceSeeds
       where
         namedOccurrenceSeeds =
           [ OccurrenceSeed
-              { occurrenceSeedName = GHC.unLoc locatedName,
-                occurrenceSeedRdrName = Nothing,
-                occurrenceSeedSpan = locatedSpan locatedName
+              { occurrenceSeedSpan = locatedSpan locatedName,
+                occurrenceSeedGres =
+                  maybeToList (GHC.lookupGRE_Name globalRdrEnv (GHC.unLoc locatedName))
               }
           | locatedName <- collectTyped renamedGroup :: [GHC.LocatedN GHC.Name]
           ]
 
         fieldOccurrenceSeeds =
           [ OccurrenceSeed
-              { occurrenceSeedName = GHC.foExt fieldOccurrence,
-                occurrenceSeedRdrName = Just (GHC.unLoc fieldOccurrence.foLabel),
-                occurrenceSeedSpan = GHC.getLocA fieldOccurrence.foLabel
+              { occurrenceSeedSpan = GHC.getLocA fieldOccurrence.foLabel,
+                occurrenceSeedGres =
+                  maybeToList $
+                    List.find
+                      (matchesFieldSelector (GHC.foExt fieldOccurrence))
+                      (GHC.lookupGRE_RdrName (GHC.unLoc fieldOccurrence.foLabel) globalRdrEnv)
               }
           | fieldOccurrence <- collectTyped renamedGroup :: [GHC.FieldOcc GHC.GhcRn]
           ]
 
-    toMinimalTypedOccurrence occurrenceSeed = do
-      gre <- lookupOccurrenceGre occurrenceSeed
-      pure
-        MinimalTypedOccurrence
+        dotFieldOccurrenceSeeds =
+          [ OccurrenceSeed
+              { occurrenceSeedSpan = GHC.getLocA dotFieldOccurrence.dfoLabel,
+                occurrenceSeedGres =
+                  filter
+                    isDotFieldSelectorGre
+                    (GHC.lookupGRE_RdrName (dotFieldLabelRdrNameRn dotFieldOccurrence) globalRdrEnv)
+              }
+          | dotFieldOccurrence <- collectTyped renamedGroup :: [GHC.DotFieldOcc GHC.GhcRn]
+          ]
+
+    toMinimalTypedOccurrences occurrenceSeed =
+      [ MinimalTypedOccurrence
           { typedOccurrenceName = GHC.greNamePrintableName gre.gre_name,
             typedOccurrenceSpan = occurrenceSeed.occurrenceSeedSpan,
             typedOccurrenceParent = case GHC.gre_par gre of
@@ -477,15 +504,8 @@ collectMinimalTypedOccurrences tcg =
                   Just importId <- [findImportId (GHC.is_dloc (GHC.is_decl importSpec))]
                 ]
           }
-
-    lookupOccurrenceGre occurrenceSeed =
-      case occurrenceSeed.occurrenceSeedRdrName of
-        Nothing ->
-          GHC.lookupGRE_Name (GHC.Tc.tcg_rdr_env tcg) occurrenceSeedName
-        Just occurrenceSeedRdrName ->
-          List.find (matchesFieldSelector occurrenceSeedName) (GHC.lookupGRE_RdrName occurrenceSeedRdrName (GHC.Tc.tcg_rdr_env tcg))
-      where
-        occurrenceSeedName = occurrenceSeed.occurrenceSeedName
+      | gre <- occurrenceSeed.occurrenceSeedGres
+      ]
 
     matchesFieldSelector selectorName gre =
       case gre.gre_name of
@@ -493,6 +513,13 @@ collectMinimalTypedOccurrences tcg =
           name == selectorName
         GHC.FieldGreName fieldLabel ->
           GHC.FieldLabel.flSelector fieldLabel == selectorName
+
+    isDotFieldSelectorGre gre =
+      case gre.gre_name of
+        GHC.FieldGreName _ ->
+          True
+        GHC.NormalGreName _ ->
+          False
 
     findImportId importSpan =
       ImportId . fst <$> List.find ((== importSpan) . snd) importDeclSpans
@@ -504,9 +531,8 @@ collectMinimalTypedOccurrences tcg =
       ]
 
 data OccurrenceSeed = OccurrenceSeed
-  { occurrenceSeedName :: !GHC.Name,
-    occurrenceSeedRdrName :: !(Maybe GHC.RdrName),
-    occurrenceSeedSpan :: !GHC.SrcSpan
+  { occurrenceSeedSpan :: !GHC.SrcSpan,
+    occurrenceSeedGres :: ![GHC.GlobalRdrElt]
   }
 
 collectExprUsedInstanceNames :: GHC.CoreExpr -> [GHC.Name]
@@ -543,6 +569,20 @@ collectBindUsedInstanceNames = \case
 collectAltUsedInstanceNames :: GHC.CoreAlt -> [GHC.Name]
 collectAltUsedInstanceNames (GHC.Alt _ _ expression) =
   collectExprUsedInstanceNames expression
+
+dotFieldLabelRdrNamePs :: GHC.DotFieldOcc GHC.GhcPs -> GHC.RdrName
+dotFieldLabelRdrNamePs dotFieldOccurrence =
+  fieldLabelStringToRdrName (GHC.unLoc dotFieldOccurrence.dfoLabel)
+
+dotFieldLabelRdrNameRn :: GHC.DotFieldOcc GHC.GhcRn -> GHC.RdrName
+dotFieldLabelRdrNameRn dotFieldOccurrence =
+  fieldLabelStringToRdrName (GHC.unLoc dotFieldOccurrence.dfoLabel)
+
+fieldLabelStringToRdrName :: GHC.FieldLabelString -> GHC.RdrName
+fieldLabelStringToRdrName fieldLabelString =
+  GHC.mkRdrUnqual $
+    GHC.mkVarOcc $
+      GHC.showSDocUnsafe (GHC.ppr fieldLabelString)
 
 findSignatureDeclaration ::
   GHC.OccName ->
