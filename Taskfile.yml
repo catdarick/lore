@@ -28,3 +28,18 @@ tasks:
       - |
         ormolu --mode inplace \
           $(find lore lore-mcp -type f \( -name '*.hs' -o -name '*.hs-boot' \) | sort)
+  
+  zip-lore-code:
+    desc: Zip lore and lore-mcp source files for sharing
+    cmds:
+      - |
+        zip -r lore-code.zip \
+          lore/src \
+          lore/test \
+          lore/package.yaml \
+          lore/README.md \
+          lore-mcp/app \
+          lore-mcp/src \
+          lore-mcp/test \
+          lore-mcp/package.yaml \
+          lore-mcp/README.md
