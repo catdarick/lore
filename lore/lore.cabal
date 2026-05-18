@@ -67,6 +67,7 @@ library
       Lore.Internal.Definition.Types
       Lore.Internal.Directory
       Lore.Internal.File
+      Lore.Internal.Ghc.AvailInfo
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
       Lore.Internal.ImportCleanup.Apply
@@ -312,6 +313,7 @@ benchmark lore-bench
       Lore.Internal.Definition.Types
       Lore.Internal.Directory
       Lore.Internal.File
+      Lore.Internal.Ghc.AvailInfo
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
       Lore.Internal.ImportCleanup.Apply
@@ -487,6 +489,7 @@ benchmark lore-memory-bench
       Lore.Internal.Definition.Types
       Lore.Internal.Directory
       Lore.Internal.File
+      Lore.Internal.Ghc.AvailInfo
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
       Lore.Internal.ImportCleanup.Apply

@@ -76,7 +76,8 @@ findMatchingSymbols targetName = do
 
 findSimilarSymbols :: (MonadLore m) => Int -> NormalizedName -> m [SymbolSuggestion]
 findSimilarSymbols suggestionLimit targetName = do
-  candidates <- findSimilarSymbolsInMap suggestionLimit targetName <$> SymbolsMap.getCachedSymbolsMap
+  symbolsMap <- SymbolsMap.getCachedSymbolsMap
+  candidates <- findSimilarSymbolsInMap suggestionLimit targetName symbolsMap
   pure $
     take suggestionLimit $
       sortOn suggestionSortKey $

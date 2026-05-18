@@ -21,7 +21,6 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
 import qualified Data.Set as Set
 import Data.Text (Text)
-import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Data.Bag as Bag
 import qualified GHC.Data.Strict as Strict
@@ -36,6 +35,7 @@ import Lore.Internal.Definition.RequiredImports
   )
 import Lore.Internal.Definition.SourceTree (collectModuleSourceRegionCandidates)
 import Lore.Internal.Definition.Types
+import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfoNamesWithFields, fieldLabelAliasText, greNameFieldAliasText)
 
 buildParsedModuleFacts :: GHC.Module -> GHC.ParsedSource -> ParsedModuleFacts
 buildParsedModuleFacts definingModule parsedSource =
@@ -106,6 +106,8 @@ buildMinimalTypedModuleFacts definingModule tcg =
   MinimalTypedModuleFacts
     { typedDefinitionNames = collectDefinitionCandidateNames definingModule tcg,
       typedDefinitionOccAliases = collectDefinitionOccAliases definingModule tcg,
+      typedExportedNames = collectExportedNames definingModule tcg,
+      typedExportedOccAliases = collectExportedOccAliases definingModule tcg,
       typedSourceImports = collectMinimalTypedImports tcg,
       typedOccurrences = collectMinimalTypedOccurrences tcg
     }
@@ -383,9 +385,26 @@ collectDefinitionOccAliases homeModule tcg =
       GHC.nameModule_maybe selectorName == Just homeModule
     ]
 
-fieldLabelAliasText :: GHC.FieldLabel -> Text
-fieldLabelAliasText fieldLabel =
-  T.pack (GHC.getOccString (GHC.FieldLabel.fieldLabelPrintableName fieldLabel))
+collectExportedNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
+collectExportedNames homeModule tcg =
+  nubOrd
+    [ name
+    | availInfo <- GHC.Tc.tcg_exports tcg,
+      name <- availInfoNamesWithFields availInfo,
+      GHC.nameModule_maybe name == Just homeModule
+    ]
+
+collectExportedOccAliases :: GHC.Module -> GHC.Tc.TcGblEnv -> Map.Map GHC.Name (Set.Set Text)
+collectExportedOccAliases homeModule tcg =
+  Map.fromListWith
+    Set.union
+    [ (name, Set.singleton aliasText)
+    | availInfo <- GHC.Tc.tcg_exports tcg,
+      greName <- availInfoGreNames availInfo,
+      name <- [GHC.greNamePrintableName greName],
+      GHC.nameModule_maybe name == Just homeModule,
+      Just aliasText <- [greNameFieldAliasText greName]
+    ]
 
 collectMinimalTypedImports :: GHC.Tc.TcGblEnv -> [MinimalTypedImport]
 collectMinimalTypedImports tcg =
