@@ -38,7 +38,7 @@ spec = do
           pure (firstCall, secondCall, forcedCall)
 
       firstCall `shouldContainText` "lookupOrZero"
-      secondCall `shouldContainText` "already returned earlier in this MCP session"
+      secondCall `shouldContainText` "definitions are completely UNCHANGED"
       secondCall `shouldContainText` "Demo: lookupOrZero"
       forcedCall `shouldContainText` "lookupOrZero"
 
@@ -51,7 +51,7 @@ spec = do
           pure (recursiveCall, directCall)
 
       recursiveCall `shouldContainText` "bumpWithSeed :: Int -> Int"
-      directCall `shouldContainText` "already returned earlier in this MCP session"
+      directCall `shouldContainText` "definitions are completely UNCHANGED"
       directCall `shouldContainText` "Demo: bumpWithSeed"
 
     it "returns previously omitted definitions after notifyKnowledgeReset" do
@@ -64,7 +64,7 @@ spec = do
           afterResetCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
           pure (cachedCall, resetCall, afterResetCall)
 
-      cachedCall `shouldContainText` "already returned earlier in this MCP session"
+      cachedCall `shouldContainText` "definitions are completely UNCHANGED"
       resetCall `shouldContainText` "Knowledge reset acknowledged. Cleared "
       afterResetCall `shouldContainText` "lookupOrOne"
 
@@ -75,7 +75,7 @@ spec = do
           _ <- callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
           callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
 
-      secondCall `shouldContainText` "already returned earlier in this MCP session"
+      secondCall `shouldContainText` "definitions are completely UNCHANGED"
       secondCall `shouldNotContainText` "Use `notifyKnowledgeReset` tool"
 
     it "keeps non-rendered paginated definitions uncached until they are actually shown" do
@@ -104,7 +104,7 @@ spec = do
 
       firstCall `shouldContainText` "lookupOrZero"
       secondCall `shouldContainText` "lookupOrZero"
-      secondCall `shouldNotContainText` "already returned earlier in this MCP session"
+      secondCall `shouldNotContainText` "definitions are completely UNCHANGED"
 
     it "follows constructor-specific recursive dependencies while still rendering root declarations" do
       withFixtureCopy \fixtureRoot -> do
