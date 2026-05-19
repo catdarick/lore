@@ -2,8 +2,6 @@
 
 module Lore.Internal.ImportCleanup.Apply
   ( ImportCleanupApplyResult (..),
-    applyImportCleanup,
-    applyImportCleanupWithDiagnostics,
     applyImportCleanupFromDiagnostics,
     traverseImportCleanupFiles,
     cleanupOneFile,
@@ -29,8 +27,7 @@ import Lore.Internal.ImportCleanup.Edit (renderImportCleanupEdits)
 import qualified Lore.Internal.ImportCleanup.Parse as ImportCleanupParse
 import Lore.Internal.ImportCleanup.Resolve (resolveImportCleanupGroups)
 import Lore.Internal.ImportCleanup.Types
-  ( AutoRefactorIssue (..),
-    ImportCleanupFileReport (..),
+  ( ImportCleanupFileReport (..),
     ImportCleanupWarning (..),
     ParsedImport,
     PlannedFileEdit (..),
@@ -53,29 +50,6 @@ data ImportCleanupApplyResult = ImportCleanupApplyResult
     importCleanupSummaryByFile :: Map.Map FilePath [String],
     importCleanupSignature :: Map.Map FilePath [FileEdit]
   }
-
-applyImportCleanup ::
-  (MonadLore m) =>
-  Map.Map FilePath GHC.ModSummary ->
-  NonEmpty AutoRefactorIssue ->
-  m ImportCleanupApplyResult
-applyImportCleanup modSummariesByFile issues =
-  applyImportCleanupFromIssues
-    modSummariesByFile
-    (NE.map (.autoRefactorIssueRedundantImport) issues)
-
-applyImportCleanupWithDiagnostics ::
-  (MonadLore m) =>
-  Map.Map FilePath GHC.ModSummary ->
-  [Diagnostic] ->
-  NonEmpty AutoRefactorIssue ->
-  m ImportCleanupApplyResult
-applyImportCleanupWithDiagnostics modSummariesByFile diagnostics issues =
-  case classifyRedundantImportIssues diagnostics of
-    Just diagnosticIssues ->
-      applyImportCleanupFromIssues modSummariesByFile diagnosticIssues
-    Nothing ->
-      applyImportCleanup modSummariesByFile issues
 
 applyImportCleanupFromDiagnostics ::
   (MonadLore m) =>

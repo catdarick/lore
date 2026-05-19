@@ -130,7 +130,7 @@ rewriteImportDeclarationEdit filePath importDeclView occurrences = do
             importDeclView.importDeclText
             newImportDeclSource,
         plannedFileEditSummary =
-          "Auto-refactor: cleaned redundant import occurrences from "
+          "Cleaned redundant import occurrences from "
             <> show parsedImport.parsedImportModuleName
       }
 
@@ -214,7 +214,7 @@ deleteWholeImportEdit filePath source importDeclView = do
     PlannedFileEdit
       { plannedFileEdit = ReplaceSpanEditExpected filePath deleteSpan expectedText "",
         plannedFileEditSummary =
-          "Auto-refactor: removed redundant import " <> show parsedImport.parsedImportModuleName
+          "Removed redundant import " <> show parsedImport.parsedImportModuleName
       }
 
 buildImportDeclView ::

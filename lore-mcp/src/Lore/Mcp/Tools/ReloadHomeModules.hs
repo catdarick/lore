@@ -2,8 +2,7 @@ module Lore.Mcp.Tools.ReloadHomeModules where
 
 import Control.Exception (IOException, try)
 import Control.Monad.IO.Class (liftIO)
-import Data.List (foldl', nub, stripPrefix)
-import Data.Maybe (fromMaybe)
+import Data.List (foldl', nub)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -92,18 +91,14 @@ autoFixedSummarySection :: LoadHomeModulesResult -> [String]
 autoFixedSummarySection loadResult
   | null loadResult.loadHomeModulesAutofixSummaryByFile = []
   | otherwise =
-      [ "Auto-fixed files (source files were modified):"
+      [ "Safe fixes applied:"
       ]
         <> concatMap renderAutofixedFileSummary loadResult.loadHomeModulesAutofixSummaryByFile
 
 renderAutofixedFileSummary :: (FilePath, [String]) -> [String]
 renderAutofixedFileSummary (filePath, summaries) =
   ["  - " <> filePath]
-    <> map (("      * " <>) . stripAutofixPrefix) (nub summaries)
-
-stripAutofixPrefix :: String -> String
-stripAutofixPrefix summary =
-  fromMaybe summary (stripPrefix "Auto-refact: " summary)
+    <> map ("      * " <>) (nub summaries)
 
 data DiagnosticGroupKey
   = DiagnosticFileGroup FilePath

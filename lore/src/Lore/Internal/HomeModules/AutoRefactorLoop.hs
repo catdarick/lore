@@ -1,21 +1,16 @@
 module Lore.Internal.HomeModules.AutoRefactorLoop
   ( maxAutoRefactorApplications,
     loadHomeModulesWithAutoRefactorRetries,
-    runAutoRefactorRetryLoop,
-    mergeAutoRefactSummaries,
-    applyAutoRefactorFromHomeModulesLoadAttempt,
-    emptyAutoRefactorResult,
   )
 where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC
-import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactorFromDiagnostics)
 import Lore.Internal.HomeModules.LoadAttempt (HomeModulesLoadAttempt (..), loadHomeModulesOnce)
 import Lore.Internal.HomeModules.Plan (HomeModulesLoadPlan)
+import Lore.Internal.ImportCleanup.Apply (ImportCleanupApplyResult (..), applyImportCleanupFromDiagnostics)
 import Lore.Internal.Session.CacheInvalidation (invalidateCachesAfterSourceEdits)
-import Lore.Logger (MonadLogger)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 
@@ -31,24 +26,20 @@ loadHomeModulesWithAutoRefactorRetries enableAutoRefactor plan
   | enableAutoRefactor =
       runAutoRefactorRetryLoop
         maxAutoRefactorApplications
-        (loadHomeModulesOnce plan)
-        applyAutoRefactorFromHomeModulesLoadAttempt
-        invalidateCachesAfterSourceEdits
+        plan
   | otherwise =
       loadHomeModulesOnce plan
 
 runAutoRefactorRetryLoop ::
-  (MonadLogger m) =>
+  (MonadLore m) =>
   Int ->
-  m HomeModulesLoadAttempt ->
-  (HomeModulesLoadAttempt -> m AutoRefactorResult) ->
-  m () ->
+  HomeModulesLoadPlan ->
   m HomeModulesLoadAttempt
-runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromAttempt invalidateAfterSourceEdits =
+runAutoRefactorRetryLoop maxApplications plan =
   go 0 Set.empty Map.empty Set.empty
   where
     go applicationsCount cleanedFiles cleanedSummaryByFile seenSignatures = do
-      attempt@HomeModulesLoadAttempt {homeModulesLoadAttemptResult} <- loadAttemptOnce
+      attempt@HomeModulesLoadAttempt {homeModulesLoadAttemptResult} <- loadHomeModulesOnce plan
       case homeModulesLoadAttemptResult of
         GHC.Succeeded ->
           pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
@@ -57,13 +48,16 @@ runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromAt
               Log.info "Auto-refactor: reached max redundant import cleanup attempts."
               pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
           | otherwise -> do
-              cleanupResult <- applyAutoRefactorFromAttempt attempt
+              cleanupResult <-
+                applyImportCleanupFromDiagnostics
+                  attempt.homeModulesLoadAttemptModuleSummariesByFile
+                  attempt.homeModulesLoadAttemptDiagnostics
               let mergedCleanedFiles =
-                    cleanedFiles `Set.union` Set.fromList cleanupResult.autoRefactorChangedFiles
+                    cleanedFiles `Set.union` Set.fromList cleanupResult.importCleanupChangedFiles
                   mergedSummaryByFile =
-                    mergeAutoRefactSummaries cleanedSummaryByFile cleanupResult.autoRefactorSummaryByFile
-                  cleanupSignature = show (Map.toAscList cleanupResult.autoRefactorCleanupSignature)
-              if cleanupResult.autoRefactorApplied
+                    Map.unionWith (<>) cleanedSummaryByFile cleanupResult.importCleanupSummaryByFile
+                  cleanupSignature = show (Map.toAscList cleanupResult.importCleanupSignature)
+              if cleanupResult.importCleanupApplied
                 then do
                   if cleanupSignature `Set.member` seenSignatures
                     then do
@@ -71,7 +65,7 @@ runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromAt
                       pure (withAutoRefactInfo mergedCleanedFiles mergedSummaryByFile attempt)
                     else do
                       Log.info "Auto-refactor: redundant import cleanup was applied. Retrying home-module load."
-                      invalidateAfterSourceEdits
+                      invalidateCachesAfterSourceEdits
                       go
                         (applicationsCount + 1)
                         mergedCleanedFiles
@@ -86,26 +80,3 @@ runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromAt
         { homeModulesLoadAttemptAutoRefactFiles = cleanedFiles,
           homeModulesLoadAttemptAutoRefactSummaryByFile = Map.toAscList cleanedSummaryByFile
         }
-
-mergeAutoRefactSummaries ::
-  Map.Map FilePath [String] ->
-  Map.Map FilePath [String] ->
-  Map.Map FilePath [String]
-mergeAutoRefactSummaries =
-  Map.unionWith (<>)
-
-applyAutoRefactorFromHomeModulesLoadAttempt ::
-  (MonadLore m) =>
-  HomeModulesLoadAttempt ->
-  m AutoRefactorResult
-applyAutoRefactorFromHomeModulesLoadAttempt HomeModulesLoadAttempt {homeModulesLoadAttemptDiagnostics, homeModulesLoadAttemptModuleSummariesByFile} =
-  applyAutoRefactorFromDiagnostics homeModulesLoadAttemptModuleSummariesByFile homeModulesLoadAttemptDiagnostics
-
-emptyAutoRefactorResult :: AutoRefactorResult
-emptyAutoRefactorResult =
-  AutoRefactorResult
-    { autoRefactorApplied = False,
-      autoRefactorChangedFiles = [],
-      autoRefactorSummaryByFile = Map.empty,
-      autoRefactorCleanupSignature = Map.empty
-    }

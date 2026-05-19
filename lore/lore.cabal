@@ -44,7 +44,6 @@ library
       Lore.HomeModules
       Lore.HomeModules.Plan
   other-modules:
-      Lore.Internal.AutoRefactor
       Lore.Internal.Cache.Types
       Lore.Internal.Definition.Analysis
       Lore.Internal.Definition.Cache.CoreModuleFacts
