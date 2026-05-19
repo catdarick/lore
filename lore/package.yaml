@@ -73,6 +73,7 @@ library:
   - Lore.TestSuite
   - Lore.TemporalModules
   - Lore.HomeModules
+  - Lore.HomeModules.Plan
 
 
 tests:

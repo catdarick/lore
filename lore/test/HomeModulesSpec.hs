@@ -8,18 +8,19 @@ import qualified GHC
 import Lore.Diagnostics (Diagnostic (..))
 import Lore.HomeModules (LoadHomeModulesOptions (..), LoadHomeModulesResult (..), defaultLoadHomeModulesOptions)
 import qualified Lore.HomeModules as HomeModules
-import Lore.Internal.HomeModules.Plan
+import Lore.HomeModules.Plan
   ( HomeModuleKey (..),
     HomeModulesComponentPlan (..),
+    HomeModulesLoadInputs (..),
     HomeModulesSelection (..),
     buildHomeModulesSelection,
     computeExternalHomeModuleDependencies,
     computeHomeModuleSourceDirs,
     homeModulesSelectionTotal,
     prepareHomeModulesComponentPlan,
+    prepareHomeModulesLoadInputs,
   )
-import Lore.Internal.Package (prepareComponentsData)
-import Lore.Internal.TemporalModules (TemporalModule (..))
+import Lore.TemporalModules (TemporalModule (..))
 import System.Directory (doesFileExist, makeAbsolute, removeFile)
 import System.FilePath ((</>))
 import Test.Hspec
@@ -33,7 +34,8 @@ spec =
         withFixtureCopy \fixtureRoot -> do
           (depsWithoutTestSuite, depsWithTestSuite) <-
             fixtureLoreAt fixtureRoot do
-              packages <- prepareComponentsData
+              inputs <- prepareHomeModulesLoadInputs
+              let packages = inputs.homeModulesPackages
               pure
                 ( computeExternalHomeModuleDependencies False packages,
                   computeExternalHomeModuleDependencies True packages
@@ -47,7 +49,8 @@ spec =
         withFixtureCopy \fixtureRoot -> do
           sourceDirs <-
             fixtureLoreAt fixtureRoot do
-              packages <- prepareComponentsData
+              inputs <- prepareHomeModulesLoadInputs
+              let packages = inputs.homeModulesPackages
               let temporalPath = fixtureRoot </> ".lore-work-test" </> "temporal-modules" </> "Temporal" </> "Sample.hs"
                   temporalModules = [TemporalModule {moduleName = GHC.mkModuleName "Temporal.Sample", modulePath = temporalPath}]
               pure (computeHomeModuleSourceDirs packages temporalModules)
@@ -60,7 +63,8 @@ spec =
           (selection, plannedFileTargets) <-
             fixtureLoreAt fixtureRoot do
               dflags <- GHC.getSessionDynFlags
-              packages <- prepareComponentsData
+              inputs <- prepareHomeModulesLoadInputs
+              let packages = inputs.homeModulesPackages
               componentPlan <- prepareHomeModulesComponentPlan packages
               let temporalModules =
                     [ TemporalModule

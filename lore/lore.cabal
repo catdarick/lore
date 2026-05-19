@@ -42,6 +42,7 @@ library
       Lore.TestSuite
       Lore.TemporalModules
       Lore.HomeModules
+      Lore.HomeModules.Plan
   other-modules:
       Lore.Internal.AutoRefactor
       Lore.Internal.Cache.Types
