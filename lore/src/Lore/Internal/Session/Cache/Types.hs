@@ -1,40 +1,40 @@
 module Lore.Internal.Session.Cache.Types
   ( InterpreterContextCache (..),
-    LastLoadTargetsResultCache (..),
-    GeneratedMainTargetKey (..),
-    GeneratedMainTarget (..),
-    GeneratedMainTargetsRegistry (..),
+    LastLoadHomeModulesResultCache (..),
+    GeneratedMainModuleKey (..),
+    GeneratedMainModule (..),
+    GeneratedMainModulesRegistry (..),
     TemporalModulesRegistry (..),
   )
 where
 
 import qualified Data.Map as Map
 import qualified GHC
-import Lore.Internal.Targets.Result (LoadTargetsResult)
+import Lore.Internal.HomeModules.Result (LoadHomeModulesResult)
 
 newtype InterpreterContextCache = InterpreterContextCache
   { cachedInterpreterModuleNames :: Maybe [GHC.ModuleName]
   }
 
-newtype LastLoadTargetsResultCache = LastLoadTargetsResultCache
-  { cachedLastLoadTargetsResult :: Maybe LoadTargetsResult
+newtype LastLoadHomeModulesResultCache = LastLoadHomeModulesResultCache
+  { cachedLastLoadHomeModulesResult :: Maybe LoadHomeModulesResult
   }
 
-data GeneratedMainTargetKey = GeneratedMainTargetKey
+data GeneratedMainModuleKey = GeneratedMainModuleKey
   { generatedMainPackageName :: String,
     generatedMainComponentName :: String,
     generatedMainOriginalPath :: FilePath
   }
   deriving (Eq, Ord, Show)
 
-data GeneratedMainTarget = GeneratedMainTarget
+data GeneratedMainModule = GeneratedMainModule
   { generatedMainModuleName :: String,
     generatedMainPath :: FilePath
   }
   deriving (Eq, Show)
 
-newtype GeneratedMainTargetsRegistry = GeneratedMainTargetsRegistry
-  { generatedMainTargetsByKey :: Map.Map GeneratedMainTargetKey GeneratedMainTarget
+newtype GeneratedMainModulesRegistry = GeneratedMainModulesRegistry
+  { generatedMainModulesByKey :: Map.Map GeneratedMainModuleKey GeneratedMainModule
   }
 
 data TemporalModulesRegistry = TemporalModulesRegistry

@@ -17,7 +17,7 @@ import McpTestSupport
     fixtureLoreMcp,
     fixtureLoreMcpAtWithCache,
     fixtureLoreMcpWithCache,
-    loadFixtureTargets,
+    loadFixtureHomeModules,
     withFixtureCopy,
   )
 import System.Directory (createDirectoryIfMissing)
@@ -31,7 +31,7 @@ spec = do
     it "omits already returned definitions and force=true returns them again" do
       (firstCall, secondCall, forcedCall) <-
         fixtureLoreMcpWithCache True do
-          loadFixtureTargets
+          loadFixtureHomeModules
           firstCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
           secondCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
           forcedCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] 0 (Just True))
@@ -45,7 +45,7 @@ spec = do
     it "remembers recursively returned definitions per symbol and omits them in later direct requests" do
       (recursiveCall, directCall) <-
         fixtureLoreMcpWithCache True do
-          loadFixtureTargets
+          loadFixtureHomeModules
           recursiveCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["derivedValue"] 2 Nothing)
           directCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["bumpWithSeed"] 0 Nothing)
           pure (recursiveCall, directCall)
@@ -57,7 +57,7 @@ spec = do
     it "returns previously omitted definitions after notifyKnowledgeReset" do
       (cachedCall, resetCall, afterResetCall) <-
         fixtureLoreMcpWithCache True do
-          loadFixtureTargets
+          loadFixtureHomeModules
           _ <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
           cachedCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
           resetCall <- callToolWithoutArgs notifyKnowledgeResetTool
@@ -71,7 +71,7 @@ spec = do
     it "hides notifyKnowledgeReset hint when the tool is disabled" do
       secondCall <-
         fixtureLoreMcpWithCache True do
-          loadFixtureTargets
+          loadFixtureHomeModules
           _ <- callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
           callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
 
@@ -83,7 +83,7 @@ spec = do
         addPaginatedDefinitionFixture fixtureRoot
         (firstPageCall, secondPageCall) <-
           fixtureLoreMcpAtWithCache True fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             firstPageCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 0) 0 Nothing)
             secondPageCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 30) 0 Nothing)
             pure (firstPageCall, secondPageCall)
@@ -97,7 +97,7 @@ spec = do
     it "does not suppress repeated definitions across calls" do
       (firstCall, secondCall) <-
         fixtureLoreMcp do
-          loadFixtureTargets
+          loadFixtureHomeModules
           firstCall <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
           secondCall <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
           pure (firstCall, secondCall)
@@ -111,7 +111,7 @@ spec = do
         addConstructorScopedDependencyFixture fixtureRoot
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ConstructorDeps.someFunction"] 2 Nothing)
 
         definitionResult `shouldContainText` "someFunction :: IO ()"
@@ -124,7 +124,7 @@ spec = do
         addClassMethodScopedDependencyFixture fixtureRoot
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ClassDeps.runAlpha"] 2 Nothing)
 
         definitionResult `shouldContainText` "runAlpha value = buildAlpha value"
@@ -137,7 +137,7 @@ spec = do
         addCrossModuleConstructorScopedDependencyFixture fixtureRoot
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ConstructorUser.someFunction"] 3 Nothing)
 
         definitionResult `shouldContainText` "someFunction :: IO ()"
@@ -150,7 +150,7 @@ spec = do
         addSharedTopLevelDependencyFixture fixtureRoot
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.SharedTopLevel.pairRight"] 2 Nothing)
 
         definitionResult `shouldContainText` "pairLeft, pairRight :: Int"
@@ -163,7 +163,7 @@ spec = do
         addRecordFieldDependencyFixture fixtureRoot
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.RecordFieldDeps.alphaField"] 1 Nothing)
 
         definitionResult `shouldContainText` "data Record = Record"
@@ -177,7 +177,7 @@ spec = do
         addSameModuleDuplicateSymbolFixture fixtureRoot
         (lookupResult, ambiguousDefinitionResult) <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             lookupResult <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Demo.AmbiguousId")
             ambiguousDefinitionResult <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Demo.AmbiguousId"] 0 Nothing)
             pure (lookupResult, ambiguousDefinitionResult)
@@ -190,7 +190,7 @@ spec = do
     it "deduplicates same-root candidates and keeps the closest-to-root symbol" do
       indexedLookup <-
         fixtureLoreMcp do
-          loadFixtureTargets
+          loadFixtureHomeModules
           callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Indexed")
 
       indexedLookup `shouldContainText` "Found 1 symbol candidates:"
@@ -201,7 +201,7 @@ spec = do
         addRecordFieldLookupFixture fixtureRoot
         (exportedFieldLookup, unexportedFieldLookup, qualifiedFieldLookup, constructorLookup) <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             exportedFieldLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "userName")
             unexportedFieldLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "hiddenValue")
             qualifiedFieldLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Demo.hiddenValue")
@@ -227,7 +227,7 @@ spec = do
     it "keeps lookup for existing unexported top-level home-module symbols" do
       supportValuesLookup <-
         fixtureLoreMcp do
-          loadFixtureTargets
+          loadFixtureHomeModules
           callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "supportValues")
 
       supportValuesLookup `shouldContainText` "supportValues"
@@ -237,7 +237,7 @@ spec = do
     it "suggests similar symbols when exact lookup misses" do
       supportValuesLookup <-
         fixtureLoreMcp do
-          loadFixtureTargets
+          loadFixtureHomeModules
           callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "supportVlaues")
 
       supportValuesLookup `shouldContainText` "No symbols found for \"supportVlaues\"."
@@ -250,7 +250,7 @@ spec = do
         addSuggestionDuplicateFixture fixtureRoot
         suggestedLookup <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "suggestedsSymbol")
 
         suggestedLookup `shouldContainText` "No symbols found for \"suggestedsSymbol\"."
@@ -259,7 +259,7 @@ spec = do
         suggestedLookup `shouldNotContainText` "$tc"
         generatedLookup <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "repSuggestedSymbol")
         generatedLookup `shouldContainText` "SuggestedSymbol"
         generatedLookup `shouldNotContainText` "Rep_SuggestedSymbol"
@@ -270,7 +270,7 @@ spec = do
         addSupportHiddenValueFixture fixtureRoot
         (unqualifiedLookup, qualifiedLookup) <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            loadFixtureTargets
+            loadFixtureHomeModules
             unqualifiedLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "hiddenValue")
             qualifiedLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Demo.hiddenValue")
             pure (unqualifiedLookup, qualifiedLookup)

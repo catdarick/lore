@@ -1,5 +1,5 @@
 module Lore.Internal.Session.CacheInvalidation
-  ( invalidateCachesForTargetConfigurationChange,
+  ( invalidateCachesForHomeModuleConfigurationChange,
     invalidateCachesAfterSourceEdits,
     retainCachesForLoadedModules,
     invalidateDefinitionDerivedCaches,
@@ -19,8 +19,8 @@ import Lore.Internal.Lookup.NameToInstances (invalidateNameToInstancesIndexCache
 import Lore.Internal.Lookup.SymbolsMap (invalidateHomeSymbolsIndexCache)
 import Lore.Monad (MonadLore)
 
-invalidateCachesForTargetConfigurationChange :: (MonadLore m) => m ()
-invalidateCachesForTargetConfigurationChange = do
+invalidateCachesForHomeModuleConfigurationChange :: (MonadLore m) => m ()
+invalidateCachesForHomeModuleConfigurationChange = do
   invalidateInterpreterContextCache
   invalidateModSummariesCache
   invalidateHomeSymbolsIndexCache

@@ -25,7 +25,7 @@ import Lore.Internal.Lookup.Cache.Types
     SymbolsDependencySetCache (..),
   )
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
-import Lore.Internal.Session.Cache.Types (GeneratedMainTargetsRegistry (..), InterpreterContextCache (..), LastLoadTargetsResultCache (..), TemporalModulesRegistry (..))
+import Lore.Internal.Session.Cache.Types (GeneratedMainModulesRegistry (..), InterpreterContextCache (..), LastLoadHomeModulesResultCache (..), TemporalModulesRegistry (..))
 import Lore.Logger (LoggerHandle, noLogHandle)
 
 data SessionContext = SessionContext
@@ -49,8 +49,8 @@ data SessionContext = SessionContext
     coreModuleFactsCacheVar :: MVar CoreModuleFactsCache,
     parsedModuleFactsCacheVar :: MVar ParsedModuleFactsCache,
     interpreterContextCacheVar :: MVar InterpreterContextCache,
-    lastLoadTargetsResultCacheVar :: MVar LastLoadTargetsResultCache,
-    generatedMainTargetsRegistryVar :: MVar GeneratedMainTargetsRegistry,
+    lastLoadHomeModulesResultCacheVar :: MVar LastLoadHomeModulesResultCache,
+    generatedMainModulesRegistryVar :: MVar GeneratedMainModulesRegistry,
     temporalModulesRegistryVar :: MVar TemporalModulesRegistry
   }
 
@@ -91,8 +91,8 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, logg
   coreModuleFactsCacheVar <- GHC.newMVar (CoreModuleFactsCache Map.empty)
   parsedModuleFactsCacheVar <- GHC.newMVar (ParsedModuleFactsCache Map.empty)
   interpreterContextCacheVar <- GHC.newMVar (InterpreterContextCache Nothing)
-  lastLoadTargetsResultCacheVar <- GHC.newMVar (LastLoadTargetsResultCache Nothing)
-  generatedMainTargetsRegistryVar <- GHC.newMVar (GeneratedMainTargetsRegistry Map.empty)
+  lastLoadHomeModulesResultCacheVar <- GHC.newMVar (LastLoadHomeModulesResultCache Nothing)
+  generatedMainModulesRegistryVar <- GHC.newMVar (GeneratedMainModulesRegistry Map.empty)
   temporalModulesRegistryVar <- GHC.newMVar (TemporalModulesRegistry Nothing [])
   case eiPackageDbPaths of
     Left err -> pure $ Left $ "Failed to resolve package database paths: " <> err
@@ -120,7 +120,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, logg
               coreModuleFactsCacheVar,
               parsedModuleFactsCacheVar,
               interpreterContextCacheVar,
-              lastLoadTargetsResultCacheVar,
-              generatedMainTargetsRegistryVar,
+              lastLoadHomeModulesResultCacheVar,
+              generatedMainModulesRegistryVar,
               temporalModulesRegistryVar
             }

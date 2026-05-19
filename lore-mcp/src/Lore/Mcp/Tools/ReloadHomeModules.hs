@@ -11,11 +11,11 @@ import Lore
   ( Diagnostic (..),
     DiagnosticClass (..),
     DiagnosticSpan (..),
-    LoadTargetsOptions (..),
-    LoadTargetsResult (..),
+    LoadHomeModulesOptions (..),
+    LoadHomeModulesResult (..),
     MonadLore,
     Span (..),
-    loadTargets,
+    loadHomeModules,
   )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithoutArgs (..))
 import Lore.Mcp.Tools.Shared.Diagnostics (compactDiagnosticMessage, renderSummaryLine)
@@ -31,19 +31,19 @@ reloadHomeModulesTool =
 
 reloadHomeModulesHandler :: (MonadLore m) => m Text
 reloadHomeModulesHandler = do
-  loadResult <- loadTargets LoadTargetsOptions {enableAutoRefactor = True}
+  loadResult <- loadHomeModules LoadHomeModulesOptions {enableAutoRefactor = True}
   renderReloadHomeModulesResult loadResult
 
-renderReloadHomeModulesResult :: (MonadLore m) => LoadTargetsResult -> m Text
-renderReloadHomeModulesResult loadResult@LoadTargetsResult {loadTargetsDiagnostics}
-  | null loadTargetsDiagnostics =
+renderReloadHomeModulesResult :: (MonadLore m) => LoadHomeModulesResult -> m Text
+renderReloadHomeModulesResult loadResult@LoadHomeModulesResult {loadHomeModulesDiagnostics}
+  | null loadHomeModulesDiagnostics =
       pure $
         T.pack $
           unlines
             ([statusLine] <> autoFixedSummarySection loadResult)
   | otherwise =
       do
-        let (visibleDiagnostics, hiddenDiagnostics) = splitAt maxRenderedDiagnostics loadTargetsDiagnostics
+        let (visibleDiagnostics, hiddenDiagnostics) = splitAt maxRenderedDiagnostics loadHomeModulesDiagnostics
             visibleGroups = groupDiagnostics visibleDiagnostics
         renderedGroups <- mapM renderDiagnosticGroup visibleGroups
         pure $
@@ -58,21 +58,21 @@ renderReloadHomeModulesResult loadResult@LoadTargetsResult {loadTargetsDiagnosti
   where
     maxRenderedDiagnostics = 5
     statusLine
-      | loadResult.loadTargetsModulesFailed > 0 =
+      | loadResult.loadHomeModulesFailed > 0 =
           "Failed to load "
-            <> show loadResult.loadTargetsModulesFailed
+            <> show loadResult.loadHomeModulesFailed
             <> " of "
-            <> show loadResult.loadTargetsModulesTotal
+            <> show loadResult.loadHomeModulesTotal
             <> " modules."
-      | loadResult.loadTargetsModulesAutofixed > 0 =
+      | loadResult.loadHomeModulesAutofixed > 0 =
           "Successfully loaded all "
-            <> show loadResult.loadTargetsModulesTotal
+            <> show loadResult.loadHomeModulesTotal
             <> " modules after auto-fixing "
-            <> show loadResult.loadTargetsModulesAutofixed
+            <> show loadResult.loadHomeModulesAutofixed
             <> ". No errors left."
       | otherwise =
           "Successfully loaded all "
-            <> show loadResult.loadTargetsModulesTotal
+            <> show loadResult.loadHomeModulesTotal
             <> " modules. No errors found."
 
 hiddenDiagnosticsSummary :: [Diagnostic] -> [String]
@@ -88,13 +88,13 @@ hiddenDiagnosticsSummary hiddenDiagnostics =
     hiddenCount = length hiddenDiagnostics
     hiddenModuleCount = length (groupDiagnostics hiddenDiagnostics)
 
-autoFixedSummarySection :: LoadTargetsResult -> [String]
+autoFixedSummarySection :: LoadHomeModulesResult -> [String]
 autoFixedSummarySection loadResult
-  | null loadResult.loadTargetsAutofixSummaryByFile = []
+  | null loadResult.loadHomeModulesAutofixSummaryByFile = []
   | otherwise =
       [ "Auto-fixed files (source files were modified):"
       ]
-        <> concatMap renderAutofixedFileSummary loadResult.loadTargetsAutofixSummaryByFile
+        <> concatMap renderAutofixedFileSummary loadResult.loadHomeModulesAutofixSummaryByFile
 
 renderAutofixedFileSummary :: (FilePath, [String]) -> [String]
 renderAutofixedFileSummary (filePath, summaries) =

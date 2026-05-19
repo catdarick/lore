@@ -5,8 +5,8 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Lore (createTemporalModule)
 import Lore.Diagnostics (Diagnostic (..))
+import Lore.HomeModules (LoadHomeModulesResult (..), defaultLoadHomeModulesOptions, loadHomeModules)
 import Lore.Interpreter (executeStatement)
-import Lore.Targets (LoadTargetsResult (..), defaultLoadTargetsOptions, loadTargets)
 import System.Directory (doesFileExist, removeFile)
 import System.FilePath ((</>))
 import Test.Hspec
@@ -23,7 +23,7 @@ spec =
             secondPath <- createTemporalModule
             liftIO $ writeModule firstPath "tempOneValue" "11"
             liftIO $ writeModule secondPath "tempTwoValue" "31"
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             evalResult <- executeStatement "(tempOneValue, tempTwoValue)"
             pure (firstPath, secondPath, evalResult)
 
@@ -37,10 +37,10 @@ spec =
           fixtureLoreAt fixtureRoot do
             temporalPath <- createTemporalModule
             liftIO $ writeModule temporalPath "ephemeralValue" "42"
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             beforeDeleteResult <- executeStatement "ephemeralValue"
             liftIO $ removeFile temporalPath
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             afterDeleteResult <- executeStatement "ephemeralValue"
             pure (temporalPath, beforeDeleteResult, afterDeleteResult)
 
@@ -55,11 +55,11 @@ spec =
           fixtureLoreAt fixtureRoot do
             temporalPath <- createTemporalModule
             liftIO $ appendUntypedBinding temporalPath "warningValue = 5"
-            loadResult <- loadTargets defaultLoadTargetsOptions
+            loadResult <- loadHomeModules defaultLoadHomeModulesOptions
             evalResult <- executeStatement "warningValue"
             pure (loadResult, evalResult)
 
-        loadResult.loadTargetsSucceeded `shouldBe` True
+        loadResult.loadHomeModulesSucceeded `shouldBe` True
         evalResult `shouldBe` Right "5"
 
 writeModule :: FilePath -> String -> String -> IO ()

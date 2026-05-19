@@ -26,7 +26,7 @@ import Lore
     ReferenceHit (..),
     ReferenceMatch (..),
     Symbol (..),
-    lookupLastLoadTargetsResult,
+    lookupLastLoadHomeModulesResult,
     parseAndNormalizeName,
     resolvePathToRoot,
     resolveReferenceMatchesForNames,
@@ -73,10 +73,10 @@ findReferencesTool =
 findReferencesHandler :: (MonadLore m) => FindReferencesArgs 'ValueType -> m Text
 findReferencesHandler FindReferencesArgs {symbol, skip} = do
   let targetName = parseAndNormalizeName symbol
-  maybeLoadResult <- lookupLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadHomeModulesResult
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run reloadHomeModules first."
+      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
       renderedBody <-
         withResolvedSymbols [symbol] \resolvedQueries ->

@@ -19,7 +19,7 @@ import Lore.Internal.Interpreter (executeStatementRaw)
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummariesByFile)
 import Lore.Internal.Package (ComponentData (..), ComponentKind (..), PackageData (..), componentMainModulePathCandidates, firstExistingPath, prepareComponentsData)
 import Lore.Internal.Session (SessionContext (..))
-import Lore.Internal.Session.Cache.Types (GeneratedMainTarget (..), GeneratedMainTargetKey (..), GeneratedMainTargetsRegistry (..))
+import Lore.Internal.Session.Cache.Types (GeneratedMainModule (..), GeneratedMainModuleKey (..), GeneratedMainModulesRegistry (..))
 import Lore.Internal.SourcePath (normalizeSourceFilePathM)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
@@ -48,7 +48,7 @@ runTestSuite RunTestSuiteOptions {packageName = packageFilter, testArguments} = 
   sessionProjectRoot <- asks projectRoot
   absoluteSessionProjectRoot <- liftIO (Dir.makeAbsolute sessionProjectRoot)
   packages <- prepareComponentsData
-  generatedMainTargetsByKey <- lookupGeneratedMainTargetsByKey
+  generatedMainModulesByKey <- lookupGeneratedMainModulesByKey
   modSummariesByFile <- getCachedModSummariesByFile
   let testComponents =
         [ (pkg.packageName, pkg.packageRoot, component)
@@ -69,7 +69,7 @@ runTestSuite RunTestSuiteOptions {packageName = packageFilter, testArguments} = 
               status = TestSuiteComponentSetupFailure "main module path does not resolve to an existing file"
             }
       Just mainPath -> do
-        resolvedModuleName <- resolveEntryModuleName pkgName component.componentName mainPath generatedMainTargetsByKey modSummariesByFile
+        resolvedModuleName <- resolveEntryModuleName pkgName component.componentName mainPath generatedMainModulesByKey modSummariesByFile
         case resolvedModuleName of
           Left reason ->
             pure
@@ -109,13 +109,13 @@ resolveEntryModuleName ::
   String ->
   String ->
   FilePath ->
-  Map.Map GeneratedMainTargetKey GeneratedMainTarget ->
+  Map.Map GeneratedMainModuleKey GeneratedMainModule ->
   Map.Map FilePath GHC.ModSummary ->
   m (Either String String)
-resolveEntryModuleName packageName componentName mainPath generatedMainTargetsByKey modSummariesByFile =
-  case Map.lookup generatedTargetKey generatedMainTargetsByKey of
-    Just generatedMainTarget ->
-      pure (Right generatedMainTarget.generatedMainModuleName)
+resolveEntryModuleName packageName componentName mainPath generatedMainModulesByKey modSummariesByFile =
+  case Map.lookup generatedMainModuleKey generatedMainModulesByKey of
+    Just generatedMainModule ->
+      pure (Right generatedMainModule.generatedMainModuleName)
     Nothing -> do
       normalizedMainPath <- normalizeSourceFilePathM mainPath
       let candidatePaths =
@@ -131,8 +131,8 @@ resolveEntryModuleName packageName componentName mainPath generatedMainTargetsBy
           Nothing ->
             Left ("entry module is not present in loaded module graph: " <> mainPath)
   where
-    generatedTargetKey =
-      GeneratedMainTargetKey
+    generatedMainModuleKey =
+      GeneratedMainModuleKey
         { generatedMainPackageName = packageName,
           generatedMainComponentName = componentName,
           generatedMainOriginalPath = mainPath
@@ -148,11 +148,11 @@ firstMatchingSummary candidatePaths modSummariesByFile =
         Just summary -> Just summary
         Nothing -> go restPaths
 
-lookupGeneratedMainTargetsByKey :: (MonadLore m) => m (Map.Map GeneratedMainTargetKey GeneratedMainTarget)
-lookupGeneratedMainTargetsByKey = do
-  registryVar <- asks generatedMainTargetsRegistryVar
-  GeneratedMainTargetsRegistry generatedMainTargetsByKey <- liftIO (MVar.readMVar registryVar)
-  pure generatedMainTargetsByKey
+lookupGeneratedMainModulesByKey :: (MonadLore m) => m (Map.Map GeneratedMainModuleKey GeneratedMainModule)
+lookupGeneratedMainModulesByKey = do
+  registryVar <- asks generatedMainModulesRegistryVar
+  GeneratedMainModulesRegistry generatedMainModulesByKey <- liftIO (MVar.readMVar registryVar)
+  pure generatedMainModulesByKey
 
 renderRunStatement :: FilePath -> String -> [String] -> String
 renderRunStatement executionDir entryModuleName args =

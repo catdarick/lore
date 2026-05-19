@@ -73,7 +73,7 @@ library:
   - Lore.SourceEdit
   - Lore.TestSuite
   - Lore.TemporalModules
-  - Lore.Targets
+  - Lore.HomeModules
 
 
 tests:
@@ -93,7 +93,7 @@ tests:
     - LoggerSpec
     - RedundantImportsSpec
     - SourceEditSpec
-    - TargetsSpec
+    - HomeModulesSpec
     - TemporalModulesSpec
     - TestSupport
     - SomeModule

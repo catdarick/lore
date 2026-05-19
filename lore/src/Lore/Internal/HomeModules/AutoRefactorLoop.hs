@@ -1,9 +1,9 @@
-module Lore.Internal.Targets.AutoRefactorLoop
+module Lore.Internal.HomeModules.AutoRefactorLoop
   ( maxAutoRefactorApplications,
-    loadTargetsWithAutoRefactorRetries,
+    loadHomeModulesWithAutoRefactorRetries,
     runAutoRefactorRetryLoop,
     mergeAutoRefactSummaries,
-    applyAutoRefactorFromLoadAttempt,
+    applyAutoRefactorFromHomeModulesLoadAttempt,
     emptyAutoRefactorResult,
   )
 where
@@ -12,9 +12,9 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC
 import Lore.Internal.AutoRefactor (AutoRefactorResult (..), applyAutoRefactorFromDiagnostics)
+import Lore.Internal.HomeModules.LoadAttempt (HomeModulesLoadAttempt (..), loadHomeModulesOnce)
+import Lore.Internal.HomeModules.Plan (HomeModulesLoadPlan)
 import Lore.Internal.Session.CacheInvalidation (invalidateCachesAfterSourceEdits)
-import Lore.Internal.Targets.LoadAttempt (LoadAttempt (..), loadTargetsOnce)
-import Lore.Internal.Targets.Plan (TargetsPlan)
 import Lore.Logger (MonadLogger)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
@@ -22,34 +22,34 @@ import Lore.Monad (MonadLore)
 maxAutoRefactorApplications :: Int
 maxAutoRefactorApplications = 3
 
-loadTargetsWithAutoRefactorRetries ::
+loadHomeModulesWithAutoRefactorRetries ::
   (MonadLore m) =>
   Bool ->
-  TargetsPlan ->
-  m LoadAttempt
-loadTargetsWithAutoRefactorRetries enableAutoRefactor targetsPlan
+  HomeModulesLoadPlan ->
+  m HomeModulesLoadAttempt
+loadHomeModulesWithAutoRefactorRetries enableAutoRefactor plan
   | enableAutoRefactor =
       runAutoRefactorRetryLoop
         maxAutoRefactorApplications
-        (loadTargetsOnce targetsPlan)
-        applyAutoRefactorFromLoadAttempt
+        (loadHomeModulesOnce plan)
+        applyAutoRefactorFromHomeModulesLoadAttempt
         invalidateCachesAfterSourceEdits
   | otherwise =
-      loadTargetsOnce targetsPlan
+      loadHomeModulesOnce plan
 
 runAutoRefactorRetryLoop ::
   (MonadLogger m) =>
   Int ->
-  m LoadAttempt ->
-  (LoadAttempt -> m AutoRefactorResult) ->
+  m HomeModulesLoadAttempt ->
+  (HomeModulesLoadAttempt -> m AutoRefactorResult) ->
   m () ->
-  m LoadAttempt
+  m HomeModulesLoadAttempt
 runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromAttempt invalidateAfterSourceEdits =
   go 0 Set.empty Map.empty Set.empty
   where
     go applicationsCount cleanedFiles cleanedSummaryByFile seenSignatures = do
-      attempt@LoadAttempt {loadAttemptResult} <- loadAttemptOnce
-      case loadAttemptResult of
+      attempt@HomeModulesLoadAttempt {homeModulesLoadAttemptResult} <- loadAttemptOnce
+      case homeModulesLoadAttemptResult of
         GHC.Succeeded ->
           pure (withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt)
         GHC.Failed
@@ -70,7 +70,7 @@ runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromAt
                       Log.info "Auto-refactor: stopping retry loop because cleanup signature repeated."
                       pure (withAutoRefactInfo mergedCleanedFiles mergedSummaryByFile attempt)
                     else do
-                      Log.info "Auto-refactor: redundant import cleanup was applied. Retrying target load."
+                      Log.info "Auto-refactor: redundant import cleanup was applied. Retrying home-module load."
                       invalidateAfterSourceEdits
                       go
                         (applicationsCount + 1)
@@ -83,8 +83,8 @@ runAutoRefactorRetryLoop maxApplications loadAttemptOnce applyAutoRefactorFromAt
 
     withAutoRefactInfo cleanedFiles cleanedSummaryByFile attempt =
       attempt
-        { loadAttemptAutoRefactFiles = cleanedFiles,
-          loadAttemptAutoRefactSummaryByFile = Map.toAscList cleanedSummaryByFile
+        { homeModulesLoadAttemptAutoRefactFiles = cleanedFiles,
+          homeModulesLoadAttemptAutoRefactSummaryByFile = Map.toAscList cleanedSummaryByFile
         }
 
 mergeAutoRefactSummaries ::
@@ -94,12 +94,12 @@ mergeAutoRefactSummaries ::
 mergeAutoRefactSummaries =
   Map.unionWith (<>)
 
-applyAutoRefactorFromLoadAttempt ::
+applyAutoRefactorFromHomeModulesLoadAttempt ::
   (MonadLore m) =>
-  LoadAttempt ->
+  HomeModulesLoadAttempt ->
   m AutoRefactorResult
-applyAutoRefactorFromLoadAttempt LoadAttempt {loadAttemptDiagnostics, loadAttemptModuleSummariesByFile} =
-  applyAutoRefactorFromDiagnostics loadAttemptModuleSummariesByFile loadAttemptDiagnostics
+applyAutoRefactorFromHomeModulesLoadAttempt HomeModulesLoadAttempt {homeModulesLoadAttemptDiagnostics, homeModulesLoadAttemptModuleSummariesByFile} =
+  applyAutoRefactorFromDiagnostics homeModulesLoadAttemptModuleSummariesByFile homeModulesLoadAttemptDiagnostics
 
 emptyAutoRefactorResult :: AutoRefactorResult
 emptyAutoRefactorResult =

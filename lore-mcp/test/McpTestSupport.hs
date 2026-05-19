@@ -3,7 +3,7 @@ module McpTestSupport
     fixtureLoreMcpWithCache,
     fixtureLoreMcpAtWithCache,
     withFixtureCopy,
-    loadFixtureTargets,
+    loadFixtureHomeModules,
     callToolWithArgs,
     callToolWithoutArgs,
   )
@@ -16,9 +16,9 @@ import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Lore
   ( SessionConfig (..),
-    defaultLoadTargetsOptions,
+    defaultLoadHomeModulesOptions,
     defaultSessionConfig,
-    loadTargets,
+    loadHomeModules,
     noLogHandle,
   )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..))
@@ -72,9 +72,9 @@ resolveFixtureRoot = do
     Just fixturePath -> pure fixturePath
     Nothing -> makeAbsolute (head candidates)
 
-loadFixtureTargets :: LoreMcpMonad ()
-loadFixtureTargets =
-  void (loadTargets defaultLoadTargetsOptions)
+loadFixtureHomeModules :: LoreMcpMonad ()
+loadFixtureHomeModules =
+  void (loadHomeModules defaultLoadHomeModulesOptions)
 
 callToolWithArgs :: SomeTool LoreMcpMonad -> J.Value -> LoreMcpMonad T.Text
 callToolWithArgs someTool args =

@@ -11,7 +11,7 @@ import Lore.Mcp.Tools.LookupInstances (lookupInstancesTool)
 import McpTestSupport
   ( callToolWithArgs,
     fixtureLoreMcpAtWithCache,
-    loadFixtureTargets,
+    loadFixtureHomeModules,
     withFixtureCopy,
   )
 import System.Directory (createDirectoryIfMissing)
@@ -51,7 +51,7 @@ renderLookupInstancesFixture moduleFileName moduleSource names =
     TIO.writeFile moduleFile moduleSource
 
     fixtureLoreMcpAtWithCache False fixtureRoot do
-      loadFixtureTargets
+      loadFixtureHomeModules
       callToolWithArgs lookupInstancesTool (lookupInstancesArgs names)
 
 lookupInstancesArgs :: [Text] -> J.Value

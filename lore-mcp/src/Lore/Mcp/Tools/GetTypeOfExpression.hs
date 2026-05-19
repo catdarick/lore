@@ -14,11 +14,11 @@ import GHC.Generics (Generic)
 import qualified GHC.Types.SourceError as GHC.SourceError
 import qualified GHC.Utils.Outputable as Outputable
 import Lore
-  ( LoadTargetsResult (..),
+  ( LoadHomeModulesResult (..),
     MonadLore,
     getTypeOfExpression,
     interpreterContextIsReady,
-    lookupLastLoadTargetsResult,
+    lookupLastLoadHomeModulesResult,
   )
 import Lore.Diagnostics
   ( Diagnostic (..),
@@ -54,11 +54,11 @@ getTypeOfExpressionTool =
 
 getTypeOfExpressionHandler :: (MonadLore m) => GetTypeOfExpressionArgs 'ValueType -> m Text
 getTypeOfExpressionHandler GetTypeOfExpressionArgs {expression} = do
-  maybeLoadResult <- lookupLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadHomeModulesResult
   contextReady <- interpreterContextIsReady
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run reloadHomeModules first."
+      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
     Just loadResult
       | not contextReady ->
           pure "Interpreter context is not ready. Run reloadHomeModules again."
@@ -78,14 +78,14 @@ getTypeOfExpressionHandler GetTypeOfExpressionArgs {expression} = do
               Left diagnostics ->
                 renderTypeFailure loadResult diagnostics
 
-renderTypeResult :: LoadTargetsResult -> GHC.Type -> Text
+renderTypeResult :: LoadHomeModulesResult -> GHC.Type -> Text
 renderTypeResult loadResult inferredType =
   appendPartialLoadWarning loadResult "Type inference may be incomplete." renderedType
   where
     renderedType =
       T.pack (Outputable.showSDocUnsafe (Outputable.ppr inferredType))
 
-renderTypeFailure :: LoadTargetsResult -> [Diagnostic] -> Text
+renderTypeFailure :: LoadHomeModulesResult -> [Diagnostic] -> Text
 renderTypeFailure loadResult diagnostics =
   renderFailureWithPartialLoadWarning loadResult "Type inference may be incomplete." "Type inference failed:" diagnostics
 

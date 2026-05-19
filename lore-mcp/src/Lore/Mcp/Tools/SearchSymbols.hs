@@ -7,7 +7,7 @@ import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Lore (MonadLore, findSimilarSymbols, lookupLastLoadTargetsResult, parseAndNormalizeName)
+import Lore (MonadLore, findSimilarSymbols, lookupLastLoadHomeModulesResult, parseAndNormalizeName)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Render (Renderable (..), (|>))
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
@@ -46,10 +46,10 @@ searchSymbolsTool =
 
 searchSymbolsHandler :: (MonadLore m) => SearchSymbolsArgs 'ValueType -> m Text
 searchSymbolsHandler SearchSymbolsArgs {query} = do
-  maybeLoadResult <- lookupLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadHomeModulesResult
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run reloadHomeModules first."
+      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
       suggestions <- findSimilarSymbols symbolSuggestionFetchLimit (parseAndNormalizeName query)
       let renderedBody =

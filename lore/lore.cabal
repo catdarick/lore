@@ -42,7 +42,7 @@ library
       Lore.SourceEdit
       Lore.TestSuite
       Lore.TemporalModules
-      Lore.Targets
+      Lore.HomeModules
   other-modules:
       Lore.Internal.AutoRefactor
       Lore.Internal.AutoRefactor.Edit
@@ -70,6 +70,12 @@ library
       Lore.Internal.Ghc.AvailInfo
       Lore.Internal.Ghc.DynFlags
       Lore.Internal.Ghc.TyThing
+      Lore.Internal.HomeModules
+      Lore.Internal.HomeModules.AutoRefactorLoop
+      Lore.Internal.HomeModules.LoadAttempt
+      Lore.Internal.HomeModules.ModuleGraphPatch
+      Lore.Internal.HomeModules.Plan
+      Lore.Internal.HomeModules.Result
       Lore.Internal.ImportCleanup.Apply
       Lore.Internal.ImportCleanup.Diagnostics
       Lore.Internal.ImportCleanup.Edit
@@ -102,12 +108,6 @@ library
       Lore.Internal.SourceSpan
       Lore.Internal.SourceSpan.Types
       Lore.Internal.SourceText
-      Lore.Internal.Targets
-      Lore.Internal.Targets.AutoRefactorLoop
-      Lore.Internal.Targets.LoadAttempt
-      Lore.Internal.Targets.ModuleGraphPatch
-      Lore.Internal.Targets.Plan
-      Lore.Internal.Targets.Result
       Lore.Internal.TemporalModules
       Lore.Internal.TestSuite
       Lore.Lib.Force
@@ -199,7 +199,7 @@ test-suite lore-test
       LoggerSpec
       RedundantImportsSpec
       SourceEditSpec
-      TargetsSpec
+      HomeModulesSpec
       TemporalModulesSpec
       TestSupport
       SomeModule

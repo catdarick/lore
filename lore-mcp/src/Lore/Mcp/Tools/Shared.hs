@@ -19,7 +19,7 @@ import Data.Maybe (mapMaybe, maybeToList)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC.Plugins as GHC
-import Lore (DeclarationSpans (..), DefinitionSlice (..), LoadTargetsResult (..), mergeDefinitionSlices)
+import Lore (DeclarationSpans (..), DefinitionSlice (..), LoadHomeModulesResult (..), mergeDefinitionSlices)
 import Lore.Diagnostics (Diagnostic (..))
 import Lore.Mcp.Internal.List (maximumMaybe, minimumMaybe)
 import Lore.Mcp.Internal.SourceSpan (realSrcSpanFromSrcSpan)
@@ -27,16 +27,16 @@ import Lore.Mcp.Internal.SourceText (readSpanText, relativeSourcePath)
 import Lore.Mcp.Tools.Shared.Diagnostics (renderDiagnosticSummary)
 import System.Directory (getCurrentDirectory)
 
-appendPartialLoadWarning :: LoadTargetsResult -> Text -> Text -> Text
+appendPartialLoadWarning :: LoadHomeModulesResult -> Text -> Text -> Text
 appendPartialLoadWarning loadResult partialLoadSuffix body
-  | loadResult.loadTargetsModulesFailed > 0 =
+  | loadResult.loadHomeModulesFailed > 0 =
       body
         <> "\n\n"
         <> renderPartialLoadWarning loadResult partialLoadSuffix
   | otherwise =
       body
 
-renderFailureWithPartialLoadWarning :: LoadTargetsResult -> Text -> Text -> [Diagnostic] -> Text
+renderFailureWithPartialLoadWarning :: LoadHomeModulesResult -> Text -> Text -> [Diagnostic] -> Text
 renderFailureWithPartialLoadWarning loadResult partialLoadSuffix heading diagnostics =
   appendPartialLoadWarning loadResult partialLoadSuffix renderedBody
   where
@@ -47,12 +47,12 @@ renderFailureWithPartialLoadWarning loadResult partialLoadSuffix heading diagnos
             [] -> ["- No diagnostics were produced."]
             _ -> map renderDiagnosticSummary diagnostics
 
-renderPartialLoadWarning :: LoadTargetsResult -> Text -> Text
+renderPartialLoadWarning :: LoadHomeModulesResult -> Text -> Text
 renderPartialLoadWarning loadResult partialLoadSuffix =
   "Warning: only "
-    <> T.pack (show loadResult.loadTargetsModulesLoaded)
+    <> T.pack (show loadResult.loadHomeModulesLoaded)
     <> " of "
-    <> T.pack (show loadResult.loadTargetsModulesTotal)
+    <> T.pack (show loadResult.loadHomeModulesTotal)
     <> " modules loaded successfully. "
     <> partialLoadSuffix
 

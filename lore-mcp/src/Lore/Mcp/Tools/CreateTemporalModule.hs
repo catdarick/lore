@@ -15,7 +15,7 @@ createTemporalModuleTool =
       { name = "createTemporalModule",
         description =
           Just
-            "Create a temporary Haskell module attached to the session load targets.\
+            "Create a temporary Haskell module attached to the session home modules load.\
             \Persists across reloads for active reuse during debugging. Automatically detached if deleted; pruned on session restart.",
         handler = createTemporalModuleHandler
       }

@@ -7,7 +7,7 @@ import qualified Data.Aeson as J
 import Data.Text (Text)
 import qualified Data.Text as T
 import Lore.Mcp.Tools.SearchSymbols (searchSymbolsTool)
-import McpTestSupport (callToolWithArgs, fixtureLoreMcp, loadFixtureTargets)
+import McpTestSupport (callToolWithArgs, fixtureLoreMcp, loadFixtureHomeModules)
 import Test.Hspec
 
 spec :: Spec
@@ -18,12 +18,12 @@ spec =
         fixtureLoreMcp do
           callToolWithArgs searchSymbolsTool (searchSymbolsArgs "supportValues")
 
-      searchResult `shouldBe` "Targets have not been loaded yet. Run reloadHomeModules first."
+      searchResult `shouldBe` "Home modules have not been loaded yet. Run reloadHomeModules first."
 
     it "returns fuzzy suggestions for misspelled query symbols" do
       searchResult <-
         fixtureLoreMcp do
-          loadFixtureTargets
+          loadFixtureHomeModules
           callToolWithArgs searchSymbolsTool (searchSymbolsArgs "supportVlaues")
 
       searchResult `shouldContainText` "Found "
@@ -34,7 +34,7 @@ spec =
     it "searches similar symbols even when exact symbols exist" do
       searchResult <-
         fixtureLoreMcp do
-          loadFixtureTargets
+          loadFixtureHomeModules
           callToolWithArgs searchSymbolsTool (searchSymbolsArgs "supportValues")
 
       searchResult `shouldContainText` "similar symbols for \"supportValues\":"
@@ -43,7 +43,7 @@ spec =
     it "renders single-module suggestions as fully qualified symbol names" do
       searchResult <-
         fixtureLoreMcp do
-          loadFixtureTargets
+          loadFixtureHomeModules
           callToolWithArgs searchSymbolsTool (searchSymbolsArgs "usageInfo")
 
       searchResult `shouldContainText` "System.Console.GetOpt.usageInfo"
@@ -52,7 +52,7 @@ spec =
     it "merges same-occurrence symbols and summarizes defining modules" do
       searchResult <-
         fixtureLoreMcp do
-          loadFixtureTargets
+          loadFixtureHomeModules
           callToolWithArgs searchSymbolsTool (searchSymbolsArgs "map")
 
       searchResult `shouldContainText` "Found 10 similar symbols for \"map\":"

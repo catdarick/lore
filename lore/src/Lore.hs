@@ -5,11 +5,11 @@ module Lore
     LoreMonadT,
     MonadLore,
     runLore,
-    LoadTargetsResult (..),
-    LoadTargetsOptions (..),
-    defaultLoadTargetsOptions,
-    loadTargets,
-    lookupLastLoadTargetsResult,
+    LoadHomeModulesResult (..),
+    LoadHomeModulesOptions (..),
+    defaultLoadHomeModulesOptions,
+    loadHomeModules,
+    lookupLastLoadHomeModulesResult,
     RunTestSuiteOptions (..),
     TestSuiteComponentStatus (..),
     TestSuiteComponentResult (..),
@@ -84,6 +84,7 @@ where
 
 import Lore.Definition
 import Lore.Diagnostics
+import Lore.HomeModules
 import Lore.Interpreter
 import Lore.Logger
 import Lore.Lookup
@@ -91,6 +92,5 @@ import Lore.Module
 import Lore.Monad (LoreMonadT, MonadLore)
 import Lore.Project
 import Lore.Session
-import Lore.Targets
 import Lore.TemporalModules
 import Lore.TestSuite

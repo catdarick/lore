@@ -20,7 +20,7 @@ import Lore
   ( Instances (..),
     MonadLore,
     listIntersectingInstances,
-    lookupLastLoadTargetsResult,
+    lookupLastLoadHomeModulesResult,
   )
 import Lore.Mcp.Internal.Annotated
   ( Description,
@@ -74,10 +74,10 @@ lookupInstancesTool =
 
 lookupInstancesHandler :: (MonadLore m) => LookupInstancesArgs 'ValueType -> m Text
 lookupInstancesHandler LookupInstancesArgs {names, skip} = do
-  maybeLoadResult <- lookupLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadHomeModulesResult
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run reloadHomeModules first."
+      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
       renderedBody <-
         withResolvedSymbols names \resolvedQueries -> do

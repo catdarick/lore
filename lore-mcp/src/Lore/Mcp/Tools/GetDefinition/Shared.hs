@@ -28,7 +28,7 @@ import Lore
     Symbol (..),
     SymbolInfo (..),
     getMinifiedImportsForDefinition,
-    lookupLastLoadTargetsResult,
+    lookupLastLoadHomeModulesResult,
     lookupSymbolInfo,
     resolveDefinitionClosureSourcesNamed,
     resolveDefinitionSourceNamed,
@@ -57,10 +57,10 @@ type RenderDefinitionsStrategy m =
 
 getDefinitionHandlerWithStrategy :: (MonadLore m) => Bool -> CommonGetDefinitionArgs -> RenderDefinitionsStrategy m -> m Text
 getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint CommonGetDefinitionArgs {symbols, skip, recursionDepth} renderDefinitions = do
-  maybeLoadResult <- lookupLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadHomeModulesResult
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run reloadHomeModules first."
+      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
       renderedBody <-
         withResolvedSymbols symbols \resolvedQueries -> do

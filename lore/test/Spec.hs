@@ -4,6 +4,7 @@ module Main
 where
 
 import qualified DefinitionSpec
+import qualified HomeModulesSpec
 import qualified ImportCleanupApplySpec
 import qualified ImportCleanupEditSpec
 import qualified ImportCleanupImportListParserSpec
@@ -15,7 +16,6 @@ import qualified LookupSearchSpec
 import qualified LookupSpec
 import qualified RedundantImportsSpec
 import qualified SourceEditSpec
-import qualified TargetsSpec
 import qualified TemporalModulesSpec
 import Test.Hspec
 
@@ -34,5 +34,5 @@ main =
     LookupSpec.spec
     RedundantImportsSpec.spec
     SourceEditSpec.spec
-    TargetsSpec.spec
+    HomeModulesSpec.spec
     TemporalModulesSpec.spec

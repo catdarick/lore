@@ -11,11 +11,11 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Lore
   ( Diagnostic (..),
-    LoadTargetsResult (..),
+    LoadHomeModulesResult (..),
     MonadLore,
     executeStatement,
     interpreterContextIsReady,
-    lookupLastLoadTargetsResult,
+    lookupLastLoadHomeModulesResult,
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
@@ -47,11 +47,11 @@ executeCodeTool =
 
 executeCodeHandler :: (MonadLore m) => ExecuteCodeArgs 'ValueType -> m Text
 executeCodeHandler ExecuteCodeArgs {code} = do
-  maybeLoadResult <- lookupLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadHomeModulesResult
   contextReady <- interpreterContextIsReady
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run reloadHomeModules first."
+      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
     Just loadResult
       | not contextReady ->
           pure "Interpreter context is not ready. Run reloadHomeModules again."
@@ -64,7 +64,7 @@ executeCodeHandler ExecuteCodeArgs {code} = do
               Left diagnostics ->
                 renderExecutionFailure loadResult diagnostics
 
-renderExecutionResult :: LoadTargetsResult -> String -> Text
+renderExecutionResult :: LoadHomeModulesResult -> String -> Text
 renderExecutionResult loadResult result =
   appendPartialLoadWarning loadResult "Evaluation may be incomplete." renderedResult
   where
@@ -76,7 +76,7 @@ renderExecutionResult loadResult result =
     outputText =
       T.pack result
 
-renderExecutionFailure :: LoadTargetsResult -> [Diagnostic] -> Text
+renderExecutionFailure :: LoadHomeModulesResult -> [Diagnostic] -> Text
 renderExecutionFailure loadResult diagnostics =
   renderFailureWithPartialLoadWarning loadResult "Evaluation may be incomplete." "Execution failed:" diagnostics
     <> renderExecutionHints diagnostics

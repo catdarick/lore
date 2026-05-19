@@ -11,7 +11,7 @@ import Lore.Mcp.Tools.FindReferences (findReferencesTool)
 import McpTestSupport
   ( callToolWithArgs,
     fixtureLoreMcpAtWithCache,
-    loadFixtureTargets,
+    loadFixtureHomeModules,
     withFixtureCopy,
   )
 import System.Directory (createDirectoryIfMissing)
@@ -207,7 +207,7 @@ renderFindReferencesFixtureModules modulesToWrite symbol =
     writeFixtureModules fixtureRoot modulesToWrite
 
     fixtureLoreMcpAtWithCache False fixtureRoot do
-      loadFixtureTargets
+      loadFixtureHomeModules
       callToolWithArgs findReferencesTool (findReferencesArgs symbol)
 
 writeFixtureModules :: FilePath -> [(FilePath, Text)] -> IO ()

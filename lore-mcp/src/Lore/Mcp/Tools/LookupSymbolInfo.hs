@@ -15,7 +15,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as Plugins
-import Lore (MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, lookupLastLoadTargetsResult, lookupSymbolInfo, parseAndNormalizeName, resolvePathToRoot)
+import Lore (MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, lookupLastLoadHomeModulesResult, lookupSymbolInfo, parseAndNormalizeName, resolvePathToRoot)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Render
   ( ListMarker (..),
@@ -65,10 +65,10 @@ lookupSymbolInfoTool =
 
 lookupSymbolInfoHandler :: (MonadLore m) => LookupSymbolInfoArgs 'ValueType -> m Text
 lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol, skip} = do
-  maybeLoadResult <- lookupLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadHomeModulesResult
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run reloadHomeModules first."
+      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
     Just loadResult -> do
       symbolInfos <- lookupExactSymbolInfos symbol
       renderedBody <-

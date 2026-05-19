@@ -16,7 +16,7 @@ import Lore
     TestSuiteComponentResult (..),
     TestSuiteComponentStatus (..),
     interpreterContextIsReady,
-    lookupLastLoadTargetsResult,
+    lookupLastLoadHomeModulesResult,
     runTestSuite,
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
@@ -52,11 +52,11 @@ runTestSuiteTool =
 
 runTestSuiteHandler :: (MonadLore m) => RunTestSuiteArgs 'ValueType -> m Text
 runTestSuiteHandler RunTestSuiteArgs {package, testArgs} = do
-  maybeLoadResult <- lookupLastLoadTargetsResult
+  maybeLoadResult <- lookupLastLoadHomeModulesResult
   contextReady <- interpreterContextIsReady
   case maybeLoadResult of
     Nothing ->
-      pure "Targets have not been loaded yet. Run reloadHomeModules first."
+      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
     Just loadResult
       | not contextReady ->
           pure "Interpreter context is not ready. Run reloadHomeModules again."

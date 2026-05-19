@@ -10,8 +10,8 @@ import Control.Monad (void)
 import Data.Text (Text)
 import qualified GHC
 import Lore.Diagnostics (Diagnostic)
+import Lore.Internal.HomeModules (defaultLoadHomeModulesOptions, loadHomeModules)
 import qualified Lore.Internal.Interpreter as Internal
-import Lore.Internal.Targets (defaultLoadTargetsOptions, loadTargets)
 import Lore.Monad (MonadLore)
 
 interpreterContextIsReady :: (MonadLore m) => m Bool
@@ -23,7 +23,7 @@ loadInterpreterContext = do
   contextReady <- interpreterContextIsReady
   if contextReady
     then pure ()
-    else void (loadTargets defaultLoadTargetsOptions)
+    else void (loadHomeModules defaultLoadHomeModulesOptions)
 
 executeStatement :: (MonadLore m) => Text -> m (Either [Diagnostic] String)
 executeStatement source = do

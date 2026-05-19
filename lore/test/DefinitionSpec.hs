@@ -12,17 +12,17 @@ import qualified GHC.Plugins
 import qualified GHC.Types.Unique as GHC.Unique
 import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), DefinitionSource (..), ImportQualifiedStyle (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..), RequiredImport (..), RequiredImportItem (..), declarationSpans, getMinifiedImportsForDefinition, mergeDefinitionSlices, resolveDefinitionClosureSourcesNamed, resolveDefinitionSourceNamed, resolveReferenceMatchesForNames)
 import Lore.Definition.RenderSlice (definitionSourceToRenderSlice)
+import Lore.HomeModules (defaultLoadHomeModulesOptions)
+import qualified Lore.HomeModules as HomeModules
 import Lore.Lookup (Symbol (..))
 import Lore.Monad (MonadLore)
-import Lore.Targets (defaultLoadTargetsOptions)
-import qualified Lore.Targets as Targets
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (joinPath, splitDirectories, (</>))
 import Test.Hspec
 import TestSupport (findSymbols, fixtureLore, fixtureLoreAt, lookupRootSymbolChains, withFixtureCopy)
 
-loadTargets :: (MonadLore m) => Targets.LoadTargetsOptions -> m ()
-loadTargets options = void (Targets.loadTargets options)
+loadHomeModules :: (MonadLore m) => HomeModules.LoadHomeModulesOptions -> m ()
+loadHomeModules options = void (HomeModules.loadHomeModules options)
 
 spec :: Spec
 spec = do
@@ -67,7 +67,7 @@ spec = do
 
         slice <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestImports.QualifiedNoAlias.emptyMap"
             targetName <-
               maybe
@@ -99,7 +99,7 @@ spec = do
 
         slice <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestImports.QualifiedAliasDecoy.emptyMap"
             targetName <-
               maybe
@@ -143,7 +143,7 @@ spec = do
     it "resolves definitions for unexported symbols from another home module" do
       slice <-
         fixtureLore do
-          loadTargets defaultLoadTargetsOptions
+          loadHomeModules defaultLoadHomeModulesOptions
           symbols <- findSymbols "Demo.Support.supportValues"
           targetName <-
             maybe
@@ -247,8 +247,8 @@ spec = do
     it "survives two consecutive reloads before resolving a definition slice" do
       slice <-
         fixtureLore do
-          loadTargets defaultLoadTargetsOptions
-          loadTargets defaultLoadTargetsOptions
+          loadHomeModules defaultLoadHomeModulesOptions
+          loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "lookupOrZero"
           targetName <- maybe (error "symbol not found: lookupOrZero") pure (findFixtureSymbol "lookupOrZero" exportedSymbols)
           source <- maybe (error "definition not found: lookupOrZero") pure =<< resolveDefinitionSourceNamed targetName
@@ -397,7 +397,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.ConstructorDeps.someFunction"
             targetName <-
               maybe
@@ -426,7 +426,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.ClassDeps.runAlpha"
             targetName <-
               maybe
@@ -457,7 +457,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.ConstructorUser.someFunction"
             targetName <-
               maybe
@@ -490,7 +490,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.SharedTopLevel.pairRight"
             targetName <-
               maybe
@@ -520,7 +520,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.SharedGadtConstructors.useB"
             targetName <-
               maybe
@@ -549,7 +549,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.DirectGadtConstructor.SomeMinimalTypedModuleFacts"
             targetName <-
               maybe
@@ -577,7 +577,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.DirectRegularConstructor.EitherBar"
             targetName <-
               maybe
@@ -605,7 +605,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.DirectClassMethod.buildAlpha"
             targetName <-
               maybe
@@ -633,7 +633,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.DirectRecordField.alphaField"
             targetName <-
               maybe
@@ -661,7 +661,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.SharedClassSignature.runG"
             targetName <-
               maybe
@@ -715,7 +715,7 @@ spec = do
     it "orders recursive closure results with dependencies before the queried root definition" do
       moduleOrder <-
         fixtureLore do
-          loadTargets defaultLoadTargetsOptions
+          loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "crossModuleRecord"
           targetName <- maybe (error "symbol not found: crossModuleRecord") pure (findFixtureSymbol "crossModuleRecord" exportedSymbols)
           namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
@@ -727,7 +727,7 @@ spec = do
     it "orders nested dependencies before their dependents within closure output" do
       definitionOrder <-
         fixtureLore do
-          loadTargets defaultLoadTargetsOptions
+          loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "derivedValue"
           targetName <- maybe (error "symbol not found: derivedValue") pure (findFixtureSymbol "derivedValue" exportedSymbols)
           namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
@@ -738,7 +738,7 @@ spec = do
     it "keeps transitive dependencies before direct dependencies in branching closures" do
       definitionOrder <-
         fixtureLore do
-          loadTargets defaultLoadTargetsOptions
+          loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "crossModuleBundle"
           targetName <- maybe (error "symbol not found: crossModuleBundle") pure (findFixtureSymbol "crossModuleBundle" exportedSymbols)
           namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
@@ -784,7 +784,7 @@ spec = do
 
         closure <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.Render.renderInt"
             targetName <-
               maybe
@@ -807,8 +807,8 @@ spec = do
     it "survives two consecutive reloads before resolving a definition closure" do
       closure <-
         fixtureLore do
-          loadTargets defaultLoadTargetsOptions
-          loadTargets defaultLoadTargetsOptions
+          loadHomeModules defaultLoadHomeModulesOptions
+          loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "crossModuleRecord"
           targetName <- maybe (error "symbol not found: crossModuleRecord") pure (findFixtureSymbol "crossModuleRecord" exportedSymbols)
           namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
@@ -839,7 +839,7 @@ spec = do
 
         references <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "Demo.Support.supportSeed"
             targetName <-
               maybe
@@ -869,7 +869,7 @@ spec = do
 
         references <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             resolvedRootChains <- lookupRootSymbolChains "TestChain.Roots.Wrapped"
             case resolvedRootChains of
               [rootChain] ->
@@ -902,7 +902,7 @@ spec = do
 
         referenceMatches <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestRefs.Snippet.target"
             targetName <-
               maybe
@@ -927,7 +927,7 @@ spec = do
 
         referenceMatches <-
           fixtureLoreAt fixtureRoot do
-            loadTargets defaultLoadTargetsOptions
+            loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestRefs.CaseSectionSnippet.target"
             targetName <-
               maybe
@@ -1076,7 +1076,7 @@ sliceRealSpan realSpan contents =
 fixtureDefinition :: String -> IO DefinitionSlice
 fixtureDefinition symbol =
   fixtureLore do
-    loadTargets defaultLoadTargetsOptions
+    loadHomeModules defaultLoadHomeModulesOptions
     exportedSymbols <- findSymbols (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
     source <- maybe (error ("definition not found: " <> symbol)) pure =<< resolveDefinitionSourceNamed targetName
@@ -1085,7 +1085,7 @@ fixtureDefinition symbol =
 fixtureDefinitionClosure :: Int -> String -> IO [DefinitionSlice]
 fixtureDefinitionClosure depth symbol =
   fixtureLore do
-    loadTargets defaultLoadTargetsOptions
+    loadHomeModules defaultLoadHomeModulesOptions
     exportedSymbols <- findSymbols (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
     namedSources <- resolveDefinitionClosureSourcesNamed depth targetName

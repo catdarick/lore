@@ -1,4 +1,4 @@
-module Lore.Internal.Targets.ModuleGraphPatch
+module Lore.Internal.HomeModules.ModuleGraphPatch
   ( applyModuleScopedArgs,
     applySourcePragmas,
   )
@@ -14,16 +14,16 @@ import qualified GHC.Driver.Config.Parser as GHC
 import qualified GHC.Driver.Session as GHC
 import qualified GHC.Parser.Header as GHC
 import qualified GHC.Unit.Module.Graph as GHC
+import Lore.Internal.HomeModules.Plan (ComponentSpecificOptions (..), HomeModuleKey (..))
 import Lore.Internal.SourcePath (normalizeSourceFilePathM)
-import Lore.Internal.Targets.Plan (ComponentSpecificOptions (..), TargetKey (..), TargetsPlan (..))
 import Lore.Monad (MonadLore)
 
 applyModuleScopedArgs ::
   (MonadLore m) =>
-  TargetsPlan ->
+  Map.Map HomeModuleKey ComponentSpecificOptions ->
   GHC.ModuleGraph ->
   m GHC.ModuleGraph
-applyModuleScopedArgs TargetsPlan {targetsWithComponentOptions} modGraph = do
+applyModuleScopedArgs homeModulesWithComponentOptions modGraph = do
   patchedNodes <- mapM patchNode (GHC.mgModSummaries' modGraph)
   pure (GHC.mkModuleGraph patchedNodes)
   where
@@ -42,8 +42,8 @@ applyModuleScopedArgs TargetsPlan {targetsWithComponentOptions} modGraph = do
           moduleName = GHC.moduleName (GHC.ms_mod summary)
       normalizedSummaryFile <- normalizeSourceFilePathM summaryFile
       let maybeComponentOptions =
-            Map.lookup (TargetSourceFile normalizedSummaryFile) targetsWithComponentOptions
-              <|> Map.lookup (TargetModuleName moduleName) targetsWithComponentOptions
+            Map.lookup (HomeModuleSourceFile normalizedSummaryFile) homeModulesWithComponentOptions
+              <|> Map.lookup (HomeModuleName moduleName) homeModulesWithComponentOptions
       case maybeComponentOptions of
         Just componentOptions
           | isJust componentOptions.language

@@ -21,10 +21,10 @@ import Lore
     SymbolInfo (..),
     SymbolVisibility (..),
     classifySymbolCategory,
-    defaultLoadTargetsOptions,
+    defaultLoadHomeModulesOptions,
     listAssociatedInstances,
     listDirectInstances,
-    loadTargets,
+    loadHomeModules,
   )
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
@@ -47,7 +47,7 @@ spec =
       it "deduplicates root-resolved results when a type and constructor share a name" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Indexed"
 
         length result `shouldBe` 1
@@ -57,27 +57,27 @@ spec =
       it "classifies non-value symbols by declaration kind" do
         indexedInfo <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Indexed"
 
         nameSetInfo <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "NameSet"
 
         hasIndexInfo <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "HasIndex"
 
         elemInfo <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Elem"
 
         bucketInfo <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Bucket"
 
         demoCategories indexedInfo `shouldBe` [SymbolData]
@@ -89,7 +89,7 @@ spec =
       it "filters symbol matches by definition module hint" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Demo.Support.supportSeed"
 
         length result `shouldBe` 1
@@ -99,7 +99,7 @@ spec =
       it "filters symbol matches by export module hint" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Prelude.map"
 
         null result `shouldBe` False
@@ -108,7 +108,7 @@ spec =
       it "supports module-qualified dotted operators" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Demo.Support..+."
 
         length result `shouldBe` 1
@@ -118,7 +118,7 @@ spec =
       it "supports parenthesized operator queries" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "(.+.)"
 
         length result `shouldBe` 1
@@ -128,7 +128,7 @@ spec =
       it "supports module-qualified parenthesized operator queries" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Demo.Support.(.+.)"
 
         length result `shouldBe` 1
@@ -138,8 +138,8 @@ spec =
       it "survives two consecutive reloads before lookupRootSymbolInfo" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Demo.Support.supportSeed"
 
         length result `shouldBe` 1
@@ -151,7 +151,7 @@ spec =
           addRecordFieldLookupFixture fixtureRoot
           (exportedFieldSymbols, unexportedFieldSymbols, qualifiedFieldSymbols, constructorSymbols) <-
             fixtureLoreAt fixtureRoot do
-              _ <- loadTargets defaultLoadTargetsOptions
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
               exportedFieldSymbols <- findSymbols "userName"
               unexportedFieldSymbols <- findSymbols "hiddenValue"
               qualifiedFieldSymbols <- findSymbols "Demo.hiddenValue"
@@ -208,7 +208,7 @@ spec =
       it "supports module-qualified hints before filtering candidates" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "Demo.Support.supportSeed"
 
         length result `shouldBe` 1
@@ -218,7 +218,7 @@ spec =
       it "includes non-exported top-level symbols from home modules" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "supportValues"
 
         length result `shouldBe` 1
@@ -231,7 +231,7 @@ spec =
           addRecordFieldLookupFixture fixtureRoot
           (leftTaggedSymbols, rightTaggedSymbols) <-
             fixtureLoreAt fixtureRoot do
-              _ <- loadTargets defaultLoadTargetsOptions
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
               leftTaggedSymbols <- findSymbols "Demo.sharedValue@LeftTagged"
               rightTaggedSymbols <- findSymbols "Demo.sharedValue@RightTagged"
               pure (leftTaggedSymbols, rightTaggedSymbols)
@@ -249,7 +249,7 @@ spec =
       it "supports module-qualified dotted operators" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "Demo.Support..+."
 
         length result `shouldBe` 1
@@ -259,7 +259,7 @@ spec =
       it "supports parenthesized operator queries" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "(.+.)"
 
         length result `shouldBe` 1
@@ -269,7 +269,7 @@ spec =
       it "supports module-qualified parenthesized operator queries" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "Demo.Support.(.+.)"
 
         length result `shouldBe` 1
@@ -279,8 +279,8 @@ spec =
       it "survives two consecutive reloads before findSymbols" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "supportValues"
 
         length result `shouldBe` 1
@@ -292,7 +292,7 @@ spec =
       it "lists exported symbols for the requested module and excludes unexported ones" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             listExportedSymbolsByModule "Demo.Support" Nothing
 
         let occNames = exportedNodeOccNames result
@@ -305,7 +305,7 @@ spec =
       it "returns an empty list when the module is not visible" do
         result <-
           fixtureLore do
-            _ <- loadTargets defaultLoadTargetsOptions
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
             listExportedSymbolsByModule "No.Such.Module" Nothing
 
         null result `shouldBe` True
@@ -319,7 +319,7 @@ spec =
 
           result <-
             fixtureLoreAt fixtureRoot do
-              _ <- loadTargets defaultLoadTargetsOptions
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
               exports <- listExportedSymbolsByModule "TestHint.Filter" Nothing
               pure (filterExportedSymbolNodesByTypeHint "String" exports)
 
@@ -332,7 +332,7 @@ spec =
         withFixtureInstances \fixtureRoot -> do
           (queryMatchCounts, renderedInstances) <-
             fixtureLoreAt fixtureRoot do
-              _ <- loadTargets defaultLoadTargetsOptions
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
               lookupIntersectingInstancesForQueries False ["HasIndex", "Indexed"]
 
           queryMatchCounts `shouldSatisfy` all (> 0)
@@ -342,7 +342,7 @@ spec =
         withFixtureInstances \fixtureRoot -> do
           (queryMatchCounts, renderedInstances) <-
             fixtureLoreAt fixtureRoot do
-              _ <- loadTargets defaultLoadTargetsOptions
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
               lookupIntersectingInstancesForQueries True ["indexedValues", "HasIndex"]
 
           queryMatchCounts `shouldSatisfy` all (> 0)
@@ -352,7 +352,7 @@ spec =
         withFixtureInstances \fixtureRoot -> do
           (queryMatchCounts, renderedInstances) <-
             fixtureLoreAt fixtureRoot do
-              _ <- loadTargets defaultLoadTargetsOptions
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
               lookupIntersectingInstancesForQueries True ["Demo.Indexed", "HasIndex"]
 
           queryMatchCounts `shouldSatisfy` all (> 0)
@@ -362,7 +362,7 @@ spec =
         withFixtureInstances \fixtureRoot -> do
           (queryMatchCounts, renderedInstances) <-
             fixtureLoreAt fixtureRoot do
-              _ <- loadTargets defaultLoadTargetsOptions
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
               lookupIntersectingInstancesForQueries False ["Elem", "Indexed"]
 
           queryMatchCounts `shouldSatisfy` all (> 0)
@@ -373,7 +373,7 @@ spec =
         withFixtureIndirectInstances \fixtureRoot -> do
           (renderedAssociated, renderedDirect) <-
             fixtureLoreAt fixtureRoot do
-              _ <- loadTargets defaultLoadTargetsOptions
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
               indexedSymbolInfos <- lookupRootSymbolInfo "Indexed"
               case indexedSymbolInfos of
                 [] -> pure ([], [])
