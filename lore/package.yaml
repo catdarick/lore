@@ -67,7 +67,6 @@ library:
   - Lore.Lookup.Search
   - Lore.Monad
   - Lore.Project
-  - Lore.Refactor.Imports
   - Lore.Refactor.ImportCleanup.Internal
   - Lore.Session
   - Lore.SourceEdit

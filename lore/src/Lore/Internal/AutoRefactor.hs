@@ -10,12 +10,14 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.Map.Strict as Map
 import qualified GHC
 import Lore.Diagnostics (Diagnostic)
-import Lore.Internal.AutoRefactor.Issue (AutoRefactorIssue)
 import Lore.Internal.ImportCleanup.Apply
   ( ImportCleanupApplyResult (..),
     applyImportCleanup,
     applyImportCleanupFromDiagnostics,
     applyImportCleanupWithDiagnostics,
+  )
+import Lore.Internal.ImportCleanup.Types
+  ( AutoRefactorIssue (..),
   )
 import Lore.Internal.SourceEdit (FileEdit)
 import qualified Lore.Logger as Log

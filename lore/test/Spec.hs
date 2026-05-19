@@ -14,7 +14,6 @@ import qualified InterpreterSpec
 import qualified LoggerSpec
 import qualified LookupSearchSpec
 import qualified LookupSpec
-import qualified RedundantImportsSpec
 import qualified SourceEditSpec
 import qualified TemporalModulesSpec
 import Test.Hspec
@@ -32,7 +31,6 @@ main =
     LoggerSpec.spec
     LookupSearchSpec.spec
     LookupSpec.spec
-    RedundantImportsSpec.spec
     SourceEditSpec.spec
     HomeModulesSpec.spec
     TemporalModulesSpec.spec

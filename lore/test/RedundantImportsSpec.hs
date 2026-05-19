@@ -11,7 +11,7 @@ import Lore.Diagnostics
     DiagnosticSpan (..),
     Span (..),
   )
-import Lore.Refactor.Imports
+import Lore.Refactor.ImportCleanup.Internal
   ( ImportNamespace (..),
     RedundantImportIssue (..),
     RedundantImportedOccurrence (..),

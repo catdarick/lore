@@ -36,7 +36,6 @@ library
       Lore.Lookup.Search
       Lore.Monad
       Lore.Project
-      Lore.Refactor.Imports
       Lore.Refactor.ImportCleanup.Internal
       Lore.Session
       Lore.SourceEdit
@@ -45,10 +44,6 @@ library
       Lore.HomeModules
   other-modules:
       Lore.Internal.AutoRefactor
-      Lore.Internal.AutoRefactor.Edit
-      Lore.Internal.AutoRefactor.ImportDecl
-      Lore.Internal.AutoRefactor.Issue
-      Lore.Internal.AutoRefactor.RedundantImports
       Lore.Internal.Cache.Types
       Lore.Internal.Definition.Analysis
       Lore.Internal.Definition.Cache.CoreModuleFacts
