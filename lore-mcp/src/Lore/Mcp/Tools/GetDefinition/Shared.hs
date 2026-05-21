@@ -199,11 +199,11 @@ quoteTexts values =
 
 omittedDefinitionsSectionHeader :: Text
 omittedDefinitionsSectionHeader =
-  "The following definitions are completely UNCHANGED and were omitted from this tool response to optimize token usage. They are already fresh and valid inside your current context window:"
+  "The following definitions are completely UNCHANGED and valid inside your current context window and were omitted:"
 
 allOmittedDefinitionsSectionHeader :: Text
 allOmittedDefinitionsSectionHeader =
-  "All matching definitions are completely UNCHANGED and were omitted from this tool response to optimize token usage. They are already fresh and valid inside your current context window:"
+  "All matching definitions are completely UNCHANGED and valid inside your current context window and were omitted."
 
 notifyKnowledgeResetHint :: Text
 notifyKnowledgeResetHint =
