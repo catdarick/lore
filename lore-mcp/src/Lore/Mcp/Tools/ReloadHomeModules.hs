@@ -2,10 +2,13 @@ module Lore.Mcp.Tools.ReloadHomeModules where
 
 import Control.Exception (IOException, try)
 import Control.Monad.IO.Class (liftIO)
+import qualified Data.Aeson as J
 import Data.List (foldl', nub)
+import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import GHC.Generics (Generic)
 import Lore
   ( Diagnostic (..),
     DiagnosticSpan (..),
@@ -15,40 +18,59 @@ import Lore
     Span (..),
     loadHomeModules,
   )
+import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.LoreDoc (LoreDoc, bulletList, heading2, heading3, paragraph)
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithoutArgs (..))
+import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Tools.Shared (Paginated (..), paginateItems)
 import Lore.Mcp.Tools.Shared.Diagnostics (diagnosticMessageBody, diagnosticSeverityTitle)
+
+data ReloadHomeModulesArgs (fieldType :: FieldType) = ReloadHomeModulesArgs
+  { skip ::
+      Maybe (Field fieldType Int)
+        `WithMeta` '[ Description "Used for pagination. Number of initial diagnostics to skip. Use it only if you need more context to fix the initial errors.",
+                      Example 5
+                    ]
+  }
+  deriving stock (Generic)
+
+instance J.FromJSON (ReloadHomeModulesArgs 'ValueType)
+
+instance ToSchema (ReloadHomeModulesArgs 'MetadataType)
 
 reloadHomeModulesTool :: (MonadLore m) => SomeTool m
 reloadHomeModulesTool =
-  SomeToolWithoutArgs
-    ToolWithoutArgs
+  SomeToolWithArgs
+    ToolWithArgs
       { name = "reloadHomeModules",
         description = Just "Reloads all home modules, checks for errors, and applies safe auto-fixes when possible. This reload resets interpreter state (interactive bindings are cleared). Run this before tools that need up-to-date module information.",
         handler = reloadHomeModulesHandler
       }
 
-reloadHomeModulesHandler :: (MonadLore m) => m LoreDoc
-reloadHomeModulesHandler = do
+reloadHomeModulesHandler :: (MonadLore m) => ReloadHomeModulesArgs 'ValueType -> m LoreDoc
+reloadHomeModulesHandler ReloadHomeModulesArgs {skip} = do
   loadResult <- loadHomeModules LoadHomeModulesOptions {enableAutoRefactor = True}
-  renderReloadHomeModulesResult loadResult
+  renderReloadHomeModulesResultWithSkip (max 0 (maybe 0 id skip)) loadResult
 
 renderReloadHomeModulesResult :: (MonadLore m) => LoadHomeModulesResult -> m LoreDoc
-renderReloadHomeModulesResult loadResult@LoadHomeModulesResult {loadHomeModulesDiagnostics} =
-  case loadHomeModulesDiagnostics of
+renderReloadHomeModulesResult =
+  renderReloadHomeModulesResultWithSkip 0
+
+renderReloadHomeModulesResultWithSkip :: (MonadLore m) => Int -> LoadHomeModulesResult -> m LoreDoc
+renderReloadHomeModulesResultWithSkip skip loadResult@LoadHomeModulesResult {loadHomeModulesDiagnostics} =
+  case paginatedDiagnostics of
     [] ->
       pure (paragraph statusLine <> autoFixedSummaryDoc loadResult)
     _ -> do
-      let (visibleDiagnostics, hiddenDiagnostics) = splitAt maxRenderedDiagnostics loadHomeModulesDiagnostics
-          visibleGroups = groupDiagnostics visibleDiagnostics
+      let visibleGroups = groupDiagnostics paginatedDiagnostics
       diagnosticsDoc <- mconcat <$> mapM diagnosticGroupDoc visibleGroups
       pure $
         paragraph statusLine
           <> autoFixedSummaryDoc loadResult
           <> diagnosticsDoc
-          <> hiddenDiagnosticsDoc hiddenDiagnostics
+          <> nextPageHintDoc loadHomeModulesDiagnostics diagnosticPage
   where
-    maxRenderedDiagnostics = 5
+    diagnosticPage = paginateDiagnostics skip loadHomeModulesDiagnostics
+    paginatedDiagnostics = maybe [] (.paginatedItems) diagnosticPage
     statusLine
       | loadResult.loadHomeModulesFailed > 0 =
           "Failed to load "
@@ -82,19 +104,33 @@ renderAutofixedFileDoc (filePath, summaries) =
       <> ": "
       <> T.intercalate "; " (map T.pack (nub summaries))
 
-hiddenDiagnosticsDoc :: [Diagnostic] -> LoreDoc
-hiddenDiagnosticsDoc [] =
+nextPageHintDoc :: [Diagnostic] -> Maybe (Paginated Diagnostic) -> LoreDoc
+nextPageHintDoc _ Nothing =
   mempty
-hiddenDiagnosticsDoc hiddenDiagnostics =
-  paragraph $
-    "... and "
-      <> T.pack (show hiddenCount)
-      <> " more diagnostics in "
-      <> T.pack (show hiddenModuleCount)
-      <> " modules."
+nextPageHintDoc allDiagnostics (Just page)
+  | remainingDiagnostics <= 0 =
+      mempty
+  | otherwise =
+      paragraph $
+        "... and "
+          <> T.pack (show remainingDiagnostics)
+          <> " more diagnostics in "
+          <> T.pack (show remainingModuleCount)
+          <> " modules.\nIf you don't have enough context to fix the listed errors, set skip to "
+          <> T.pack (show nextSkip)
+          <> " to get the next page."
   where
-    hiddenCount = length hiddenDiagnostics
-    hiddenModuleCount = length (groupDiagnostics hiddenDiagnostics)
+    nextSkip = page.paginatedSkippedItems + page.paginatedConsumedItems
+    remainingDiagnostics =
+      max 0 (page.paginatedTotalItems - nextSkip)
+    remainingModuleCount =
+      length (groupDiagnostics (drop nextSkip allDiagnostics))
+
+paginateDiagnostics :: Int -> [Diagnostic] -> Maybe (Paginated Diagnostic)
+paginateDiagnostics skip diagnostics =
+  paginateItems skip maxRenderedDiagnostics diagnostics
+  where
+    maxRenderedDiagnostics = 5
 
 data DiagnosticGroupKey
   = DiagnosticFileGroup FilePath
@@ -142,9 +178,18 @@ type SnippetContext = Maybe [Text]
 diagnosticDoc :: SnippetContext -> Diagnostic -> LoreDoc
 diagnosticDoc snippetContext diagnostic =
   heading3 (diagnosticSeverityTitle diagnostic)
-    <> paragraph (diagnosticMessageBody diagnostic)
+    <> paragraph (truncateDiagnosticMessage (diagnosticMessageBody diagnostic))
     <> diagnosticHintsDoc diagnostic.diagnosticHints
     <> diagnosticSnippetDoc snippetContext diagnostic
+
+truncateDiagnosticMessage :: Text -> Text
+truncateDiagnosticMessage message
+  | T.length message > maxDiagnosticMessageLength =
+      T.take maxDiagnosticMessageLength message
+  | otherwise =
+      message
+  where
+    maxDiagnosticMessageLength = 700
 
 diagnosticHintsDoc :: [Text] -> LoreDoc
 diagnosticHintsDoc [] =

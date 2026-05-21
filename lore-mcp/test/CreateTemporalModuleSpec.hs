@@ -40,7 +40,7 @@ spec = do
             modulePathText <- callToolWithoutArgs createTemporalModuleTool
             let modulePath = temporalModulePathFromResponse modulePathText
             liftIO $ writeModule modulePath "temporalValue" "99"
-            _ <- callToolWithoutArgs reloadHomeModulesTool
+            _ <- callToolWithArgs reloadHomeModulesTool (J.object [])
             callToolWithArgs executeCodeTool (J.object ["code" J..= ("temporalValue" :: String)])
 
         executionResult `shouldSatisfy` T.isInfixOf "99"

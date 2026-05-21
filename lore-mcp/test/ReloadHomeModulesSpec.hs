@@ -3,9 +3,10 @@ module ReloadHomeModulesSpec
   )
 where
 
+import qualified Data.Aeson as J
 import qualified Data.Text as T
-import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
-import McpTestSupport (callToolWithoutArgs, fixtureLoreMcpAtWithCache, withFixtureCopy)
+import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool, truncateDiagnosticMessage)
+import McpTestSupport (callToolWithArgs, fixtureLoreMcpAtWithCache, withFixtureCopy)
 import System.FilePath ((</>))
 import Test.Hspec
 
@@ -32,7 +33,7 @@ spec =
 
         result <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
-            callToolWithoutArgs reloadHomeModulesTool
+            callToolWithArgs reloadHomeModulesTool (J.object [])
 
         result `shouldContainText` "Failed to load"
         result `shouldContainText` "BrokenWarnError.hs"
@@ -40,6 +41,26 @@ spec =
         result `shouldContainText` "### Error"
         result `shouldContainText` "^"
         result `shouldNotContainText` "1. error:"
+
+    it "prints next-page skip hint only when there are remaining diagnostics" do
+      withFixtureCopy \fixtureRoot -> do
+        mapM_ (writeBrokenModule fixtureRoot) [1 .. 6 :: Int]
+
+        firstPage <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            callToolWithArgs reloadHomeModulesTool (J.object [])
+
+        secondPage <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            callToolWithArgs reloadHomeModulesTool (J.object ["skip" J..= (5 :: Int)])
+
+        firstPage `shouldContainText` "If you don't have enough context to fix the listed errors, set skip to 5 to get the next page."
+        secondPage `shouldNotContainText` "If you don't have enough context to fix the listed errors, set skip to "
+
+    it "truncates diagnostic message text over 700 symbols" do
+      let longMessage = T.replicate 1200 "x"
+          truncatedMessage = truncateDiagnosticMessage longMessage
+      T.length truncatedMessage `shouldBe` 700
 
 shouldContainText :: T.Text -> T.Text -> Expectation
 shouldContainText actual expected =
@@ -64,3 +85,14 @@ shouldNotContainText actual unexpected =
             <> T.unpack actual
         )
     else pure ()
+
+writeBrokenModule :: FilePath -> Int -> IO ()
+writeBrokenModule fixtureRoot index =
+  writeFile
+    (fixtureRoot </> "src" </> ("BrokenForPagination" <> show index <> ".hs"))
+    ( unlines
+        [ "module BrokenForPagination" <> show index <> " where",
+          "brokenValue :: Int",
+          "brokenValue = \"oops\""
+        ]
+    )
