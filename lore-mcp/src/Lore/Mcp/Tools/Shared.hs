@@ -25,9 +25,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Lore
   ( DefinitionSlice (..),
+    LoadHomeModulesOptions (..),
     LoadHomeModulesResult (..),
     MonadLore,
     interpreterContextIsReady,
+    loadHomeModules,
     lookupLastLoadHomeModulesResult,
     mergeDefinitionSlices,
   )
@@ -39,8 +41,7 @@ data ToolRun a
   | ToolRunReady a
 
 data ToolBlocked
-  = HomeModulesNotLoaded
-  | InterpreterContextNotReady
+  = InterpreterContextNotReady
 
 newtype LoadedSession = LoadedSession
   { loadedSessionLoadResult :: LoadHomeModulesResult
@@ -51,27 +52,19 @@ withLoadedSession ::
   (LoadedSession -> m a) ->
   m (ToolRun a)
 withLoadedSession action = do
-  maybeLoadResult <- lookupLastLoadHomeModulesResult
-  case maybeLoadResult of
-    Nothing ->
-      pure (ToolRunBlocked HomeModulesNotLoaded)
-    Just loadResult ->
-      ToolRunReady <$> action (LoadedSession loadResult)
+  loadResult <- ensureLoadedSession
+  ToolRunReady <$> action (LoadedSession loadResult)
 
 withInterpreterSession ::
   (MonadLore m) =>
   (LoadedSession -> m a) ->
   m (ToolRun a)
 withInterpreterSession action = do
-  maybeLoadResult <- lookupLastLoadHomeModulesResult
-  case maybeLoadResult of
-    Nothing ->
-      pure (ToolRunBlocked HomeModulesNotLoaded)
-    Just loadResult -> do
-      ready <- interpreterContextIsReady
-      if ready
-        then ToolRunReady <$> action (LoadedSession loadResult)
-        else pure (ToolRunBlocked InterpreterContextNotReady)
+  loadResult <- ensureLoadedSession
+  ready <- interpreterContextIsReady
+  if ready
+    then ToolRunReady <$> action (LoadedSession loadResult)
+    else pure (ToolRunBlocked InterpreterContextNotReady)
 
 instance (ToLoreDoc a) => ToLoreDoc (ToolRun a) where
   toLoreDoc = \case
@@ -82,10 +75,17 @@ instance (ToLoreDoc a) => ToLoreDoc (ToolRun a) where
 
 instance ToLoreDoc ToolBlocked where
   toLoreDoc = \case
-    HomeModulesNotLoaded ->
-      paragraph "Home modules have not been loaded yet. Run reloadHomeModules first."
     InterpreterContextNotReady ->
       paragraph "Interpreter context is not ready. Run reloadHomeModules again."
+
+ensureLoadedSession :: (MonadLore m) => m LoadHomeModulesResult
+ensureLoadedSession = do
+  maybeLoadResult <- lookupLastLoadHomeModulesResult
+  case maybeLoadResult of
+    Just loadResult ->
+      pure loadResult
+    Nothing ->
+      loadHomeModules LoadHomeModulesOptions {enableAutoRefactor = True}
 
 data PartialLoadWarning = PartialLoadWarning
   { partialLoadLoaded :: Int,

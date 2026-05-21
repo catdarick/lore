@@ -13,12 +13,13 @@ import Test.Hspec
 spec :: Spec
 spec =
   describe "searchSymbols" do
-    it "returns not-loaded message before targets are loaded" do
+    it "auto-loads home modules on first call" do
       searchResult <-
         fixtureLoreMcp do
           callToolWithArgs searchSymbolsTool (searchSymbolsArgs "supportValues")
 
-      searchResult `shouldBe` "Home modules have not been loaded yet. Run reloadHomeModules first."
+      searchResult `shouldContainText` "similar symbols for \"supportValues\":"
+      searchResult `shouldNotContainText` "Home modules have not been loaded yet."
 
     it "returns fuzzy suggestions for misspelled query symbols" do
       searchResult <-
