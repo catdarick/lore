@@ -9,20 +9,21 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Lore
-  ( MonadLore,
+  ( LoadHomeModulesOptions (..),
+    LoadHomeModulesResult (..),
+    MonadLore,
     RunTestSuiteOptions (..),
     TestSuiteComponentResult (..),
     TestSuiteComponentStatus (..),
+    loadHomeModules,
     runTestSuite,
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.LoreDoc (LoreDoc, ToLoreDoc (toLoreDoc), heading2, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Tools.ReloadHomeModules (renderReloadHomeModulesResult)
 import Lore.Mcp.Tools.Shared
-  ( PartialLoadWarning,
-    ToolRun,
-    loadedSessionPartialWarning,
-    partialLoadWarningDoc,
+  ( ToolRun (..),
     withInterpreterSession,
   )
 import Lore.Mcp.Tools.Shared.Diagnostics (diagnosticSummaryDoc)
@@ -44,30 +45,26 @@ instance J.FromJSON (RunTestSuiteArgs 'ValueType)
 
 instance ToSchema (RunTestSuiteArgs 'MetadataType)
 
-type RunTestSuiteResult = ToolRun RunTestSuiteOutput
+type RunTestSuiteResult = ToolRun LoreDoc
 
 data RunTestSuiteOutput = RunTestSuiteOutput
   { runTestSuitePackageFilter :: Maybe Text,
     runTestSuiteForwardedArgs :: [String],
-    runTestSuiteComponents :: [TestSuiteComponentResult],
-    runTestSuitePartialLoadWarning :: Maybe PartialLoadWarning
+    runTestSuiteComponents :: [TestSuiteComponentResult]
   }
 
 instance ToLoreDoc RunTestSuiteOutput where
   toLoreDoc output =
-    body <> partialLoadWarningDoc output.runTestSuitePartialLoadWarning
-    where
-      body =
-        case output.runTestSuiteComponents of
-          [] ->
-            paragraph $
-              "No test components found"
-                <> packageFilterSuffix output.runTestSuitePackageFilter
-                <> "."
-          _ ->
-            paragraph (summaryLine output)
-              <> paragraph ("Forwarded arguments: " <> T.pack (show output.runTestSuiteForwardedArgs))
-              <> mconcat (map componentResultDoc output.runTestSuiteComponents)
+    case output.runTestSuiteComponents of
+      [] ->
+        paragraph $
+          "No test components found"
+            <> packageFilterSuffix output.runTestSuitePackageFilter
+            <> "."
+      _ ->
+        paragraph (summaryLine output)
+          <> paragraph ("Forwarded arguments: " <> T.pack (show output.runTestSuiteForwardedArgs))
+          <> mconcat (map componentResultDoc output.runTestSuiteComponents)
 
 summaryLine :: RunTestSuiteOutput -> Text
 summaryLine output =
@@ -124,21 +121,25 @@ runTestSuiteTool =
 
 runTestSuiteHandler :: (MonadLore m) => RunTestSuiteArgs 'ValueType -> m RunTestSuiteResult
 runTestSuiteHandler RunTestSuiteArgs {package, testArgs} =
-  withInterpreterSession \session -> do
-    let parsedArgs = maybe [] (parseTestArgs . T.unpack) testArgs
-    componentResults <-
-      runTestSuite
-        RunTestSuiteOptions
-          { packageName = T.unpack <$> package,
-            testArguments = parsedArgs
-          }
-    pure
-      RunTestSuiteOutput
-        { runTestSuitePackageFilter = package,
-          runTestSuiteForwardedArgs = parsedArgs,
-          runTestSuiteComponents = componentResults,
-          runTestSuitePartialLoadWarning = loadedSessionPartialWarning session "Test execution may be incomplete."
-        }
+  do
+    loadResult <- loadHomeModules LoadHomeModulesOptions {enableAutoRefactor = True}
+    if not loadResult.loadHomeModulesSucceeded
+      then ToolRunReady <$> renderReloadHomeModulesResult loadResult
+      else withInterpreterSession \_ -> do
+        let parsedArgs = maybe [] (parseTestArgs . T.unpack) testArgs
+        componentResults <-
+          runTestSuite
+            RunTestSuiteOptions
+              { packageName = T.unpack <$> package,
+                testArguments = parsedArgs
+              }
+        pure $
+          toLoreDoc
+            RunTestSuiteOutput
+              { runTestSuitePackageFilter = package,
+                runTestSuiteForwardedArgs = parsedArgs,
+                runTestSuiteComponents = componentResults
+              }
 
 packageFilterSuffix :: Maybe Text -> Text
 packageFilterSuffix maybePackage =
