@@ -4,7 +4,7 @@ module Lore.Mcp.Protocol.Server
   )
 where
 
-import Control.Exception (SomeException)
+import Control.Exception (SomeException, evaluate)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Aeson (Value, object, (.=))
 import qualified Data.Aeson as J
@@ -22,6 +22,7 @@ import Lore.JsonRpc.Server
     runJsonRpcLoop,
   )
 import qualified Lore.Logger as Log
+import Lore.Mcp.Internal.LoreDoc (LoreDoc, ToLoreDoc (toLoreDoc))
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..), getSomeToolSpec, getToolName)
 import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Notification (..), McpRequest'Tools (..), parseMcpRequest)
 import UnliftIO (MonadUnliftIO, try)
@@ -38,7 +39,8 @@ initialMcpServerState = do
 data McpServer m = McpServer
   { name :: Text,
     initialize :: m (),
-    tools :: [SomeTool m]
+    tools :: [SomeTool m],
+    renderer :: LoreDoc -> Text
   }
 
 runMcpServer :: (MonadUnliftIO m, Log.MonadLogger m) => McpServer m -> m ()
@@ -62,7 +64,7 @@ handleJsonRpcRequest state server jsonRpcRequest = do
   Log.debug $ "Finished handling request"
   pure res
 
-handleMcpRequest :: (MonadUnliftIO m) => McpServerState -> McpServer m -> McpRequest -> m JsonRpcResponse
+handleMcpRequest :: forall m. (MonadUnliftIO m) => McpServerState -> McpServer m -> McpRequest -> m JsonRpcResponse
 handleMcpRequest state server mcpRequest = case mcpRequest of
   Initialize -> do
     server.initialize
@@ -83,9 +85,10 @@ handleMcpRequest state server mcpRequest = case mcpRequest of
           case J.fromJSON <$> args of
             Nothing -> pure $ Left "missing arguments"
             Just (J.Error e) -> pure $ Left ("invalid arguments: " <> T.pack e)
-            Just (J.Success parsedArgs) -> first (T.pack . show) <$> try @_ @SomeException (tool.handler parsedArgs)
-        SomeToolWithoutArgs tool -> do
-          first (T.pack . show) <$> try @_ @SomeException tool.handler
+            Just (J.Success parsedArgs) ->
+              runToolHandler (tool.handler parsedArgs)
+        SomeToolWithoutArgs tool ->
+          runToolHandler tool.handler
       case eiOutput of
         Left err -> pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32602, jsonRpcErrorMessage = err}
         Right output -> pure $ JsonRpcResult (toolCallResult output)
@@ -102,6 +105,13 @@ handleMcpRequest state server mcpRequest = case mcpRequest of
       case find (\someTool -> name == getToolName someTool) server.tools of
         Just someTool -> action someTool
         Nothing -> pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32602, jsonRpcErrorMessage = "tool not found: " <> name}
+    runToolHandler :: forall output. (ToLoreDoc output) => m output -> m (Either Text Text)
+    runToolHandler action =
+      first (T.pack . show) <$> try @_ @SomeException do
+        output <- action
+        let rendered = server.renderer (toLoreDoc output)
+        _ <- liftIO (evaluate (T.length rendered))
+        pure rendered
 
 initializeResult :: Text -> Value
 initializeResult serverName =

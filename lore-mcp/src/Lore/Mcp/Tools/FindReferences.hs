@@ -3,12 +3,11 @@ module Lore.Mcp.Tools.FindReferences
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
 import Data.List (foldl', sortOn)
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -26,20 +25,43 @@ import Lore
     ReferenceHit (..),
     ReferenceMatch (..),
     Symbol (..),
-    lookupLastLoadHomeModulesResult,
     parseAndNormalizeName,
     resolvePathToRoot,
     resolveReferenceMatchesForNames,
   )
 import Lore.Definition.Rendering (chooseBestReferenceContext, getDefinitionSourceTree)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.List (maximumMaybe, minimumMaybe)
+import Lore.Mcp.Internal.List (minimumMaybe)
+import Lore.Mcp.Internal.LoreDoc
+  ( LoreDoc,
+    SourceFile (..),
+    SourceSection (..),
+    ToLoreDoc (toLoreDoc),
+    paragraph,
+    sourceFile,
+  )
 import Lore.Mcp.Internal.SourceSpan (realSrcSpanFromSrcSpan)
-import Lore.Mcp.Internal.SourceText (readSpanLines, readSpanText, relativeSourcePath)
+import Lore.Mcp.Internal.SourceText (readSpanLines, readSpanText)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (PaginatedDefinitionModules (..), appendPartialLoadWarning, paginationSummaryLines)
-import Lore.Mcp.Tools.Shared.SymbolResolution (ResolvedSymbolQuery (resolvedSymbol), withResolvedSymbols)
-import System.Directory (getCurrentDirectory)
+import Lore.Mcp.Tools.Shared
+  ( Paginated (..),
+    PaginationRenderConfig (..),
+    PartialLoadWarning (..),
+    ToolRun (..),
+    loadedSessionPartialWarning,
+    paginateItems,
+    paginationSummaryDoc,
+    withLoadedSession,
+    withPartialLoadWarning,
+  )
+import Lore.Mcp.Tools.Shared.Source (declarationSpansLineRange, definitionSourcePath, definitionSourceRealSrcSpan)
+import Lore.Mcp.Tools.Shared.SymbolResolution
+  ( ResolvedSymbolQuery (resolvedSymbol),
+    SymbolsResolved (resolvedQueries),
+    SymbolsUnresolved,
+    resolveUniqueSymbolQueries,
+    unresolvedSymbolQueriesMessage,
+  )
 
 data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
   { symbol ::
@@ -70,26 +92,75 @@ findReferencesTool =
         handler = findReferencesHandler
       }
 
-findReferencesHandler :: (MonadLore m) => FindReferencesArgs 'ValueType -> m Text
+type FindReferencesResult = ToolRun FindReferencesOutput
+
+data FindReferencesOutput
+  = FindReferencesFailedResult FindReferencesFailure
+  | FindReferencesReadyResult FindReferencesReady
+
+data FindReferencesFailure = FindReferencesFailure
+  { findReferencesFailureReason :: FindReferencesFailureReason,
+    findReferencesFailurePartialLoadWarning :: Maybe PartialLoadWarning
+  }
+
+data FindReferencesFailureReason
+  = FindReferencesUnresolvedSymbols SymbolsUnresolved
+  | FindReferencesInternalError Text
+
+data FindReferencesReady = FindReferencesReady
+  { findReferencesSymbol :: Text,
+    findReferencesPage :: Maybe (Paginated SourceFile),
+    findReferencesPartialLoadWarning :: Maybe PartialLoadWarning
+  }
+
+findReferencesHandler :: (MonadLore m) => FindReferencesArgs 'ValueType -> m FindReferencesResult
 findReferencesHandler FindReferencesArgs {symbol, skip} = do
   let targetName = parseAndNormalizeName symbol
-  maybeLoadResult <- lookupLastLoadHomeModulesResult
-  case maybeLoadResult of
-    Nothing ->
-      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
-    Just loadResult -> do
-      renderedBody <-
-        withResolvedSymbols [symbol] \resolvedQueries ->
-          case resolvedQueries of
-            [resolvedQuery] -> do
-              let matchedSymbol = resolvedQuery.resolvedSymbol
-              rootChain <- NE.toList . (.unPathToRoot) <$> resolvePathToRoot matchedSymbol.name
-              references <- resolveReferenceMatchesForNames (filterRootChainByQuery targetName.occName [matchedSymbol] rootChain)
-              renderedReferences <- renderReferenceDefinitions resolvedSkip references
-              renderReferencesResult symbol renderedReferences
-            _ ->
-              pure "Internal error: expected exactly one resolved symbol query."
-      pure (appendPartialLoadWarning loadResult "Reference results may be incomplete." renderedBody)
+  withLoadedSession \session -> do
+    let partialLoadWarning =
+          loadedSessionPartialWarning session "Reference results may be incomplete."
+    eiResolvedQueries <- resolveUniqueSymbolQueries [symbol]
+    case eiResolvedQueries of
+      Left unresolvedQueries ->
+        pure $
+          FindReferencesFailedResult
+            FindReferencesFailure
+              { findReferencesFailureReason = FindReferencesUnresolvedSymbols unresolvedQueries,
+                findReferencesFailurePartialLoadWarning = partialLoadWarning
+              }
+      Right resolved ->
+        case resolved.resolvedQueries of
+          [resolvedQuery] -> do
+            let matchedSymbol = resolvedQuery.resolvedSymbol
+            rootChain <- NE.toList . (.unPathToRoot) <$> resolvePathToRoot matchedSymbol.name
+            references <- resolveReferenceMatchesForNames (filterRootChainByQuery targetName.occName [matchedSymbol] rootChain)
+            let maybeReferences =
+                  paginateReferenceMatches resolvedSkip references
+            case maybeReferences of
+              Nothing ->
+                pure $
+                  FindReferencesReadyResult
+                    FindReferencesReady
+                      { findReferencesSymbol = symbol,
+                        findReferencesPage = Nothing,
+                        findReferencesPartialLoadWarning = partialLoadWarning
+                      }
+              Just referencePagination -> do
+                renderedPage <- referenceMatchesToPaginatedSourceFiles referencePagination
+                pure $
+                  FindReferencesReadyResult
+                    FindReferencesReady
+                      { findReferencesSymbol = symbol,
+                        findReferencesPage = Just renderedPage,
+                        findReferencesPartialLoadWarning = partialLoadWarning
+                      }
+          _ ->
+            pure $
+              FindReferencesFailedResult
+                FindReferencesFailure
+                  { findReferencesFailureReason = FindReferencesInternalError "Internal error: expected exactly one resolved symbol query.",
+                    findReferencesFailurePartialLoadWarning = partialLoadWarning
+                  }
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
@@ -139,75 +210,30 @@ filterRootChainByQuery targetOccName matchedSymbols rootChain =
       | otherwise =
           (Set.insert name seenNames, name : keptNames)
 
-data PaginatedReferenceMatches = PaginatedReferenceMatches
-  { paginationInfo :: PaginatedDefinitionModules,
-    visibleMatches :: [ReferenceMatch]
-  }
-
-renderReferenceDefinitions :: (MonadLore m) => Int -> [ReferenceMatch] -> m (Maybe PaginatedReferenceMatches)
-renderReferenceDefinitions skip definitionSlices =
-  pure $
-    case sortedMatches of
-      [] ->
-        Nothing
-      _ ->
-        Just
-          PaginatedReferenceMatches
-            { paginationInfo =
-                PaginatedDefinitionModules
-                  { totalItems = length sortedMatches,
-                    skippedItems = resolvedSkip,
-                    shownItems = length pagedMatches,
-                    renderedPage = Nothing
-                  },
-              visibleMatches = pagedMatches
-            }
+paginateReferenceMatches :: Int -> [ReferenceMatch] -> Maybe (Paginated ReferenceMatch)
+paginateReferenceMatches skip referenceMatches =
+  paginateItems resolvedSkip maxRenderedReferenceResults sortedMatches
   where
     sortedMatches =
-      sortOn referenceMatchSortKey definitionSlices
-    totalItems = length sortedMatches
+      sortOn referenceMatchSortKey referenceMatches
     resolvedSkip = min (max 0 skip) totalItems
-    pagedMatches =
-      take maxRenderedReferenceResults (drop resolvedSkip sortedMatches)
+    totalItems = length sortedMatches
 
-renderReferencesResult :: (MonadLore m) => Text -> Maybe PaginatedReferenceMatches -> m Text
-renderReferencesResult symbol renderedReferences =
-  case renderedReferences of
-    Nothing ->
-      pure ("No references found for " <> quoteText symbol <> ".")
-    Just paginatedReferences ->
-      renderReferenceResultsPage paginatedReferences
+referenceMatchesToPaginatedSourceFiles :: (MonadLore m) => Paginated ReferenceMatch -> m (Paginated SourceFile)
+referenceMatchesToPaginatedSourceFiles referencePagination = do
+  sourceFiles <- referenceMatchesToSourceFiles referencePagination.paginatedItems
+  pure
+    Paginated
+      { paginatedTotalItems = referencePagination.paginatedTotalItems,
+        paginatedSkippedItems = referencePagination.paginatedSkippedItems,
+        paginatedShownItems = referencePagination.paginatedShownItems,
+        paginatedConsumedItems = referencePagination.paginatedConsumedItems,
+        paginatedItems = sourceFiles
+      }
 
-quoteText :: Text -> Text
-quoteText value =
-  "\"" <> value <> "\""
-
-referenceResultsSection :: PaginatedDefinitionModules -> [Text]
-referenceResultsSection paginatedReferences =
-  paginationSummaryLines "reference results" "skip" paginatedReferences
-    <> maybe [] pure paginatedReferences.renderedPage
-
-renderReferenceResultsPage :: (MonadLore m) => PaginatedReferenceMatches -> m Text
-renderReferenceResultsPage paginatedReferences =
-  T.intercalate "\n\n"
-    . (referenceResultsSection paginatedReferences.paginationInfo <>)
-    . pure
-    <$> renderedReferenceMatches paginatedReferences.visibleMatches
-
-renderedReferenceMatches :: (MonadLore m) => [ReferenceMatch] -> m Text
-renderedReferenceMatches referenceMatches =
-  T.intercalate "\n\n" <$> mapM renderReferenceModuleGroup (groupByModule referenceMatches)
-
-renderReferenceModuleGroup :: (MonadLore m) => [ReferenceMatch] -> m Text
-renderReferenceModuleGroup [] =
-  pure ""
-renderReferenceModuleGroup moduleMatches@(referenceMatch : _) = do
-  renderedPath <- liftIO $ renderReferenceModulePath referenceMatch.referenceMatchDefinition
-  renderedBlocks <- mapM renderReferenceMatchBlock moduleMatches
-  pure $
-    T.intercalate "\n\n" $
-      ["=== " <> renderedPath <> " ==="]
-        <> renderedBlocks
+referenceMatchesToSourceFiles :: (MonadLore m) => [ReferenceMatch] -> m [SourceFile]
+referenceMatchesToSourceFiles referenceMatches =
+  mapM referenceModuleGroupToSourceFile (groupByModule referenceMatches)
 
 groupByModule :: [ReferenceMatch] -> [[ReferenceMatch]]
 groupByModule [] = []
@@ -216,8 +242,24 @@ groupByModule (referenceMatch : rest) =
         span ((== referenceMatch.referenceMatchDefinition.definitionSourceModule) . (.referenceMatchDefinition.definitionSourceModule)) rest
    in (referenceMatch : matchingModule) : groupByModule remaining
 
-renderReferenceMatchBlock :: (MonadLore m) => ReferenceMatch -> m Text
-renderReferenceMatchBlock referenceMatch = do
+referenceModuleGroupToSourceFile :: (MonadLore m) => [ReferenceMatch] -> m SourceFile
+referenceModuleGroupToSourceFile [] =
+  pure
+    SourceFile
+      { sourceFilePath = "<definition source unavailable>",
+        sourceFileSections = []
+      }
+referenceModuleGroupToSourceFile moduleMatches@(referenceMatch : _) = do
+  renderedPath <- liftIO $ definitionSourcePath referenceMatch.referenceMatchDefinition
+  renderedSections <- mapM referenceMatchToSourceSection moduleMatches
+  pure
+    SourceFile
+      { sourceFilePath = renderedPath,
+        sourceFileSections = renderedSections
+      }
+
+referenceMatchToSourceSection :: (MonadLore m) => ReferenceMatch -> m SourceSection
+referenceMatchToSourceSection referenceMatch = do
   let declarationSpans = referenceMatch.referenceMatchDefinition.definitionSourceSpans
   maybeSourceTree <- getDefinitionSourceTree referenceMatch.referenceMatchDefinition
   let referenceContexts =
@@ -228,12 +270,11 @@ renderReferenceMatchBlock referenceMatch = do
         | occurrence <- referenceMatch.referenceMatchOccurrences
         ]
   snippetText <- liftIO $ renderReferenceSnippet declarationSpans referenceContexts
-  pure $
-    T.intercalate
-      "\n"
-      [ "--- " <> renderReferenceBlockHeader declarationSpans <> " ---",
-        snippetText
-      ]
+  pure
+    SourceSection
+      { sourceSectionTitle = renderReferenceBlockHeader declarationSpans,
+        sourceSectionText = snippetText
+      }
 
 renderReferenceSnippet :: DeclarationSpans -> [(Maybe GHC.SrcSpan, GHC.SrcSpan)] -> IO Text
 renderReferenceSnippet declarationSpans referenceContexts = do
@@ -414,35 +455,6 @@ renderLineRanges declarationLines ranges =
         Nothing -> ""
         Just lineText -> T.takeWhile (== ' ') lineText
 
-renderReferenceModulePath :: DefinitionSource -> IO Text
-renderReferenceModulePath definitionSource =
-  case definitionSourceRealSrcSpan definitionSource of
-    Nothing ->
-      pure "<definition source unavailable>"
-    Just realSrcSpan -> do
-      currentDirectory <- getCurrentDirectory
-      pure . T.pack $
-        relativeSourcePath currentDirectory (Plugins.unpackFS (GHC.srcSpanFile realSrcSpan))
-
-definitionSourceRealSrcSpan :: DefinitionSource -> Maybe GHC.RealSrcSpan
-definitionSourceRealSrcSpan definitionSource =
-  declarationSpansRealSrcSpan definitionSource.definitionSourceSpans
-
-declarationSpansRealSrcSpan :: DeclarationSpans -> Maybe GHC.RealSrcSpan
-declarationSpansRealSrcSpan declarationSpans =
-  realSrcSpanFromSrcSpan declarationSpans.declarationSpan
-    <|> (declarationSpans.signatureSpan >>= realSrcSpanFromSrcSpan)
-
-declarationSpansLineRange :: DeclarationSpans -> Maybe (Int, Int)
-declarationSpansLineRange declarationSpans = do
-  firstSpan <- minimumMaybe realSrcSpans
-  lastSpan <- maximumMaybe realSrcSpans
-  pure (GHC.srcSpanStartLine firstSpan, GHC.srcSpanEndLine lastSpan)
-  where
-    realSrcSpans =
-      mapMaybe realSrcSpanFromSrcSpan $
-        maybeToList declarationSpans.signatureSpan <> [declarationSpans.declarationSpan]
-
 referenceMatchSortKey :: ReferenceMatch -> (String, String, Int, Int)
 referenceMatchSortKey referenceMatch =
   case definitionSourceRealSrcSpan referenceMatch.referenceMatchDefinition of
@@ -454,6 +466,51 @@ referenceMatchSortKey referenceMatch =
       )
     Nothing ->
       (GHC.moduleNameString (GHC.moduleName referenceMatch.referenceMatchDefinition.definitionSourceModule), "", maxBound, maxBound)
+
+instance ToLoreDoc FindReferencesOutput where
+  toLoreDoc = \case
+    FindReferencesFailedResult failed ->
+      toLoreDoc failed
+    FindReferencesReadyResult ready ->
+      renderFindReferencesReady ready
+
+instance ToLoreDoc FindReferencesFailure where
+  toLoreDoc failed =
+    withPartialLoadWarning failed.findReferencesFailurePartialLoadWarning $
+      paragraph (renderFindReferencesFailureReason failed.findReferencesFailureReason)
+
+instance ToLoreDoc FindReferencesFailureReason where
+  toLoreDoc =
+    paragraph . renderFindReferencesFailureReason
+
+renderFindReferencesFailureReason :: FindReferencesFailureReason -> Text
+renderFindReferencesFailureReason = \case
+  FindReferencesUnresolvedSymbols unresolvedQueries ->
+    unresolvedSymbolQueriesMessage unresolvedQueries
+  FindReferencesInternalError message ->
+    message
+
+renderFindReferencesReady :: FindReferencesReady -> LoreDoc
+renderFindReferencesReady ready =
+  case ready.findReferencesPage of
+    Nothing ->
+      withPartialLoadWarning ready.findReferencesPartialLoadWarning $
+        paragraph ("No references found for " <> quoteText ready.findReferencesSymbol <> ".")
+    Just page ->
+      mconcat
+        [ paginationSummaryDoc
+            PaginationRenderConfig
+              { paginationItemLabel = "reference results",
+                paginationSkipArgName = Just "skip"
+              }
+            page,
+          mconcat (map sourceFile page.paginatedItems),
+          maybe mempty toLoreDoc ready.findReferencesPartialLoadWarning
+        ]
+
+quoteText :: Text -> Text
+quoteText value =
+  "\"" <> value <> "\""
 
 maxRenderedReferenceResults :: Int
 maxRenderedReferenceResults = 15

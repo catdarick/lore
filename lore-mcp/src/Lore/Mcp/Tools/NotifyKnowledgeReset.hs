@@ -5,6 +5,7 @@ where
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithoutArgs (..))
 import Lore.Mcp.Monad (MonadLoreMcp, clearSentDefinitionHashes)
 
@@ -17,15 +18,21 @@ notifyKnowledgeResetTool =
         handler = notifyKnowledgeResetHandler
       }
 
-notifyKnowledgeResetHandler :: (MonadLoreMcp m) => m Text
+newtype KnowledgeResetResult = KnowledgeResetResult Int
+
+instance ToLoreDoc KnowledgeResetResult where
+  toLoreDoc (KnowledgeResetResult clearedHashes) =
+    paragraph $
+      "Knowledge reset acknowledged. Cleared "
+        <> T.pack (show clearedHashes)
+        <> " cached definition fingerprint"
+        <> pluralSuffix clearedHashes
+        <> "."
+
+notifyKnowledgeResetHandler :: (MonadLoreMcp m) => m KnowledgeResetResult
 notifyKnowledgeResetHandler = do
   clearedHashes <- clearSentDefinitionHashes
-  pure $
-    "Knowledge reset acknowledged. Cleared "
-      <> T.pack (show clearedHashes)
-      <> " cached definition fingerprint"
-      <> pluralSuffix clearedHashes
-      <> "."
+  pure (KnowledgeResetResult clearedHashes)
 
 pluralSuffix :: Int -> Text
 pluralSuffix count

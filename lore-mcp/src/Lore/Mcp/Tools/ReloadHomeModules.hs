@@ -8,7 +8,6 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Lore
   ( Diagnostic (..),
-    DiagnosticClass (..),
     DiagnosticSpan (..),
     LoadHomeModulesOptions (..),
     LoadHomeModulesResult (..),
@@ -16,8 +15,9 @@ import Lore
     Span (..),
     loadHomeModules,
   )
+import Lore.Mcp.Internal.LoreDoc (LoreDoc, bulletList, heading2, heading3, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithoutArgs (..))
-import Lore.Mcp.Tools.Shared.Diagnostics (compactDiagnosticMessage, renderSummaryLine)
+import Lore.Mcp.Tools.Shared.Diagnostics (diagnosticMessageBody, diagnosticSeverityTitle)
 
 reloadHomeModulesTool :: (MonadLore m) => SomeTool m
 reloadHomeModulesTool =
@@ -28,77 +28,73 @@ reloadHomeModulesTool =
         handler = reloadHomeModulesHandler
       }
 
-reloadHomeModulesHandler :: (MonadLore m) => m Text
+reloadHomeModulesHandler :: (MonadLore m) => m LoreDoc
 reloadHomeModulesHandler = do
   loadResult <- loadHomeModules LoadHomeModulesOptions {enableAutoRefactor = True}
   renderReloadHomeModulesResult loadResult
 
-renderReloadHomeModulesResult :: (MonadLore m) => LoadHomeModulesResult -> m Text
-renderReloadHomeModulesResult loadResult@LoadHomeModulesResult {loadHomeModulesDiagnostics}
-  | null loadHomeModulesDiagnostics =
+renderReloadHomeModulesResult :: (MonadLore m) => LoadHomeModulesResult -> m LoreDoc
+renderReloadHomeModulesResult loadResult@LoadHomeModulesResult {loadHomeModulesDiagnostics} =
+  case loadHomeModulesDiagnostics of
+    [] ->
+      pure (paragraph statusLine <> autoFixedSummaryDoc loadResult)
+    _ -> do
+      let (visibleDiagnostics, hiddenDiagnostics) = splitAt maxRenderedDiagnostics loadHomeModulesDiagnostics
+          visibleGroups = groupDiagnostics visibleDiagnostics
+      diagnosticsDoc <- mconcat <$> mapM diagnosticGroupDoc visibleGroups
       pure $
-        T.pack $
-          unlines
-            ([statusLine] <> autoFixedSummarySection loadResult)
-  | otherwise =
-      do
-        let (visibleDiagnostics, hiddenDiagnostics) = splitAt maxRenderedDiagnostics loadHomeModulesDiagnostics
-            visibleGroups = groupDiagnostics visibleDiagnostics
-        renderedGroups <- mapM renderDiagnosticGroup visibleGroups
-        pure $
-          T.pack . unlines $
-            [ statusLine,
-              ""
-            ]
-              <> autoFixedSummarySection loadResult
-              <> ["" | not (null (autoFixedSummarySection loadResult))]
-              <> concatMap (<> [""]) renderedGroups
-              <> hiddenDiagnosticsSummary hiddenDiagnostics
+        paragraph statusLine
+          <> autoFixedSummaryDoc loadResult
+          <> diagnosticsDoc
+          <> hiddenDiagnosticsDoc hiddenDiagnostics
   where
     maxRenderedDiagnostics = 5
     statusLine
       | loadResult.loadHomeModulesFailed > 0 =
           "Failed to load "
-            <> show loadResult.loadHomeModulesFailed
+            <> T.pack (show loadResult.loadHomeModulesFailed)
             <> " of "
-            <> show loadResult.loadHomeModulesTotal
+            <> T.pack (show loadResult.loadHomeModulesTotal)
             <> " modules."
       | loadResult.loadHomeModulesAutofixed > 0 =
           "Successfully loaded all "
-            <> show loadResult.loadHomeModulesTotal
+            <> T.pack (show loadResult.loadHomeModulesTotal)
             <> " modules after auto-fixing "
-            <> show loadResult.loadHomeModulesAutofixed
+            <> T.pack (show loadResult.loadHomeModulesAutofixed)
             <> ". No errors left."
       | otherwise =
           "Successfully loaded all "
-            <> show loadResult.loadHomeModulesTotal
+            <> T.pack (show loadResult.loadHomeModulesTotal)
             <> " modules. No errors found."
 
-hiddenDiagnosticsSummary :: [Diagnostic] -> [String]
-hiddenDiagnosticsSummary [] = []
-hiddenDiagnosticsSummary hiddenDiagnostics =
-  [ "... and "
-      <> show hiddenCount
+autoFixedSummaryDoc :: LoadHomeModulesResult -> LoreDoc
+autoFixedSummaryDoc loadResult
+  | null loadResult.loadHomeModulesAutofixSummaryByFile =
+      mempty
+  | otherwise =
+      heading2 "Safe fixes applied"
+        <> bulletList (map renderAutofixedFileDoc loadResult.loadHomeModulesAutofixSummaryByFile)
+
+renderAutofixedFileDoc :: (FilePath, [String]) -> LoreDoc
+renderAutofixedFileDoc (filePath, summaries) =
+  paragraph $
+    T.pack filePath
+      <> ": "
+      <> T.intercalate "; " (map T.pack (nub summaries))
+
+hiddenDiagnosticsDoc :: [Diagnostic] -> LoreDoc
+hiddenDiagnosticsDoc [] =
+  mempty
+hiddenDiagnosticsDoc hiddenDiagnostics =
+  paragraph $
+    "... and "
+      <> T.pack (show hiddenCount)
       <> " more diagnostics in "
-      <> show hiddenModuleCount
+      <> T.pack (show hiddenModuleCount)
       <> " modules."
-  ]
   where
     hiddenCount = length hiddenDiagnostics
     hiddenModuleCount = length (groupDiagnostics hiddenDiagnostics)
-
-autoFixedSummarySection :: LoadHomeModulesResult -> [String]
-autoFixedSummarySection loadResult
-  | null loadResult.loadHomeModulesAutofixSummaryByFile = []
-  | otherwise =
-      [ "Safe fixes applied:"
-      ]
-        <> concatMap renderAutofixedFileSummary loadResult.loadHomeModulesAutofixSummaryByFile
-
-renderAutofixedFileSummary :: (FilePath, [String]) -> [String]
-renderAutofixedFileSummary (filePath, summaries) =
-  ["  - " <> filePath]
-    <> map ("      * " <>) (nub summaries)
 
 data DiagnosticGroupKey
   = DiagnosticFileGroup FilePath
@@ -129,37 +125,43 @@ diagnosticGroupKey Diagnostic {diagnosticSpan} =
     UnhelpfulDiagnosticSpan spanText ->
       DiagnosticOtherGroup spanText
 
-renderDiagnosticGroup :: (MonadLore m) => DiagnosticGroup -> m [String]
-renderDiagnosticGroup (groupKey, diagnostics) = do
+diagnosticGroupDoc :: (MonadLore m) => DiagnosticGroup -> m LoreDoc
+diagnosticGroupDoc (groupKey, diagnostics) = do
   snippetContext <- loadSnippetContext groupKey
   pure $
-    diagnosticGroupHeader groupKey
-      : concatMap (\(index, diagnostic) -> renderDiagnosticBlock snippetContext groupKey index diagnostic) (zip [1 :: Int ..] diagnostics)
+    heading2 (diagnosticGroupTitle groupKey)
+      <> mconcat (map (diagnosticDoc snippetContext) diagnostics)
+
+diagnosticGroupTitle :: DiagnosticGroupKey -> Text
+diagnosticGroupTitle = \case
+  DiagnosticFileGroup filePath -> T.pack filePath
+  DiagnosticOtherGroup spanText -> spanText
 
 type SnippetContext = Maybe [Text]
 
-renderDiagnosticBlock :: SnippetContext -> DiagnosticGroupKey -> Int -> Diagnostic -> [String]
-renderDiagnosticBlock snippetContext _groupKey index diagnostic@Diagnostic {diagnosticSeverity, diagnosticMessage, diagnosticHints} =
-  [ "  " <> show index <> ". " <> summaryLine
-  ]
-    <> map ("      " <>) detailLines
-    <> hintLines diagnosticHints
-    <> snippetLines snippetContext diagnostic
-  where
-    compactLines = compactDiagnosticMessage diagnosticMessage
-    summaryLine =
-      renderSummaryLine diagnosticSeverity compactLines
-    detailLines = tailOrEmpty compactLines
+diagnosticDoc :: SnippetContext -> Diagnostic -> LoreDoc
+diagnosticDoc snippetContext diagnostic =
+  heading3 (diagnosticSeverityTitle diagnostic)
+    <> paragraph (diagnosticMessageBody diagnostic)
+    <> diagnosticHintsDoc diagnostic.diagnosticHints
+    <> diagnosticSnippetDoc snippetContext diagnostic
 
-hintLines :: [Text] -> [String]
-hintLines [] = []
-hintLines hints =
-  "      hints:" : map (("        - " <>) . T.unpack) hints
+diagnosticHintsDoc :: [Text] -> LoreDoc
+diagnosticHintsDoc [] =
+  mempty
+diagnosticHintsDoc hints =
+  paragraph "Hints:"
+    <> bulletList (map paragraph hints)
 
-diagnosticGroupHeader :: DiagnosticGroupKey -> String
-diagnosticGroupHeader = \case
-  DiagnosticFileGroup filePath -> filePath
-  DiagnosticOtherGroup spanText -> T.unpack spanText
+diagnosticSnippetDoc :: SnippetContext -> Diagnostic -> LoreDoc
+diagnosticSnippetDoc Nothing _ =
+  mempty
+diagnosticSnippetDoc (Just fileLines) Diagnostic {diagnosticSpan = RealDiagnosticSpan span'} =
+  case renderSnippet fileLines span' of
+    [] -> mempty
+    renderedLines -> paragraph (T.intercalate "\n" (map T.pack renderedLines))
+diagnosticSnippetDoc (Just _) Diagnostic {diagnosticSpan = UnhelpfulDiagnosticSpan {}} =
+  mempty
 
 loadSnippetContext :: (MonadLore m) => DiagnosticGroupKey -> m SnippetContext
 loadSnippetContext = \case
@@ -171,14 +173,6 @@ loadSnippetContext = \case
         Left _ -> Nothing
   DiagnosticOtherGroup {} ->
     pure Nothing
-
-snippetLines :: SnippetContext -> Diagnostic -> [String]
-snippetLines Nothing _ = []
-snippetLines (Just fileLines) Diagnostic {diagnosticSpan = RealDiagnosticSpan span'} =
-  case renderSnippet fileLines span' of
-    [] -> []
-    renderedLines -> map ("      " <>) renderedLines
-snippetLines (Just _) Diagnostic {diagnosticSpan = UnhelpfulDiagnosticSpan {}} = []
 
 renderSnippet :: [Text] -> Span -> [String]
 renderSnippet fileLines Span {spanStartLine, spanStartCol, spanEndLine, spanEndCol}
@@ -228,17 +222,3 @@ safeLine values lineNumber
 padLeft :: Int -> String -> String
 padLeft width value =
   replicate (max 0 (width - length value)) ' ' <> value
-
-tailOrEmpty :: [a] -> [a]
-tailOrEmpty [] = []
-tailOrEmpty (_ : rest) = rest
-
-isErrorLikeDiagnostic :: Diagnostic -> Bool
-isErrorLikeDiagnostic Diagnostic {diagnosticClass, diagnosticSeverity} =
-  diagnosticClass == DiagFatal
-    || maybe False (isErrorSeverity . show) diagnosticSeverity
-
-isErrorSeverity :: String -> Bool
-isErrorSeverity renderedSeverity =
-  renderedSeverity == "SevError"
-    || renderedSeverity == "SevFatal"

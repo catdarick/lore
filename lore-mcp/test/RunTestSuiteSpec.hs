@@ -7,7 +7,7 @@ import qualified Data.Aeson as J
 import qualified Data.Text as T
 import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
 import Lore.Mcp.Tools.RunTestSuite (runTestSuiteTool)
-import McpTestSupport (callToolWithArgs, callToolWithoutArgs, fixtureLoreMcpAtWithCache, withFixtureCopy)
+import McpTestSupport (callToolWithArgs, callToolWithoutArgs, fixtureLoreMcp, fixtureLoreMcpAtWithCache, withFixtureCopy)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import Test.Hspec
@@ -46,6 +46,37 @@ spec =
               )
 
         result `shouldContainText` "No test components found for package \"unknown-package\"."
+
+    it "keeps partial-load warning when package filter matches no test components" do
+      withFixtureCopy \fixtureRoot -> do
+        addFixtureTestComponent fixtureRoot
+        writeFile
+          (fixtureRoot </> "src" </> "BrokenForPartialLoad.hs")
+          ( unlines
+              [ "module BrokenForPartialLoad where",
+                "brokenValue :: Int",
+                "brokenValue = \"oops\""
+              ]
+          )
+        result <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            _ <- callToolWithoutArgs reloadHomeModulesTool
+            callToolWithArgs
+              runTestSuiteTool
+              ( J.object
+                  [ "package" J..= ("unknown-package" :: String)
+                  ]
+              )
+
+        result `shouldContainText` "No test components found for package \"unknown-package\"."
+        result `shouldContainText` "Warning: only "
+
+    it "returns shared not-loaded message before reload" do
+      result <-
+        fixtureLoreMcp do
+          callToolWithArgs runTestSuiteTool (J.object [])
+
+      result `shouldBe` "Home modules have not been loaded yet. Run reloadHomeModules first."
 
 shouldContainText :: T.Text -> T.Text -> Expectation
 shouldContainText actual expected =

@@ -25,6 +25,7 @@ import Lore.Mcp.Internal.DirectoryTree
     describeDirectoryError,
     discoverDirectory,
   )
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 
 data DiscoverDirectoryArgs (fieldType :: FieldType) = DiscoverDirectoryArgs
@@ -51,15 +52,26 @@ discoverDirectoryTool =
         handler = discoverDirectoryHandler
       }
 
-discoverDirectoryHandler :: (MonadLore m) => DiscoverDirectoryArgs 'ValueType -> m Text
+data DiscoverDirectoryResult
+  = DiscoverDirectoryFailed Text
+  | DiscoverDirectoryReady DirectoryTree
+
+instance ToLoreDoc DiscoverDirectoryResult where
+  toLoreDoc = \case
+    DiscoverDirectoryFailed message ->
+      paragraph message
+    DiscoverDirectoryReady tree ->
+      paragraph (renderDirectoryTree tree)
+
+discoverDirectoryHandler :: (MonadLore m) => DiscoverDirectoryArgs 'ValueType -> m DiscoverDirectoryResult
 discoverDirectoryHandler DiscoverDirectoryArgs {path} = do
   discoveredTree <- discoverDirectory options
   pure $
     case discoveredTree of
       Left directoryError ->
-        T.pack (describeDirectoryError directoryError)
+        DiscoverDirectoryFailed (T.pack (describeDirectoryError directoryError))
       Right directoryTree ->
-        renderDirectoryTree directoryTree
+        DiscoverDirectoryReady directoryTree
   where
     options =
       defaultDirectoryTreeDiscoveryOptions

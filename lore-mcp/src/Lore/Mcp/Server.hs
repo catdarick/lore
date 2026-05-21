@@ -11,6 +11,7 @@ import qualified Data.Set as Set
 import Data.Text (pack)
 import qualified Data.Text as T
 import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConfig (..), noLogHandle, prettyLoggerHandle)
+import Lore.Mcp.Internal.LoreDoc.Markdown (renderLoreDocMarkdown)
 import Lore.Mcp.Internal.Tool (SomeTool, getToolName)
 import Lore.Mcp.Monad (newLoreMcpContext, runLoreMcp)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
@@ -47,7 +48,8 @@ runLoreMcpServer = do
       McpServer
         { name = "lore",
           initialize = pure (),
-          tools = enabledTools
+          tools = enabledTools,
+          renderer = renderLoreDocMarkdown
         }
   where
     getTools definitionKnowledgeCacheEnabled notifyKnowledgeResetToolEnabled maybeFeedbackFilePath =

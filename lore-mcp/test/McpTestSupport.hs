@@ -21,6 +21,8 @@ import Lore
     loadHomeModules,
     noLogHandle,
   )
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc))
+import Lore.Mcp.Internal.LoreDoc.Markdown (renderLoreDocMarkdown)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..))
 import Lore.Mcp.Monad (LoreMcpMonad, newLoreMcpContext, runLoreMcp)
 import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, listDirectory, makeAbsolute, removeFile, removePathForcibly)
@@ -88,7 +90,7 @@ callToolWithArgs someTool args =
               <> ": "
               <> errorMessage
         J.Success parsedArgs ->
-          tool.handler parsedArgs
+          renderLoreDocMarkdown . toLoreDoc <$> tool.handler parsedArgs
     SomeToolWithoutArgs tool ->
       error $
         "Tool "
@@ -99,7 +101,7 @@ callToolWithoutArgs :: SomeTool LoreMcpMonad -> LoreMcpMonad T.Text
 callToolWithoutArgs someTool =
   case someTool of
     SomeToolWithoutArgs tool ->
-      tool.handler
+      renderLoreDocMarkdown . toLoreDoc <$> tool.handler
     SomeToolWithArgs tool ->
       error $
         "Tool "

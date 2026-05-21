@@ -1,9 +1,12 @@
 module Lore.Mcp.Tools.Shared.SymbolResolution
   ( ResolvedSymbolQuery (..),
     UnresolvedSymbolQuery (..),
+    SymbolsResolved (..),
+    SymbolsUnresolved (..),
+    SymbolResolutionResult (..),
     resolveUniqueSymbolQueries,
-    withResolvedSymbols,
-    renderUnresolvedSymbolQueries,
+    resolveSymbolQueries,
+    unresolvedSymbolQueriesMessage,
   )
 where
 
@@ -23,6 +26,7 @@ import Lore
     parseAndNormalizeName,
     resolvePathToRoot,
   )
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), paragraph)
 
 data ResolvedSymbolQuery = ResolvedSymbolQuery
   { queryText :: !Text,
@@ -31,27 +35,37 @@ data ResolvedSymbolQuery = ResolvedSymbolQuery
     resolvedRootName :: !Plugins.Name
   }
 
+newtype SymbolsResolved = MkSymbolsResolved
+  { resolvedQueries :: [ResolvedSymbolQuery]
+  }
+
 data UnresolvedSymbolQuery
   = UnresolvedSymbolQuery'Missing !Text
-  | UnresolvedSymbolQuery'Ambiguous !Text !NormalizedName ![Symbol] ![Plugins.Name]
+  | UnresolvedSymbolQuery'Ambiguous !Text ![Text]
 
-resolveUniqueSymbolQueries :: (MonadLore m) => [Text] -> m (Either [UnresolvedSymbolQuery] [ResolvedSymbolQuery])
+newtype SymbolsUnresolved = MkSymbolsUnresolved
+  { unresolvedQueries :: [UnresolvedSymbolQuery]
+  }
+
+data SymbolResolutionResult
+  = SymbolQueriesResolved SymbolsResolved
+  | SymbolQueriesUnresolved SymbolsUnresolved
+
+resolveUniqueSymbolQueries :: (MonadLore m) => [Text] -> m (Either SymbolsUnresolved SymbolsResolved)
 resolveUniqueSymbolQueries queries = do
   resolutions <- mapM resolveOneQuery queries
-  let unresolvedQueries = [unresolvedQuery | Left unresolvedQuery <- resolutions]
+  let unresolved = [unresolvedQuery | Left unresolvedQuery <- resolutions]
   pure
-    if null unresolvedQueries
-      then Right [resolvedQuery | Right resolvedQuery <- resolutions]
-      else Left unresolvedQueries
+    if null unresolved
+      then Right (MkSymbolsResolved [resolvedQuery | Right resolvedQuery <- resolutions])
+      else Left (MkSymbolsUnresolved unresolved)
 
-withResolvedSymbols :: (MonadLore m) => [Text] -> ([ResolvedSymbolQuery] -> m Text) -> m Text
-withResolvedSymbols queries onResolved = do
-  resolvedQueries <- resolveUniqueSymbolQueries queries
-  case resolvedQueries of
-    Left unresolvedQueries ->
-      renderUnresolvedSymbolQueries unresolvedQueries
-    Right uniqueQueries ->
-      onResolved uniqueQueries
+resolveSymbolQueries :: (MonadLore m) => [Text] -> m SymbolResolutionResult
+resolveSymbolQueries queries = do
+  eiResolved <- resolveUniqueSymbolQueries queries
+  pure $ case eiResolved of
+    Left unresolved -> SymbolQueriesUnresolved unresolved
+    Right resolved -> SymbolQueriesResolved resolved
 
 resolveOneQuery :: (MonadLore m) => Text -> m (Either UnresolvedSymbolQuery ResolvedSymbolQuery)
 resolveOneQuery query = do
@@ -89,8 +103,9 @@ resolveOneQuery query = do
                 )
             [] ->
               pure (Left (UnresolvedSymbolQuery'Missing query))
-        _ ->
-          pure (Left (UnresolvedSymbolQuery'Ambiguous query normalizedQuery matchingSymbols rootNames))
+        _ -> do
+          disambiguationHints <- renderDisambiguationHints query normalizedQuery matchingSymbols rootNames
+          pure (Left (UnresolvedSymbolQuery'Ambiguous query disambiguationHints))
 
 resolveSymbolRoot :: (MonadLore m) => Symbol -> m (Symbol, Plugins.Name)
 resolveSymbolRoot symbol = do
@@ -101,29 +116,28 @@ resolveRootName :: (MonadLore m) => Plugins.Name -> m Plugins.Name
 resolveRootName name =
   NE.last . (.unPathToRoot) <$> resolvePathToRoot name
 
-renderUnresolvedSymbolQueries :: (MonadLore m) => [UnresolvedSymbolQuery] -> m Text
-renderUnresolvedSymbolQueries unresolvedQueries = do
-  renderedQueries <- mapM renderUnresolvedQuery unresolvedQueries
-  pure (T.intercalate "\n\n" renderedQueries)
+instance ToLoreDoc SymbolsUnresolved where
+  toLoreDoc =
+    paragraph . unresolvedSymbolQueriesMessage
 
-renderUnresolvedQuery :: (MonadLore m) => UnresolvedSymbolQuery -> m Text
-renderUnresolvedQuery unresolvedQuery =
+unresolvedSymbolQueriesMessage :: SymbolsUnresolved -> Text
+unresolvedSymbolQueriesMessage unresolvedQueries =
+  T.intercalate "\n\n" (map renderUnresolvedSymbolQuery unresolvedQueries.unresolvedQueries)
+
+renderUnresolvedSymbolQuery :: UnresolvedSymbolQuery -> Text
+renderUnresolvedSymbolQuery unresolvedQuery =
   case unresolvedQuery of
     UnresolvedSymbolQuery'Missing queryText ->
-      pure ("No symbols found for " <> quoteText queryText <> ".")
-    UnresolvedSymbolQuery'Ambiguous queryText parsedQuery matchedSymbols matchedRoots ->
-      do
-        disambiguationHints <- renderDisambiguationHints queryText parsedQuery matchedSymbols matchedRoots
-        pure
-          ( T.intercalate
-              "\n"
-              ( [ "The requested name " <> quoteText queryText <> " is ambiguous. More qualification is required:",
-                  ""
-                ]
-                  <> map ("  - " <>) disambiguationHints
-                  <> ["", "Run the tool again with a fully qualified symbol name from the list above."]
-              )
-          )
+      "No symbols found for " <> quoteText queryText <> "."
+    UnresolvedSymbolQuery'Ambiguous queryText disambiguationHints ->
+      T.intercalate
+        "\n"
+        ( [ "The requested name " <> quoteText queryText <> " is ambiguous. More qualification is required:",
+            ""
+          ]
+            <> map ("  - " <>) disambiguationHints
+            <> ["", "Run the tool again with a fully qualified symbol name from the list above."]
+        )
 
 renderDisambiguationHints :: (MonadLore m) => Text -> NormalizedName -> [Symbol] -> [Plugins.Name] -> m [Text]
 renderDisambiguationHints queryText parsedQuery matchedSymbols matchedRoots = do
@@ -162,7 +176,7 @@ ownerHintResolvesUniquely :: (MonadLore m) => Text -> m Bool
 ownerHintResolvesUniquely query = do
   maybeResolution <- resolveUniqueSymbolQueries [query]
   pure $ case maybeResolution of
-    Right [_] -> True
+    Right (MkSymbolsResolved [_]) -> True
     _ -> False
 
 renderName :: Plugins.Name -> String

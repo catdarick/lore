@@ -4,9 +4,8 @@ module Lore.Mcp.Tools.DiscoverProject
 where
 
 import Control.Monad.RWS (asks)
-import Data.List (intercalate, isPrefixOf, isSuffixOf, sortOn)
+import Data.List (isPrefixOf, isSuffixOf, sortOn)
 import qualified Data.Set as Set
-import Data.Text (Text)
 import qualified Data.Text as T
 import Lore
   ( ComponentData (..),
@@ -16,6 +15,7 @@ import Lore
     PackageData (..),
     discoverProject,
   )
+import Lore.Mcp.Internal.LoreDoc (LoreDoc, bulletList, heading2, heading3, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithoutArgs (..))
 import Lore.Session (SessionContext (..))
 import System.FilePath (dropTrailingPathSeparator, makeRelative, normalise, splitDirectories, (</>))
@@ -29,56 +29,52 @@ discoverProjectTool =
         handler = discoverProjectHandler
       }
 
-discoverProjectHandler :: (MonadLore m) => m Text
+discoverProjectHandler :: (MonadLore m) => m LoreDoc
 discoverProjectHandler = do
   rootPath <- asks projectRoot
   packages <- discoverProject
   pure (renderDiscoverProject rootPath (sortOn packageYamlPath packages))
 
-renderDiscoverProject :: FilePath -> [PackageData] -> Text
+renderDiscoverProject :: FilePath -> [PackageData] -> LoreDoc
 renderDiscoverProject _ [] =
-  "No package.yaml files were found under the project root."
+  paragraph "No package.yaml files were found under the project root."
 renderDiscoverProject projectRoot packages =
-  T.pack (intercalate "\n\n" (map (renderPackage projectRoot) packages))
+  mconcat (map (renderPackage projectRoot) packages)
 
-renderPackage :: FilePath -> PackageData -> String
+renderPackage :: FilePath -> PackageData -> LoreDoc
 renderPackage projectRoot packageData =
-  intercalate "\n\n" (packageBlock : componentBlocks)
+  heading2 ("Package: " <> T.pack packageData.packageName)
+    <> bulletList
+      [ paragraph ("package root: " <> T.pack (renderDirectoryPath (toProjectRelativePath projectRoot packageData.packageRoot))),
+        paragraph ("package.yaml: " <> T.pack (toProjectRelativePath projectRoot packageData.packageYamlPath)),
+        paragraph ("shared dependencies: " <> T.pack (renderStringSet sharedDependencies)),
+        paragraph ("shared GHC options: " <> T.pack (renderStringSet sharedGhcOptions)),
+        paragraph ("shared extensions: " <> T.pack (renderStringSet sharedExtensions))
+      ]
+    <> mconcat componentDocs
   where
     sharedDependencies = commonSetIntersection (map dependencies packageData.components)
     sharedGhcOptions = commonSetIntersection (map (Set.map unGhcOption . ghcOptions) packageData.components)
     sharedExtensions = commonSetIntersection (map (Set.map unGhcExtension . defaultExtensions) packageData.components)
 
-    packageBlock =
-      intercalate
-        "\n"
-        [ "## Package: " <> packageData.packageName,
-          "- package root: " <> renderDirectoryPath (toProjectRelativePath projectRoot packageData.packageRoot),
-          "- package.yaml: " <> toProjectRelativePath projectRoot packageData.packageYamlPath,
-          "- shared dependencies: " <> renderStringSet sharedDependencies,
-          "- shared GHC options: " <> renderStringSet sharedGhcOptions,
-          "- shared extensions: " <> renderStringSet sharedExtensions
-        ]
-
-    componentBlocks =
+    componentDocs =
       case sortOn componentName packageData.components of
-        [] -> ["### Component: (none)"]
+        [] -> [heading3 "Component: (none)"]
         components ->
           map
             (renderComponent projectRoot packageData.packageRoot sharedDependencies sharedGhcOptions sharedExtensions)
             components
 
-renderComponent :: FilePath -> FilePath -> Set.Set String -> Set.Set String -> Set.Set String -> ComponentData -> String
+renderComponent :: FilePath -> FilePath -> Set.Set String -> Set.Set String -> Set.Set String -> ComponentData -> LoreDoc
 renderComponent projectRoot packageRoot sharedDependencies sharedGhcOptions sharedExtensions componentData =
-  intercalate
-    "\n"
-    [ "### Component: " <> componentData.componentName,
-      "- source dirs: " <> renderDirectorySet (Set.map (toProjectRelativePath projectRoot . (packageRoot </>)) componentData.sourceDirs),
-      "- main module: " <> maybe "(none)" (toProjectRelativePath projectRoot) (resolveMainModulePath packageRoot componentData.sourceDirs componentData.mainModulePath),
-      "- component specific dependencies: " <> renderStringSet (componentData.dependencies Set.\\ sharedDependencies),
-      "- component specific GHC options: " <> renderStringSet (Set.map unGhcOption componentData.ghcOptions Set.\\ sharedGhcOptions),
-      "- component specific extensions: " <> renderStringSet (Set.map unGhcExtension componentData.defaultExtensions Set.\\ sharedExtensions)
-    ]
+  heading3 ("Component: " <> T.pack componentData.componentName)
+    <> bulletList
+      [ paragraph ("source dirs: " <> T.pack (renderDirectorySet (Set.map (toProjectRelativePath projectRoot . (packageRoot </>)) componentData.sourceDirs))),
+        paragraph ("main module: " <> maybe "(none)" (T.pack . toProjectRelativePath projectRoot) (resolveMainModulePath packageRoot componentData.sourceDirs componentData.mainModulePath)),
+        paragraph ("component specific dependencies: " <> T.pack (renderStringSet (componentData.dependencies Set.\\ sharedDependencies))),
+        paragraph ("component specific GHC options: " <> T.pack (renderStringSet (Set.map unGhcOption componentData.ghcOptions Set.\\ sharedGhcOptions))),
+        paragraph ("component specific extensions: " <> T.pack (renderStringSet (Set.map unGhcExtension componentData.defaultExtensions Set.\\ sharedExtensions)))
+      ]
 
 renderStringSet :: Set.Set String -> String
 renderStringSet values =
@@ -129,4 +125,4 @@ commonSetIntersection sets = foldr1 Set.intersection sets
 
 renderList :: [String] -> String
 renderList [] = "(none)"
-renderList values = intercalate ", " values
+renderList values = T.unpack (T.intercalate ", " (map T.pack values))

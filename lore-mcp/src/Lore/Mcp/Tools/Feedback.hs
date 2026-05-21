@@ -13,6 +13,7 @@ import qualified Data.Text.IO as TIO
 import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
@@ -46,14 +47,20 @@ feedbackTool feedbackFilePath =
         handler = feedbackHandler feedbackFilePath
       }
 
-feedbackHandler :: (MonadLore m) => FilePath -> FeedbackArgs 'ValueType -> m Text
+newtype FeedbackResult = FeedbackAppended FilePath
+
+instance ToLoreDoc FeedbackResult where
+  toLoreDoc (FeedbackAppended path) =
+    paragraph ("Feedback appended to " <> T.pack path <> ".")
+
+feedbackHandler :: (MonadLore m) => FilePath -> FeedbackArgs 'ValueType -> m FeedbackResult
 feedbackHandler feedbackFilePath FeedbackArgs {title, content} = do
   liftIO do
     let targetDirectory = takeDirectory feedbackFilePath
     when (not (null targetDirectory) && targetDirectory /= ".") do
       createDirectoryIfMissing True targetDirectory
     TIO.appendFile feedbackFilePath (renderFeedbackEntry title content)
-  pure ("Feedback appended to " <> T.pack feedbackFilePath <> ".")
+  pure (FeedbackAppended feedbackFilePath)
 
 renderFeedbackEntry :: Text -> Text -> Text
 renderFeedbackEntry title content =

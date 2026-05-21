@@ -17,19 +17,24 @@ import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
 import Lore (DeclarationSpans (..), DefinitionId, DefinitionSource (..), MonadLore, NamedDefinitionSource (..))
 import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), Maximum, MinItems, Minimum, WithMeta)
+import Lore.Mcp.Internal.LoreDoc (SourceFile)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Monad (MonadLoreMcp (..), sentDefinitionHashes)
 import Lore.Mcp.Tools.GetDefinition.Shared
-  ( CommonGetDefinitionArgs (..),
+  ( BuildDefinitionsStrategy,
+    CommonGetDefinitionArgs (..),
     FilteredDefinitions (..),
+    GetDefinitionResult,
     PaginatedDefinitionSources (..),
+    buildPaginatedDefinitionSourceFiles,
     defaultRecursionDepth,
     getDefinitionHandlerWithStrategy,
     maxRenderedDefinitionResults,
+    mkOmittedDefinitions,
     paginateDefinitionSources,
-    renderPaginatedDefinitionSources,
   )
-import qualified Lore.Mcp.Tools.Shared as Shared
+import Lore.Mcp.Tools.Shared (Paginated (..))
+import Lore.Mcp.Tools.Shared.Source (declarationBodyText)
 import Text.Printf (printf)
 
 data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
@@ -67,9 +72,9 @@ cachedGetDefinitionTool shouldRenderNotifyKnowledgeResetHint =
         handler = cachedGetDefinitionHandler shouldRenderNotifyKnowledgeResetHint
       }
 
-cachedGetDefinitionHandler :: (MonadLoreMcp m) => Bool -> GetDefinitionArgs 'ValueType -> m Text
+cachedGetDefinitionHandler :: (MonadLoreMcp m) => Bool -> GetDefinitionArgs 'ValueType -> m GetDefinitionResult
 cachedGetDefinitionHandler shouldRenderNotifyKnowledgeResetHint GetDefinitionArgs {symbols, skip, recursionDepth} =
-  getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint commonArgs renderWithKnowledgeCache
+  getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint commonArgs buildWithKnowledgeCache
   where
     commonArgs =
       CommonGetDefinitionArgs
@@ -83,12 +88,10 @@ data HashedDefinitionEntry = HashedDefinitionEntry
     definitionEntry :: NamedDefinitionSource
   }
 
-renderWithKnowledgeCache ::
+buildWithKnowledgeCache ::
   (MonadLoreMcp m) =>
-  Int ->
-  [NamedDefinitionSource] ->
-  m FilteredDefinitions
-renderWithKnowledgeCache skip definitionEntries = do
+  BuildDefinitionsStrategy m
+buildWithKnowledgeCache skip definitionEntries = do
   hashedDefinitions <- hashDefinitionEntries definitionEntries
   let uniqueDefinitions =
         dedupeHashedDefinitionEntries hashedDefinitions
@@ -119,17 +122,16 @@ renderWithKnowledgeCache skip definitionEntries = do
         | definition <- uniqueDefinitions,
           Set.member definition.definitionFingerprint visibleKnownFingerprints
         ]
-  renderedDefinitions <-
-    renderFilteredVisibleDefinitionSources
+  filteredDefinitionPage <-
+    buildFilteredVisibleDefinitionSourceFiles
       visibleDefinitionPage
       0
       maxRenderedDefinitionResults
       (map (.definitionEntry) visibleFreshDefinitions)
   pure
     FilteredDefinitions
-      { renderedDefinitions,
-        omittedKnownDefinitions = omittedDefinitions,
-        omittedKnownDefinitionCount = length omittedDefinitions
+      { filteredDefinitionPage,
+        filteredOmittedDefinitions = mkOmittedDefinitions omittedDefinitions
       }
 
 hashDefinitionEntries :: (MonadLore m) => [NamedDefinitionSource] -> m [HashedDefinitionEntry]
@@ -139,7 +141,7 @@ hashDefinitionEntries definitionEntries =
     hashDefinitionEntry definitionEntry =
       do
         let declarationSpans = definitionEntry.definitionSource.definitionSourceSpans
-        declarationBody <- liftIO (Shared.renderDeclarationBodyText declarationSpans)
+        declarationBody <- liftIO (declarationBodyText declarationSpans)
         pure
           HashedDefinitionEntry
             { definitionFingerprint = definitionFingerprintText definitionEntry declarationSpans declarationBody,
@@ -209,29 +211,29 @@ dedupeHashedDefinitionEntries =
       | otherwise =
           (Set.insert definition.definitionFingerprint seenFingerprints, definition : deduped)
 
-renderFilteredVisibleDefinitionSources ::
+buildFilteredVisibleDefinitionSourceFiles ::
   (MonadLore m) =>
   Maybe PaginatedDefinitionSources ->
   Int ->
   Int ->
   [NamedDefinitionSource] ->
-  m (Maybe Shared.PaginatedDefinitionModules)
-renderFilteredVisibleDefinitionSources visibleDefinitionPage skip maxItems definitions =
+  m (Maybe (Paginated SourceFile))
+buildFilteredVisibleDefinitionSourceFiles visibleDefinitionPage skip maxItems definitions =
   case visibleDefinitionPage of
     Just paginatedSources
-      | null paginatedSources.visibleDefinitionSources ->
-          -- Preserve original pagination metadata when the selected page exists but
-          -- all entries were filtered out (for example, all are already known).
-          pure $
-            Just
-              Shared.PaginatedDefinitionModules
-                { totalItems = paginatedSources.sourceTotalItems,
-                  skippedItems = paginatedSources.sourceSkippedItems,
-                  shownItems = 0,
-                  renderedPage = Just ""
-                }
+      | null definitions ->
+          pure
+            ( Just
+                Paginated
+                  { paginatedTotalItems = paginatedSources.sourceTotalItems,
+                    paginatedSkippedItems = paginatedSources.sourceSkippedItems,
+                    paginatedShownItems = 0,
+                    paginatedConsumedItems = length paginatedSources.visibleDefinitionSources,
+                    paginatedItems = []
+                  }
+            )
     _ ->
-      renderPaginatedDefinitionSources skip maxItems definitions
+      buildPaginatedDefinitionSourceFiles skip maxItems definitions
 
 visibleDefinitionFingerprintsForPage :: Maybe PaginatedDefinitionSources -> [HashedDefinitionEntry] -> Set.Set Text
 visibleDefinitionFingerprintsForPage visibleDefinitionPage definitions =

@@ -5,30 +5,37 @@ where
 
 import qualified Data.Aeson as J
 import Data.List (foldl')
-import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
 import Data.Text (Text)
-import qualified Data.Text as T
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as Plugins
-import Lore (MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, lookupLastLoadHomeModulesResult, lookupSymbolInfo, parseAndNormalizeName, resolvePathToRoot)
+import Lore (MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, lookupSymbolInfo, parseAndNormalizeName, resolvePathToRoot)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.Render
-  ( ListMarker (..),
-    RenderList (..),
-    Renderable (..),
-    Truncation (..),
-    totalItems,
-    (|>),
-  )
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), numberedListFrom, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared.DetailedSymbolInfo (DetailedSymbolInfo (..))
-import Lore.Mcp.Tools.Shared.PartialLoadWarning (mkPartialWarning)
-import Lore.Mcp.Tools.Shared.SymbolSuggestions (renderMissingSymbol, symbolSuggestionFetchLimit)
+import Lore.Mcp.Tools.Shared
+  ( Paginated (..),
+    PaginationRenderConfig (..),
+    PartialLoadWarning,
+    ToolRun (..),
+    loadedSessionPartialWarning,
+    paginateItems,
+    paginationSummaryDoc,
+    withLoadedSession,
+  )
+import Lore.Mcp.Tools.Shared.DetailedSymbolInfo (DetailedSymbolInfo (..), detailedSymbolInfoLabel)
+import Lore.Mcp.Tools.Shared.SymbolSuggestions
+  ( GroupedSymbolSuggestion,
+    groupSymbolSuggestions,
+    groupedSymbolSuggestionLabel,
+    maxRenderedSymbolSuggestions,
+    noSymbolsFound,
+    symbolSuggestionFetchLimit,
+  )
 
 data LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
   { symbol ::
@@ -49,6 +56,41 @@ instance J.FromJSON (LookupSymbolInfoArgs 'ValueType)
 
 instance ToSchema (LookupSymbolInfoArgs 'MetadataType)
 
+type LookupSymbolInfoResult = ToolRun LookupSymbolInfoReady
+
+data LookupSymbolInfoReady = LookupSymbolInfoReady
+  { lookupSymbolInfoQuery :: Text,
+    lookupSymbolInfoPage :: Maybe (Paginated DetailedSymbolInfo),
+    lookupSymbolInfoSuggestions :: [GroupedSymbolSuggestion],
+    lookupSymbolInfoPartialLoadWarning :: Maybe PartialLoadWarning
+  }
+
+instance ToLoreDoc LookupSymbolInfoReady where
+  toLoreDoc ready =
+    case (ready.lookupSymbolInfoPage, ready.lookupSymbolInfoSuggestions) of
+      (Nothing, []) ->
+        mconcat
+          [ paragraph (noSymbolsFound ready.lookupSymbolInfoQuery),
+            maybe mempty toLoreDoc ready.lookupSymbolInfoPartialLoadWarning
+          ]
+      (Nothing, suggestions) ->
+        mconcat
+          [ paragraph (noSymbolsFound ready.lookupSymbolInfoQuery <> " Maybe you meant one of these?"),
+            numberedListFrom 1 (map (paragraph . groupedSymbolSuggestionLabel) suggestions),
+            maybe mempty toLoreDoc ready.lookupSymbolInfoPartialLoadWarning
+          ]
+      (Just page, _) ->
+        mconcat
+          [ paginationSummaryDoc
+              PaginationRenderConfig
+                { paginationItemLabel = "symbol candidates",
+                  paginationSkipArgName = Just "skip"
+                }
+              page,
+            numberedListFrom (fromIntegral (page.paginatedSkippedItems + 1)) (map (paragraph . detailedSymbolInfoLabel) page.paginatedItems),
+            maybe mempty toLoreDoc ready.lookupSymbolInfoPartialLoadWarning
+          ]
+
 lookupSymbolInfoTool :: (MonadLore m) => SomeTool m
 lookupSymbolInfoTool =
   SomeToolWithArgs
@@ -63,52 +105,41 @@ lookupSymbolInfoTool =
         handler = lookupSymbolInfoHandler
       }
 
-lookupSymbolInfoHandler :: (MonadLore m) => LookupSymbolInfoArgs 'ValueType -> m Text
+lookupSymbolInfoHandler :: (MonadLore m) => LookupSymbolInfoArgs 'ValueType -> m LookupSymbolInfoResult
 lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol, skip} = do
-  maybeLoadResult <- lookupLastLoadHomeModulesResult
-  case maybeLoadResult of
-    Nothing ->
-      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
-    Just loadResult -> do
-      symbolInfos <- lookupExactSymbolInfos symbol
-      renderedBody <-
-        case NE.nonEmpty symbolInfos of
-          Nothing -> do
-            suggestions <- findSimilarSymbols symbolSuggestionFetchLimit (parseAndNormalizeName symbol)
-            pure (renderMissingSymbol symbol suggestions)
-          Just nonEmptySymbolInfos -> do
-            detailedSymbolInfos <- mapM mkDetailedSymbolInfo nonEmptySymbolInfos
-            pure (renderResolvedSymbols detailedSymbolInfos)
-      let toRender =
-            renderedBody
-              |> mkPartialWarning loadResult
-      pure $ renderText toRender
+  withLoadedSession \session -> do
+    symbolInfos <- lookupExactSymbolInfos symbol
+    let partialLoadWarning =
+          loadedSessionPartialWarning session "Symbol lookup results may be incomplete."
+    case symbolInfos of
+      [] -> do
+        suggestions <- findSimilarSymbols symbolSuggestionFetchLimit (parseAndNormalizeName symbol)
+        pure
+          LookupSymbolInfoReady
+            { lookupSymbolInfoQuery = symbol,
+              lookupSymbolInfoPage = Nothing,
+              lookupSymbolInfoSuggestions = take maxRenderedSymbolSuggestions (groupSymbolSuggestions suggestions),
+              lookupSymbolInfoPartialLoadWarning = partialLoadWarning
+            }
+      _ -> do
+        detailedSymbolInfos <- mapM mkDetailedSymbolInfo symbolInfos
+        pure
+          LookupSymbolInfoReady
+            { lookupSymbolInfoQuery = symbol,
+              lookupSymbolInfoPage = paginateDetailedSymbolInfos resolvedSkip detailedSymbolInfos,
+              lookupSymbolInfoSuggestions = [],
+              lookupSymbolInfoPartialLoadWarning = partialLoadWarning
+            }
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
 
-    renderResolvedSymbols detailedSymbolInfos =
-      renderText (renderSymbolCandidatesList resolvedSkip detailedSymbolInfos)
+paginateDetailedSymbolInfos :: Int -> [DetailedSymbolInfo] -> Maybe (Paginated DetailedSymbolInfo)
+paginateDetailedSymbolInfos skip =
+  paginateItems skip maxRenderedSymbolCandidates
 
-renderSymbolCandidatesList :: Int -> NonEmpty DetailedSymbolInfo -> RenderList
-renderSymbolCandidatesList skip detailedSymbolInfos =
-  RenderList
-    { renderHeader =
-        \ctx -> Just $ "Found " <> T.pack (show ctx.totalItems) <> " symbol candidates:",
-      contentIndentWidth = 0,
-      markerStyle = NumberMarker,
-      itemsList = detailedSymbolInfos,
-      skip = skip,
-      truncation =
-        Just
-          Truncation
-            { maxItems = maxRenderedSymbolCandidates,
-              itemName = "symbol candidates",
-              skipArgName = Just "skip"
-            }
-    }
-  where
-    maxRenderedSymbolCandidates = 5
+maxRenderedSymbolCandidates :: Int
+maxRenderedSymbolCandidates = 5
 
 lookupExactSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
 lookupExactSymbolInfos query = do

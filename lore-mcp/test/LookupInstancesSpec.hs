@@ -39,7 +39,7 @@ spec =
           duplicateFieldNamesModuleSource
           ["TestRefs.RenderedDuplicateFieldNames.fieldOne@RecordOne", "Int"]
 
-      result `shouldContainText` "Found 0 matching instances."
+      result `shouldContainText` "Found 0 matching instances for [\"TestRefs.RenderedDuplicateFieldNames.fieldOne@RecordOne\", \"Int\"]."
       result `shouldNotContainText` "is ambiguous. More qualification is required"
 
 renderLookupInstancesFixture :: FilePath -> Text -> [Text] -> IO Text

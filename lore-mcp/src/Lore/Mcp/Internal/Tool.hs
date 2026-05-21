@@ -11,24 +11,31 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Lore.Mcp.Internal.Annotated (FieldType (..))
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc)
 
-data ToolWithArgs m r = ToolWithArgs
+data ToolWithArgs m r output = ToolWithArgs
   { name :: Text,
     description :: Maybe Text,
-    handler :: r 'ValueType -> m Text
+    handler :: r 'ValueType -> m output
   }
 
-data ToolWithoutArgs m = ToolWithoutArgs
+data ToolWithoutArgs m output = ToolWithoutArgs
   { name :: Text,
     description :: Maybe Text,
-    handler :: m Text
+    handler :: m output
   }
 
 data SomeTool m where
-  SomeToolWithArgs :: (ToSchema (r 'MetadataType), J.FromJSON (r 'ValueType)) => ToolWithArgs m r -> SomeTool m
-  SomeToolWithoutArgs :: ToolWithoutArgs m -> SomeTool m
+  SomeToolWithArgs ::
+    (ToSchema (r 'MetadataType), J.FromJSON (r 'ValueType), ToLoreDoc output) =>
+    ToolWithArgs m r output ->
+    SomeTool m
+  SomeToolWithoutArgs ::
+    (ToLoreDoc output) =>
+    ToolWithoutArgs m output ->
+    SomeTool m
 
-getToolArgsInputSchema :: forall r m. (ToSchema (r 'MetadataType)) => ToolWithArgs m r -> J.Value
+getToolArgsInputSchema :: forall r m output. (ToSchema (r 'MetadataType)) => ToolWithArgs m r output -> J.Value
 getToolArgsInputSchema _tool =
   J.toJSON (moveFieldsAnnotationsIntoDescription (toInlinedSchema @(r 'MetadataType) Proxy))
 
@@ -51,7 +58,7 @@ getSomeToolSpec someTool =
     ]
   where
     toolInputSchema = case someTool of
-      SomeToolWithArgs (_tool :: ToolWithArgs m r) -> J.toJSON (moveFieldsAnnotationsIntoDescription $ toInlinedSchema @(r 'MetadataType) Proxy)
+      SomeToolWithArgs (_tool :: ToolWithArgs m r output) -> J.toJSON (moveFieldsAnnotationsIntoDescription $ toInlinedSchema @(r 'MetadataType) Proxy)
       SomeToolWithoutArgs _ ->
         J.object
           [ "type" J..= ("object" :: Text),

@@ -14,11 +14,8 @@ import GHC.Generics (Generic)
 import qualified GHC.Types.SourceError as GHC.SourceError
 import qualified GHC.Utils.Outputable as Outputable
 import Lore
-  ( LoadHomeModulesResult (..),
-    MonadLore,
+  ( MonadLore,
     getTypeOfExpression,
-    interpreterContextIsReady,
-    lookupLastLoadHomeModulesResult,
   )
 import Lore.Diagnostics
   ( Diagnostic (..),
@@ -27,8 +24,16 @@ import Lore.Diagnostics
     ghcMessagesToDiagnostics,
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), heading2, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (appendPartialLoadWarning, renderFailureWithPartialLoadWarning)
+import Lore.Mcp.Tools.Shared
+  ( PartialLoadWarning,
+    ToolRun,
+    loadedSessionPartialWarning,
+    withInterpreterSession,
+    withPartialLoadWarning,
+  )
+import Lore.Mcp.Tools.Shared.Diagnostics (diagnosticSummaryDoc)
 
 newtype GetTypeOfExpressionArgs (fieldType :: FieldType) = GetTypeOfExpressionArgs
   { expression ::
@@ -43,6 +48,23 @@ instance J.FromJSON (GetTypeOfExpressionArgs 'ValueType)
 
 instance ToSchema (GetTypeOfExpressionArgs 'MetadataType)
 
+type GetTypeOfExpressionResult = ToolRun TypeExpressionOutput
+
+data TypeExpressionOutput
+  = TypeExpressionSucceeded (Maybe PartialLoadWarning) Text
+  | TypeExpressionFailed (Maybe PartialLoadWarning) [Diagnostic]
+
+instance ToLoreDoc TypeExpressionOutput where
+  toLoreDoc = \case
+    TypeExpressionSucceeded warning renderedType ->
+      withPartialLoadWarning warning $
+        heading2 "Type"
+          <> paragraph renderedType
+    TypeExpressionFailed warning diagnostics ->
+      withPartialLoadWarning warning $
+        heading2 "Type inference failed"
+          <> diagnosticSummaryDoc diagnostics
+
 getTypeOfExpressionTool :: (MonadLore m) => SomeTool m
 getTypeOfExpressionTool =
   SomeToolWithArgs
@@ -52,42 +74,24 @@ getTypeOfExpressionTool =
         handler = getTypeOfExpressionHandler
       }
 
-getTypeOfExpressionHandler :: (MonadLore m) => GetTypeOfExpressionArgs 'ValueType -> m Text
-getTypeOfExpressionHandler GetTypeOfExpressionArgs {expression} = do
-  maybeLoadResult <- lookupLastLoadHomeModulesResult
-  contextReady <- interpreterContextIsReady
-  case maybeLoadResult of
-    Nothing ->
-      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
-    Just loadResult
-      | not contextReady ->
-          pure "Interpreter context is not ready. Run reloadHomeModules again."
-      | otherwise -> do
-          typeResult <-
-            catches
-              (Right <$> getTypeOfExpression expression)
-              [ Handler \sourceError ->
-                  pure (Left (ghcMessagesToDiagnostics (GHC.SourceError.srcErrorMessages sourceError))),
-                Handler \runtimeException ->
-                  pure (Left [runtimeExceptionDiagnostic runtimeException])
-              ]
-          pure $
-            case typeResult of
-              Right inferredType ->
-                renderTypeResult loadResult inferredType
-              Left diagnostics ->
-                renderTypeFailure loadResult diagnostics
-
-renderTypeResult :: LoadHomeModulesResult -> GHC.Type -> Text
-renderTypeResult loadResult inferredType =
-  appendPartialLoadWarning loadResult "Type inference may be incomplete." renderedType
-  where
-    renderedType =
-      T.pack (Outputable.showSDocUnsafe (Outputable.ppr inferredType))
-
-renderTypeFailure :: LoadHomeModulesResult -> [Diagnostic] -> Text
-renderTypeFailure loadResult diagnostics =
-  renderFailureWithPartialLoadWarning loadResult "Type inference may be incomplete." "Type inference failed:" diagnostics
+getTypeOfExpressionHandler :: (MonadLore m) => GetTypeOfExpressionArgs 'ValueType -> m GetTypeOfExpressionResult
+getTypeOfExpressionHandler GetTypeOfExpressionArgs {expression} =
+  withInterpreterSession \session -> do
+    typeResult <-
+      catches
+        (Right <$> getTypeOfExpression expression)
+        [ Handler \sourceError ->
+            pure (Left (ghcMessagesToDiagnostics (GHC.SourceError.srcErrorMessages sourceError))),
+          Handler \runtimeException ->
+            pure (Left [runtimeExceptionDiagnostic runtimeException])
+        ]
+    let partialWarning = loadedSessionPartialWarning session "Type inference may be incomplete."
+    pure $
+      case typeResult of
+        Right inferredType ->
+          TypeExpressionSucceeded partialWarning (T.pack (Outputable.showSDocUnsafe (Outputable.ppr inferredType)))
+        Left diagnostics ->
+          TypeExpressionFailed partialWarning diagnostics
 
 runtimeExceptionDiagnostic :: Exception.SomeException -> Diagnostic
 runtimeExceptionDiagnostic runtimeException =

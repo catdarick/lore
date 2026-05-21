@@ -34,6 +34,11 @@ spec = do
       result `shouldContainText` "    b"
       result `shouldContainText` "    targetSymbol"
       result `shouldContainText` "    c"
+      result `shouldContainText` "## src/"
+      result `shouldContainText` "### lines "
+      result `shouldNotContainText` "=== "
+      result `shouldNotContainText` "--- lines "
+      result `shouldNotContainText` "```"
 
     it "renders useful context for do-block references" do
       result <-

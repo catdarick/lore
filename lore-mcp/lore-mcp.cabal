@@ -28,7 +28,8 @@ library
       Lore.Mcp.Internal.Directory
       Lore.Mcp.Internal.DirectoryTree
       Lore.Mcp.Internal.List
-      Lore.Mcp.Internal.Render
+      Lore.Mcp.Internal.LoreDoc
+      Lore.Mcp.Internal.LoreDoc.Markdown
       Lore.Mcp.Internal.SourceSpan
       Lore.Mcp.Internal.SourceText
       Lore.Mcp.Internal.Tool
@@ -59,7 +60,7 @@ library
       Lore.Mcp.Tools.Shared.DetailedSymbolInfo
       Lore.Mcp.Tools.Shared.Diagnostics
       Lore.Mcp.Tools.Shared.Outputable
-      Lore.Mcp.Tools.Shared.PartialLoadWarning
+      Lore.Mcp.Tools.Shared.Source
       Lore.Mcp.Tools.Shared.SymbolResolution
       Lore.Mcp.Tools.Shared.SymbolSuggestions
   other-modules:
@@ -209,10 +210,13 @@ test-suite lore-mcp-test
       FindReferencesSpec
       GetDefinitionSpec
       LookupInstancesSpec
+      LoreDocMarkdownSpec
       McpTestSupport
       ProtocolRequestSpec
+      ReloadHomeModulesSpec
       RunTestSuiteSpec
       SearchSymbolsSpec
+      ToolBlockedSpec
       Paths_lore_mcp
   autogen-modules:
       Paths_lore_mcp

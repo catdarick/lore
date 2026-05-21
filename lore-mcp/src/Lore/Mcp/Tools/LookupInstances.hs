@@ -5,8 +5,6 @@ where
 
 import qualified Data.Aeson as J
 import Data.List (foldl')
-import Data.List.NonEmpty (NonEmpty)
-import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
 import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
@@ -20,7 +18,6 @@ import Lore
   ( Instances (..),
     MonadLore,
     listIntersectingInstances,
-    lookupLastLoadHomeModulesResult,
   )
 import Lore.Mcp.Internal.Annotated
   ( Description,
@@ -31,18 +28,25 @@ import Lore.Mcp.Internal.Annotated
     MinItems,
     WithMeta,
   )
-import Lore.Mcp.Internal.Render
-  ( ListMarker (..),
-    RenderList (..),
-    Renderable (..),
-    Truncation (..),
-    totalItems,
-    (|>),
-  )
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), bulletList, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Tools.Shared
+  ( Paginated (..),
+    PaginationRenderConfig (..),
+    PartialLoadWarning,
+    ToolRun (..),
+    loadedSessionPartialWarning,
+    paginateItems,
+    paginationSummaryDoc,
+    withLoadedSession,
+  )
 import Lore.Mcp.Tools.Shared.Outputable (renderOutputable)
-import Lore.Mcp.Tools.Shared.PartialLoadWarning (mkPartialWarning)
-import Lore.Mcp.Tools.Shared.SymbolResolution (ResolvedSymbolQuery (resolvedRootName), withResolvedSymbols)
+import Lore.Mcp.Tools.Shared.SymbolResolution
+  ( ResolvedSymbolQuery (resolvedRootName),
+    SymbolsResolved (resolvedQueries),
+    SymbolsUnresolved,
+    resolveUniqueSymbolQueries,
+  )
 
 data LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs
   { names ::
@@ -63,6 +67,68 @@ instance J.FromJSON (LookupInstancesArgs 'ValueType)
 
 instance ToSchema (LookupInstancesArgs 'MetadataType)
 
+type LookupInstancesResult = ToolRun LookupInstancesOutput
+
+data LookupInstancesOutput
+  = LookupInstancesFailed LookupInstancesFailure
+  | LookupInstancesReadyResult LookupInstancesReady
+
+data LookupInstancesFailure = LookupInstancesFailure
+  { lookupInstancesFailureReason :: LookupInstancesFailureReason,
+    lookupInstancesFailurePartialLoadWarning :: Maybe PartialLoadWarning
+  }
+
+data LookupInstancesFailureReason
+  = LookupInstancesUnresolvedSymbols SymbolsUnresolved
+  | LookupInstancesInternalError Text
+
+data LookupInstancesReady = LookupInstancesReady
+  { lookupInstancesQueriedNames :: [Text],
+    lookupInstancesPage :: Maybe (Paginated MatchingInstance),
+    lookupInstancesPartialLoadWarning :: Maybe PartialLoadWarning
+  }
+
+instance ToLoreDoc LookupInstancesOutput where
+  toLoreDoc = \case
+    LookupInstancesFailed failed ->
+      toLoreDoc failed
+    LookupInstancesReadyResult ready ->
+      toLoreDoc ready
+
+instance ToLoreDoc LookupInstancesFailure where
+  toLoreDoc failed =
+    mconcat
+      [ toLoreDoc failed.lookupInstancesFailureReason,
+        maybe mempty toLoreDoc failed.lookupInstancesFailurePartialLoadWarning
+      ]
+
+instance ToLoreDoc LookupInstancesFailureReason where
+  toLoreDoc = \case
+    LookupInstancesUnresolvedSymbols unresolved ->
+      toLoreDoc unresolved
+    LookupInstancesInternalError message ->
+      paragraph message
+
+instance ToLoreDoc LookupInstancesReady where
+  toLoreDoc ready =
+    case ready.lookupInstancesPage of
+      Nothing ->
+        mconcat
+          [ paragraph ("Found 0 matching instances for " <> renderQuotedNames ready.lookupInstancesQueriedNames <> "."),
+            maybe mempty toLoreDoc ready.lookupInstancesPartialLoadWarning
+          ]
+      Just page ->
+        mconcat
+          [ paginationSummaryDoc
+              PaginationRenderConfig
+                { paginationItemLabel = "matching instances",
+                  paginationSkipArgName = Just "skip"
+                }
+              page,
+            bulletList (map (paragraph . matchingInstanceLabel) page.paginatedItems),
+            maybe mempty toLoreDoc ready.lookupInstancesPartialLoadWarning
+          ]
+
 lookupInstancesTool :: (MonadLore m) => SomeTool m
 lookupInstancesTool =
   SomeToolWithArgs
@@ -72,62 +138,40 @@ lookupInstancesTool =
         handler = lookupInstancesHandler
       }
 
-lookupInstancesHandler :: (MonadLore m) => LookupInstancesArgs 'ValueType -> m Text
+lookupInstancesHandler :: (MonadLore m) => LookupInstancesArgs 'ValueType -> m LookupInstancesResult
 lookupInstancesHandler LookupInstancesArgs {names, skip} = do
-  maybeLoadResult <- lookupLastLoadHomeModulesResult
-  case maybeLoadResult of
-    Nothing ->
-      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
-    Just loadResult -> do
-      renderedBody <-
-        withResolvedSymbols names \resolvedQueries -> do
-          let resolvedRootNames = dedupeNamesBy renderName (map (.resolvedRootName) resolvedQueries)
-          intersectingInstances <- listIntersectingInstances resolvedRootNames
-          pure (renderLookupInstancesResult resolvedSkip (toMatchingInstances intersectingInstances))
-      pure (renderText (renderedBody |> mkPartialWarning loadResult))
+  withLoadedSession \session -> do
+    let partialLoadWarning =
+          loadedSessionPartialWarning session "Instance lookup results may be incomplete."
+    eiResolved <- resolveUniqueSymbolQueries names
+    case eiResolved of
+      Left unresolved ->
+        pure
+          (LookupInstancesFailed LookupInstancesFailure {lookupInstancesFailureReason = LookupInstancesUnresolvedSymbols unresolved, lookupInstancesFailurePartialLoadWarning = partialLoadWarning})
+      Right resolved -> do
+        let resolvedRootNames = dedupeNamesBy renderName (map (.resolvedRootName) resolved.resolvedQueries)
+        intersectingInstances <- listIntersectingInstances resolvedRootNames
+        pure
+          (LookupInstancesReadyResult LookupInstancesReady {lookupInstancesQueriedNames = names, lookupInstancesPage = paginateMatchingInstances resolvedSkip (toMatchingInstances intersectingInstances), lookupInstancesPartialLoadWarning = partialLoadWarning})
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
-
-renderLookupInstancesResult :: Int -> [MatchingInstance] -> Text
-renderLookupInstancesResult skip lookupResult =
-  case NE.nonEmpty lookupResult of
-    Nothing ->
-      "Found 0 matching instances."
-    Just matchingInstances ->
-      renderText (renderMatchingInstancesList skip matchingInstances)
 
 data MatchingInstance
   = MatchingClassInstance GHC.ClsInst
   | MatchingFamilyInstance GHC.FamInst
 
-renderMatchingInstancesList :: Int -> NonEmpty MatchingInstance -> RenderList
-renderMatchingInstancesList skip matchingInstances =
-  RenderList
-    { renderHeader =
-        \ctx -> Just $ "Found " <> T.pack (show ctx.totalItems) <> " matching instances:",
-      contentIndentWidth = 0,
-      markerStyle = BulletMarker,
-      itemsList = fmap RenderedMatchingInstance matchingInstances,
-      skip = skip,
-      truncation =
-        Just
-          Truncation
-            { maxItems = maxRenderedMatchingInstances,
-              itemName = "matching instances",
-              skipArgName = Just "skip"
-            }
-    }
+matchingInstanceLabel :: MatchingInstance -> Text
+matchingInstanceLabel matchingInstance =
+  case matchingInstance of
+    MatchingClassInstance classInstance ->
+      renderOutputable classInstance
+    MatchingFamilyInstance familyInstance ->
+      renderOutputable familyInstance
 
-newtype RenderedMatchingInstance = RenderedMatchingInstance MatchingInstance
-
-instance Renderable RenderedMatchingInstance where
-  renderText (RenderedMatchingInstance matchingInstance) =
-    case matchingInstance of
-      MatchingClassInstance classInstance ->
-        renderOutputable classInstance
-      MatchingFamilyInstance familyInstance ->
-        renderOutputable familyInstance
+paginateMatchingInstances :: Int -> [MatchingInstance] -> Maybe (Paginated MatchingInstance)
+paginateMatchingInstances skip =
+  paginateItems skip maxRenderedMatchingInstances
 
 toMatchingInstances :: Instances -> [MatchingInstance]
 toMatchingInstances instances_ =
@@ -154,3 +198,9 @@ dedupeNamesBy renderKey =
 
 maxRenderedMatchingInstances :: Int
 maxRenderedMatchingInstances = 25
+
+renderQuotedNames :: [Text] -> Text
+renderQuotedNames names =
+  "[" <> T.intercalate ", " (map quoteText names) <> "]"
+  where
+    quoteText value = "\"" <> value <> "\""

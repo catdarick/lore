@@ -5,7 +5,6 @@ where
 
 import qualified Data.Aeson as J
 import Data.List (intercalate)
-import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
@@ -19,16 +18,24 @@ import Lore
     classifySymbolCategory,
     filterExportedSymbolNodesByTypeHint,
     listSymbolsExportedByModule,
-    lookupLastLoadHomeModulesResult,
     mkNormalizedModuleName,
     occName,
     parseAndNormalizeName,
     resolveModule,
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.Render (ListMarker (..), RenderList (..), Renderable (..), Truncation (..), (|>))
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), numberedListFrom, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared.PartialLoadWarning (mkPartialWarning)
+import Lore.Mcp.Tools.Shared
+  ( Paginated (..),
+    PaginationRenderConfig (..),
+    PartialLoadWarning,
+    ToolRun (..),
+    loadedSessionPartialWarning,
+    paginateItems,
+    paginationSummaryDoc,
+    withLoadedSession,
+  )
 
 data ListExportedSymbolsArgs (fieldType :: FieldType) = ListExportedSymbolsArgs
   { moduleName ::
@@ -61,6 +68,38 @@ instance J.FromJSON (ListExportedSymbolsArgs 'ValueType)
 
 instance ToSchema (ListExportedSymbolsArgs 'MetadataType)
 
+type ListExportedSymbolsResult = ToolRun ListExportedSymbolsReady
+
+data ListExportedSymbolsReady = ListExportedSymbolsReady
+  { listExportedSymbolsModuleName :: Text,
+    listExportedSymbolsPackageName :: Maybe Text,
+    listExportedSymbolsTypeHint :: Maybe Text,
+    listExportedSymbolsTotalBeforeHint :: Int,
+    listExportedSymbolsPage :: Maybe (Paginated ExportedSymbolNode),
+    listExportedSymbolsPartialLoadWarning :: Maybe PartialLoadWarning
+  }
+
+instance ToLoreDoc ListExportedSymbolsReady where
+  toLoreDoc ready =
+    case ready.listExportedSymbolsPage of
+      Nothing ->
+        mconcat
+          [ paragraph (allExportsPart ready <> hintPart ready <> "."),
+            maybe mempty toLoreDoc ready.listExportedSymbolsPartialLoadWarning
+          ]
+      Just page ->
+        mconcat
+          [ paragraph (allExportsPart ready <> hintPart ready <> ":"),
+            paginationSummaryDoc
+              PaginationRenderConfig
+                { paginationItemLabel = "exported symbols",
+                  paginationSkipArgName = Just "skip"
+                }
+              page,
+            numberedListFrom (fromIntegral (page.paginatedSkippedItems + 1)) (map (paragraph . renderExportedSymbolNodeLabel) page.paginatedItems),
+            maybe mempty toLoreDoc ready.listExportedSymbolsPartialLoadWarning
+          ]
+
 listExportedSymbolsTool :: (MonadLore m) => SomeTool m
 listExportedSymbolsTool =
   SomeToolWithArgs
@@ -70,24 +109,25 @@ listExportedSymbolsTool =
         handler = listExportedSymbolsHandler
       }
 
-listExportedSymbolsHandler :: (MonadLore m) => ListExportedSymbolsArgs 'ValueType -> m Text
+listExportedSymbolsHandler :: (MonadLore m) => ListExportedSymbolsArgs 'ValueType -> m ListExportedSymbolsResult
 listExportedSymbolsHandler ListExportedSymbolsArgs {moduleName, packageName, typeHint, skip} = do
-  maybeLoadResult <- lookupLastLoadHomeModulesResult
-  case maybeLoadResult of
-    Nothing ->
-      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
-    Just loadResult -> do
-      allSymbols <- resolveExportedSymbols moduleName packageName
-      let totalSymbols = length allSymbols
-          symbolsToRender =
-            case typeHint of
-              Nothing -> allSymbols
-              Just hint ->
-                filterExportedSymbolNodesByTypeHint (occName (parseAndNormalizeName hint)) allSymbols
-      let toRender =
-            renderExportedSymbolsResult resolvedSkip moduleName packageName typeHint totalSymbols symbolsToRender
-              |> mkPartialWarning loadResult
-      pure (renderText toRender)
+  withLoadedSession \session -> do
+    allSymbols <- resolveExportedSymbols moduleName packageName
+    let totalSymbols = length allSymbols
+        symbolsToRender =
+          case typeHint of
+            Nothing -> allSymbols
+            Just hint ->
+              filterExportedSymbolNodesByTypeHint (occName (parseAndNormalizeName hint)) allSymbols
+    pure
+      ListExportedSymbolsReady
+        { listExportedSymbolsModuleName = moduleName,
+          listExportedSymbolsPackageName = packageName,
+          listExportedSymbolsTypeHint = typeHint,
+          listExportedSymbolsTotalBeforeHint = totalSymbols,
+          listExportedSymbolsPage = paginateExportedSymbols resolvedSkip symbolsToRender,
+          listExportedSymbolsPartialLoadWarning = loadedSessionPartialWarning session "Module export results may be incomplete."
+        }
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
@@ -99,55 +139,41 @@ resolveExportedSymbols moduleName maybePackageName = do
   maybeModule <- resolveModule normalizedModuleName maybePackageName
   maybe (pure []) listSymbolsExportedByModule maybeModule
 
-renderExportedSymbolsResult :: Int -> Text -> Maybe Text -> Maybe Text -> Int -> [ExportedSymbolNode] -> Text
-renderExportedSymbolsResult skip moduleName packageName typeHint totalSymbols filteredSymbols =
-  case NE.nonEmpty filteredSymbols of
+paginateExportedSymbols :: Int -> [ExportedSymbolNode] -> Maybe (Paginated ExportedSymbolNode)
+paginateExportedSymbols skip =
+  paginateItems skip maxRenderedExportedSymbols
+
+allExportsPart :: ListExportedSymbolsReady -> Text
+allExportsPart ready =
+  "Found "
+    <> T.pack (show ready.listExportedSymbolsTotalBeforeHint)
+    <> " symbols exported from "
+    <> modulePart ready
+
+hintPart :: ListExportedSymbolsReady -> Text
+hintPart ready =
+  case ready.listExportedSymbolsTypeHint of
+    Just hint ->
+      ", "
+        <> T.pack (show renderedCount)
+        <> " of which mention type "
+        <> quoteText hint
     Nothing ->
-      allExportsPart <> hintPart <> "."
-    Just nonEmptySymbols ->
-      renderText (exportedSymbolsList nonEmptySymbols)
+      ""
   where
-    modulePart =
-      case packageName of
-        Nothing ->
-          quoteText moduleName
-        Just packageName' ->
-          quoteText moduleName <> " (package " <> quoteText packageName' <> ")"
-    allExportsPart =
-      "Found "
-        <> T.pack (show totalSymbols)
-        <> " symbols exported from "
-        <> modulePart
-    hintPart = case typeHint of
-      Just hint -> ", " <> T.pack (show (length filteredSymbols)) <> " of which mention type " <> quoteText hint
-      Nothing -> ""
+    renderedCount =
+      maybe 0 (.paginatedTotalItems) ready.listExportedSymbolsPage
 
-    exportedSymbolsList neFilteredSymbols =
-      RenderList
-        { renderHeader =
-            \_ctx ->
-              Just $ allExportsPart <> hintPart <> ":",
-          contentIndentWidth = 0,
-          markerStyle = BulletMarker,
-          itemsList = fmap RenderedExportedSymbolNode neFilteredSymbols,
-          skip = skip,
-          truncation =
-            Just
-              Truncation
-                { maxItems = maxRenderedExportedSymbols,
-                  itemName = "exported symbols",
-                  skipArgName = Just "skip"
-                }
-        }
+modulePart :: ListExportedSymbolsReady -> Text
+modulePart ready =
+  case ready.listExportedSymbolsPackageName of
+    Nothing ->
+      quoteText ready.listExportedSymbolsModuleName
+    Just packageName ->
+      quoteText ready.listExportedSymbolsModuleName <> " (package " <> quoteText packageName <> ")"
 
-newtype RenderedExportedSymbolNode = RenderedExportedSymbolNode ExportedSymbolNode
-
-instance Renderable RenderedExportedSymbolNode where
-  renderText (RenderedExportedSymbolNode node) =
-    renderSymbolNode node
-
-renderSymbolNode :: ExportedSymbolNode -> Text
-renderSymbolNode node =
+renderExportedSymbolNodeLabel :: ExportedSymbolNode -> Text
+renderExportedSymbolNodeLabel node =
   baseLabel
     <> case node.nodeChildren of
       [] -> ""

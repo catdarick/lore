@@ -90,6 +90,11 @@ spec = do
 
         firstPageCall `shouldContainText` "pageDef30 :: Int"
         firstPageCall `shouldNotContainText` "pageDef31 :: Int"
+        firstPageCall `shouldContainText` "## src/"
+        firstPageCall `shouldContainText` "### lines "
+        firstPageCall `shouldNotContainText` "=== "
+        firstPageCall `shouldNotContainText` "--- lines "
+        firstPageCall `shouldNotContainText` "```"
         secondPageCall `shouldContainText` "Showing all 1 definition results."
         secondPageCall `shouldContainText` "pageDef31 :: Int"
 
@@ -182,7 +187,7 @@ spec = do
             ambiguousDefinitionResult <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Demo.AmbiguousId"] 0 Nothing)
             pure (lookupResult, ambiguousDefinitionResult)
 
-        lookupResult `shouldContainText` "Found 2 symbol candidates:"
+        lookupResult `shouldContainText` "Showing all 2 symbol candidates."
         ambiguousDefinitionResult `shouldContainText` "is ambiguous. More qualification is required"
         ambiguousDefinitionResult `shouldContainText` "Demo.AmbiguousId"
 
@@ -193,7 +198,7 @@ spec = do
           loadFixtureHomeModules
           callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Indexed")
 
-      indexedLookup `shouldContainText` "Found 1 symbol candidates:"
+      indexedLookup `shouldContainText` "Showing all 1 symbol candidates."
       indexedLookup `shouldContainText` "Indexed"
 
     it "resolves exported and unexported record fields from DuplicateRecordFields modules" do
@@ -209,7 +214,7 @@ spec = do
             pure (exportedFieldLookup, unexportedFieldLookup, qualifiedFieldLookup, constructorLookup)
 
         exportedFieldLookup `shouldContainText` "userName"
-        exportedFieldLookup `shouldContainText` "Found 1 symbol candidates:"
+        exportedFieldLookup `shouldContainText` "Showing all 1 symbol candidates."
         exportedFieldLookup `shouldContainText` ":: User -> String"
 
         unexportedFieldLookup `shouldContainText` "hiddenValue"
@@ -217,7 +222,7 @@ spec = do
         unexportedFieldLookup `shouldNotContainText` "type Hidden :: Type"
 
         qualifiedFieldLookup `shouldContainText` "hiddenValue"
-        qualifiedFieldLookup `shouldContainText` "Found 1 symbol candidates:"
+        qualifiedFieldLookup `shouldContainText` "Showing all 1 symbol candidates."
         qualifiedFieldLookup `shouldContainText` ":: Hidden -> Int"
         qualifiedFieldLookup `shouldNotContainText` "type Hidden :: Type"
 
@@ -231,7 +236,7 @@ spec = do
           callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "supportValues")
 
       supportValuesLookup `shouldContainText` "supportValues"
-      supportValuesLookup `shouldContainText` "Found 1 symbol candidates:"
+      supportValuesLookup `shouldContainText` "Showing all 1 symbol candidates."
       supportValuesLookup `shouldNotContainText` "type SupportRecord :: Type"
 
     it "suggests similar symbols when exact lookup misses" do
@@ -275,11 +280,11 @@ spec = do
             qualifiedLookup <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Demo.hiddenValue")
             pure (unqualifiedLookup, qualifiedLookup)
 
-        unqualifiedLookup `shouldContainText` "Found 2 symbol candidates:"
+        unqualifiedLookup `shouldContainText` "Showing all 2 symbol candidates."
         unqualifiedLookup `shouldContainText` ":: Hidden -> Int"
         unqualifiedLookup `shouldContainText` "hiddenValue :: Int"
 
-        qualifiedLookup `shouldContainText` "Found 1 symbol candidates:"
+        qualifiedLookup `shouldContainText` "Showing all 1 symbol candidates."
         qualifiedLookup `shouldContainText` ":: Hidden -> Int"
         qualifiedLookup `shouldNotContainText` "hiddenValue :: Int"
 

@@ -1,5 +1,6 @@
 module Lore.Mcp.Tools.Shared.DetailedSymbolInfo
   ( DetailedSymbolInfo (..),
+    detailedSymbolInfoLabel,
   )
 where
 
@@ -12,9 +13,8 @@ import qualified GHC.Iface.Syntax as Iface
 import qualified GHC.Types.TyThing as TyThing
 import qualified GHC.Types.TyThing.Ppr as TyThing
 import Lore (Instances (..), SymbolInfo (..), SymbolVisibility (..))
-import Lore.Mcp.Internal.Render (Renderable (renderText), indented, (|>))
-import Lore.Mcp.Tools.Shared.CompactClassInstance (CompactClassInstance (CompactClassInstance))
-import Lore.Mcp.Tools.Shared.DefinitionLocation (mkDefinitionLocation)
+import Lore.Mcp.Tools.Shared.CompactClassInstance (CompactClassInstance (CompactClassInstance), renderCompactClassInstanceLabel)
+import Lore.Mcp.Tools.Shared.DefinitionLocation (mkDefinitionLocation, renderDefinitionLocationLabel)
 import Lore.Mcp.Tools.Shared.Outputable (renderOutputable, renderOutputableWith)
 
 data DetailedSymbolInfo = DetailedSymbolInfo
@@ -22,18 +22,14 @@ data DetailedSymbolInfo = DetailedSymbolInfo
     instancesInfo :: Instances
   }
 
-instance Renderable DetailedSymbolInfo where
-  renderText detailedSymbolInfo =
-    renderText $
-      renderSymbolHeader symbolInfo
-        |> indented
-          ( definitionLocation symbolInfo
-              |> renderExportedModules symbolInfo
-              |> classInstancesSection symbolInfo instancesInfo
-          )
-    where
-      symbolInfo = detailedSymbolInfo.symbolInfo
-      instancesInfo = detailedSymbolInfo.instancesInfo
+detailedSymbolInfoLabel :: DetailedSymbolInfo -> Text
+detailedSymbolInfoLabel detailedSymbolInfo =
+  T.intercalate "\n" ([renderSymbolHeader symbolInfo] <> map ("  " <>) detailLines)
+  where
+    symbolInfo = detailedSymbolInfo.symbolInfo
+    detailLines =
+      [definitionLocation symbolInfo, renderExportedModules symbolInfo]
+        <> maybe [] pure (classInstancesSection symbolInfo detailedSymbolInfo.instancesInfo)
 
 renderSymbolHeader :: SymbolInfo -> Text
 renderSymbolHeader symbolInfo =
@@ -60,7 +56,7 @@ definitionLocation :: SymbolInfo -> Text
 definitionLocation symbolInfo =
   case mkDefinitionLocation symbolInfo.symbolName of
     Nothing -> "Defined in (source is unavailable): " <> T.pack (GHC.moduleNameString (GHC.moduleName symbolInfo.definedIn))
-    Just defLoc -> "Defined at: " <> renderText defLoc
+    Just defLoc -> "Defined at: " <> renderDefinitionLocationLabel defLoc
 
 renderExportedModules :: SymbolInfo -> Text
 renderExportedModules symbolInfo =
@@ -81,7 +77,7 @@ classInstancesSection symbolInfo instancesInfo =
     classInstances ->
       Just
         ( "Class instances: "
-            <> T.intercalate ", " (map (renderText . CompactClassInstance symbolInfo) displayedInstances)
+            <> T.intercalate ", " (map (renderCompactClassInstanceLabel . CompactClassInstance symbolInfo) displayedInstances)
             <> overflowSuffix overflowCount
         )
       where

@@ -6,14 +6,20 @@ where
 import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Lore (MonadLore, findSimilarSymbols, lookupLastLoadHomeModulesResult, parseAndNormalizeName)
+import Lore (MonadLore, findSimilarSymbols, parseAndNormalizeName)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.Render (Renderable (..), (|>))
+import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), numberedListFrom, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared.PartialLoadWarning (mkPartialWarning)
+import Lore.Mcp.Tools.Shared (PartialLoadWarning, ToolRun, loadedSessionPartialWarning, withLoadedSession)
 import Lore.Mcp.Tools.Shared.SymbolSuggestions
-  ( renderSearchSymbolResults,
+  ( GroupedSymbolSuggestion,
+    groupSymbolSuggestions,
+    groupedSymbolSuggestionLabel,
+    maxSearchSymbolSuggestions,
+    noSymbolsFound,
+    quoteText,
     symbolSuggestionFetchLimit,
   )
 
@@ -32,6 +38,29 @@ instance J.FromJSON (SearchSymbolsArgs 'ValueType)
 
 instance ToSchema (SearchSymbolsArgs 'MetadataType)
 
+type SearchSymbolsResult = ToolRun SearchSymbolsReady
+
+data SearchSymbolsReady = SearchSymbolsReady
+  { searchSymbolsQuery :: Text,
+    searchSymbolsSuggestions :: [GroupedSymbolSuggestion],
+    searchSymbolsPartialLoadWarning :: Maybe PartialLoadWarning
+  }
+
+instance ToLoreDoc SearchSymbolsReady where
+  toLoreDoc ready =
+    case ready.searchSymbolsSuggestions of
+      [] ->
+        mconcat
+          [ paragraph (noSymbolsFound ready.searchSymbolsQuery),
+            maybe mempty toLoreDoc ready.searchSymbolsPartialLoadWarning
+          ]
+      suggestions ->
+        mconcat
+          [ paragraph ("Found " <> T.pack (show (length suggestions)) <> " similar symbols for " <> quoteText ready.searchSymbolsQuery <> ":"),
+            numberedListFrom 1 (map (paragraph . groupedSymbolSuggestionLabel) suggestions),
+            maybe mempty toLoreDoc ready.searchSymbolsPartialLoadWarning
+          ]
+
 searchSymbolsTool :: (MonadLore m) => SomeTool m
 searchSymbolsTool =
   SomeToolWithArgs
@@ -44,17 +73,13 @@ searchSymbolsTool =
         handler = searchSymbolsHandler
       }
 
-searchSymbolsHandler :: (MonadLore m) => SearchSymbolsArgs 'ValueType -> m Text
+searchSymbolsHandler :: (MonadLore m) => SearchSymbolsArgs 'ValueType -> m SearchSymbolsResult
 searchSymbolsHandler SearchSymbolsArgs {query} = do
-  maybeLoadResult <- lookupLastLoadHomeModulesResult
-  case maybeLoadResult of
-    Nothing ->
-      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
-    Just loadResult -> do
-      suggestions <- findSimilarSymbols symbolSuggestionFetchLimit (parseAndNormalizeName query)
-      let renderedBody =
-            renderSearchSymbolResults query suggestions
-          toRender =
-            renderedBody
-              |> mkPartialWarning loadResult
-      pure (renderText toRender)
+  withLoadedSession \session -> do
+    suggestions <- findSimilarSymbols symbolSuggestionFetchLimit (parseAndNormalizeName query)
+    pure
+      SearchSymbolsReady
+        { searchSymbolsQuery = query,
+          searchSymbolsSuggestions = take maxSearchSymbolSuggestions (groupSymbolSuggestions suggestions),
+          searchSymbolsPartialLoadWarning = loadedSessionPartialWarning session "Search results may be incomplete."
+        }

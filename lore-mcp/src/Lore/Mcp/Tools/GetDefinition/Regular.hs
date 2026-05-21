@@ -7,16 +7,19 @@ import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Lore (MonadLore, NamedDefinitionSource (..))
+import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), Maximum, MinItems, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.GetDefinition.Shared
-  ( CommonGetDefinitionArgs (..),
+  ( BuildDefinitionsStrategy,
+    CommonGetDefinitionArgs (..),
     FilteredDefinitions (..),
+    GetDefinitionResult,
+    buildPaginatedDefinitionSourceFiles,
     defaultRecursionDepth,
     getDefinitionHandlerWithStrategy,
     maxRenderedDefinitionResults,
-    renderPaginatedDefinitionSources,
+    mkOmittedDefinitions,
   )
 
 data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
@@ -54,9 +57,9 @@ regularGetDefinitionTool =
         handler = regularGetDefinitionHandler
       }
 
-regularGetDefinitionHandler :: (MonadLore m) => GetDefinitionArgs 'ValueType -> m Text
+regularGetDefinitionHandler :: (MonadLore m) => GetDefinitionArgs 'ValueType -> m GetDefinitionResult
 regularGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} =
-  getDefinitionHandlerWithStrategy False commonArgs renderWithoutKnowledgeCache
+  getDefinitionHandlerWithStrategy False commonArgs buildWithoutKnowledgeCache
   where
     commonArgs =
       CommonGetDefinitionArgs
@@ -65,22 +68,19 @@ regularGetDefinitionHandler GetDefinitionArgs {symbols, skip, recursionDepth} =
           recursionDepth = Just (max 0 (fromMaybeDefault defaultRecursionDepth recursionDepth))
         }
 
-renderWithoutKnowledgeCache ::
+buildWithoutKnowledgeCache ::
   (MonadLore m) =>
-  Int ->
-  [NamedDefinitionSource] ->
-  m FilteredDefinitions
-renderWithoutKnowledgeCache skip definitionEntries = do
-  renderedDefinitions <-
-    renderPaginatedDefinitionSources
+  BuildDefinitionsStrategy m
+buildWithoutKnowledgeCache skip definitionEntries = do
+  filteredDefinitionPage <-
+    buildPaginatedDefinitionSourceFiles
       skip
       maxRenderedDefinitionResults
       definitionEntries
   pure
     FilteredDefinitions
-      { renderedDefinitions,
-        omittedKnownDefinitions = [],
-        omittedKnownDefinitionCount = 0
+      { filteredDefinitionPage,
+        filteredOmittedDefinitions = mkOmittedDefinitions []
       }
 
 fromMaybeDefault :: a -> Maybe a -> a

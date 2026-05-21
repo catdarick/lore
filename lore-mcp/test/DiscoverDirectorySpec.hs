@@ -34,6 +34,22 @@ spec =
       discoveryResult `shouldContainText` "src/Demo/"
       discoveryResult `shouldContainText` "└── Support.hs"
 
+    it "preserves exact unicode tree rendering for a small fixture" do
+      discoveryResult <-
+        withFixtureCopy \fixtureRoot -> do
+          createDirectoryIfMissing True (fixtureRoot </> "sample-tree" </> "src")
+          createDirectoryIfMissing True (fixtureRoot </> "sample-tree" </> "test")
+          writeFile (fixtureRoot </> "sample-tree" </> "src" </> "Foo.hs") "module Foo where\n"
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            callToolWithArgs discoverDirectoryTool (directoryTreeArgs "sample-tree")
+
+      discoveryResult
+        `shouldBe` T.unlines
+          [ "sample-tree/",
+            "├── test/",
+            "└── src/Foo.hs"
+          ]
+
     it "returns directory validation errors for missing paths" do
       discoveryResult <-
         fixtureLoreMcp do

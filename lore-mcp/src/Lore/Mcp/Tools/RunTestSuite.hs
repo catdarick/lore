@@ -4,25 +4,28 @@ module Lore.Mcp.Tools.RunTestSuite
 where
 
 import qualified Data.Aeson as J
-import Data.List (intercalate)
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Lore
-  ( Diagnostic (..),
-    MonadLore,
+  ( MonadLore,
     RunTestSuiteOptions (..),
     TestSuiteComponentResult (..),
     TestSuiteComponentStatus (..),
-    interpreterContextIsReady,
-    lookupLastLoadHomeModulesResult,
     runTestSuite,
   )
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.LoreDoc (LoreDoc, ToLoreDoc (toLoreDoc), heading2, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (appendPartialLoadWarning)
-import Lore.Mcp.Tools.Shared.Diagnostics (renderDiagnosticSummary)
+import Lore.Mcp.Tools.Shared
+  ( PartialLoadWarning,
+    ToolRun,
+    loadedSessionPartialWarning,
+    partialLoadWarningDoc,
+    withInterpreterSession,
+  )
+import Lore.Mcp.Tools.Shared.Diagnostics (diagnosticSummaryDoc)
 
 data RunTestSuiteArgs (fieldType :: FieldType) = RunTestSuiteArgs
   { package ::
@@ -41,6 +44,75 @@ instance J.FromJSON (RunTestSuiteArgs 'ValueType)
 
 instance ToSchema (RunTestSuiteArgs 'MetadataType)
 
+type RunTestSuiteResult = ToolRun RunTestSuiteOutput
+
+data RunTestSuiteOutput = RunTestSuiteOutput
+  { runTestSuitePackageFilter :: Maybe Text,
+    runTestSuiteForwardedArgs :: [String],
+    runTestSuiteComponents :: [TestSuiteComponentResult],
+    runTestSuitePartialLoadWarning :: Maybe PartialLoadWarning
+  }
+
+instance ToLoreDoc RunTestSuiteOutput where
+  toLoreDoc output =
+    body <> partialLoadWarningDoc output.runTestSuitePartialLoadWarning
+    where
+      body =
+        case output.runTestSuiteComponents of
+          [] ->
+            paragraph $
+              "No test components found"
+                <> packageFilterSuffix output.runTestSuitePackageFilter
+                <> "."
+          _ ->
+            paragraph (summaryLine output)
+              <> paragraph ("Forwarded arguments: " <> T.pack (show output.runTestSuiteForwardedArgs))
+              <> mconcat (map componentResultDoc output.runTestSuiteComponents)
+
+summaryLine :: RunTestSuiteOutput -> Text
+summaryLine output =
+  "Executed "
+    <> T.pack (show (length output.runTestSuiteComponents))
+    <> " test components"
+    <> packageFilterSuffix output.runTestSuitePackageFilter
+    <> ". Successes: "
+    <> T.pack (show successCount)
+    <> ", execution failures: "
+    <> T.pack (show executionFailureCount)
+    <> ", setup failures: "
+    <> T.pack (show setupFailureCount)
+    <> "."
+  where
+    successCount =
+      length [() | TestSuiteComponentResult {status = TestSuiteComponentExecutionSuccess _} <- output.runTestSuiteComponents]
+    executionFailureCount =
+      length [() | TestSuiteComponentResult {status = TestSuiteComponentExecutionFailure _} <- output.runTestSuiteComponents]
+    setupFailureCount =
+      length [() | TestSuiteComponentResult {status = TestSuiteComponentSetupFailure _} <- output.runTestSuiteComponents]
+
+componentResultDoc :: TestSuiteComponentResult -> LoreDoc
+componentResultDoc TestSuiteComponentResult {packageName, componentName, moduleName, status} =
+  case status of
+    TestSuiteComponentSetupFailure failureReason ->
+      heading2 ("[SETUP FAIL] " <> componentLabel)
+        <> paragraph ("reason: " <> T.pack failureReason)
+    TestSuiteComponentExecutionFailure diagnostics ->
+      heading2 ("[FAIL] " <> componentLabel)
+        <> diagnosticSummaryDoc diagnostics
+    TestSuiteComponentExecutionSuccess output ->
+      heading2 ("[PASS] " <> componentLabel)
+        <> paragraph
+          ( if null output
+              then "output: <empty>"
+              else T.pack output
+          )
+  where
+    componentLabel =
+      T.pack packageName
+        <> "/"
+        <> T.pack componentName
+        <> maybe "" (\name -> " (" <> T.pack name <> ")") moduleName
+
 runTestSuiteTool :: (MonadLore m) => SomeTool m
 runTestSuiteTool =
   SomeToolWithArgs
@@ -50,81 +122,29 @@ runTestSuiteTool =
         handler = runTestSuiteHandler
       }
 
-runTestSuiteHandler :: (MonadLore m) => RunTestSuiteArgs 'ValueType -> m Text
-runTestSuiteHandler RunTestSuiteArgs {package, testArgs} = do
-  maybeLoadResult <- lookupLastLoadHomeModulesResult
-  contextReady <- interpreterContextIsReady
-  case maybeLoadResult of
-    Nothing ->
-      pure "Home modules have not been loaded yet. Run reloadHomeModules first."
-    Just loadResult
-      | not contextReady ->
-          pure "Interpreter context is not ready. Run reloadHomeModules again."
-      | otherwise -> do
-          let parsedArgs = maybe [] (parseTestArgs . T.unpack) testArgs
-          componentResults <-
-            runTestSuite
-              RunTestSuiteOptions
-                { packageName = T.unpack <$> package,
-                  testArguments = parsedArgs
-                }
-          let rendered = renderRunTestSuiteResult package parsedArgs componentResults
-          pure (appendPartialLoadWarning loadResult "Test execution may be incomplete." rendered)
+runTestSuiteHandler :: (MonadLore m) => RunTestSuiteArgs 'ValueType -> m RunTestSuiteResult
+runTestSuiteHandler RunTestSuiteArgs {package, testArgs} =
+  withInterpreterSession \session -> do
+    let parsedArgs = maybe [] (parseTestArgs . T.unpack) testArgs
+    componentResults <-
+      runTestSuite
+        RunTestSuiteOptions
+          { packageName = T.unpack <$> package,
+            testArguments = parsedArgs
+          }
+    pure
+      RunTestSuiteOutput
+        { runTestSuitePackageFilter = package,
+          runTestSuiteForwardedArgs = parsedArgs,
+          runTestSuiteComponents = componentResults,
+          runTestSuitePartialLoadWarning = loadedSessionPartialWarning session "Test execution may be incomplete."
+        }
 
-renderRunTestSuiteResult :: Maybe Text -> [String] -> [TestSuiteComponentResult] -> Text
-renderRunTestSuiteResult packageFilter args componentResults =
-  case componentResults of
-    [] ->
-      "No test components found"
-        <> T.pack (renderPackageFilterSuffix packageFilter)
-        <> "."
-    _ ->
-      T.pack (intercalate "\n" (headerLines <> concatMap renderComponentResult componentResults))
-  where
-    successCount =
-      length [() | TestSuiteComponentResult {status = TestSuiteComponentExecutionSuccess _} <- componentResults]
-    executionFailureCount =
-      length [() | TestSuiteComponentResult {status = TestSuiteComponentExecutionFailure _} <- componentResults]
-    setupFailureCount =
-      length [() | TestSuiteComponentResult {status = TestSuiteComponentSetupFailure _} <- componentResults]
-    headerLines =
-      [ "Executed "
-          <> show (length componentResults)
-          <> " test components"
-          <> renderPackageFilterSuffix packageFilter
-          <> ".",
-        "Successes: " <> show successCount <> ", execution failures: " <> show executionFailureCount <> ", setup failures: " <> show setupFailureCount <> ".",
-        "Forwarded arguments: " <> show args
-      ]
-
-renderComponentResult :: TestSuiteComponentResult -> [String]
-renderComponentResult TestSuiteComponentResult {packageName, componentName, moduleName, status} =
-  case status of
-    TestSuiteComponentSetupFailure failureReason ->
-      [ "",
-        "[SETUP FAIL] " <> packageName <> "/" <> componentName,
-        "reason: " <> failureReason
-      ]
-    TestSuiteComponentExecutionFailure diagnostics ->
-      [ "",
-        "[FAIL] " <> packageName <> "/" <> componentName <> maybe "" (\name -> " (" <> name <> ")") moduleName
-      ]
-        <> case diagnostics of
-          [] -> ["- no diagnostics"]
-          _ -> concatMap renderExecutionDiagnostic diagnostics
-    TestSuiteComponentExecutionSuccess output ->
-      [ "",
-        "[PASS] " <> packageName <> "/" <> componentName <> maybe "" (\name -> " (" <> name <> ")") moduleName
-      ]
-        <> if null output
-          then ["output: <empty>"]
-          else ["output:", output]
-
-renderPackageFilterSuffix :: Maybe Text -> String
-renderPackageFilterSuffix maybePackage =
+packageFilterSuffix :: Maybe Text -> Text
+packageFilterSuffix maybePackage =
   case maybePackage of
     Nothing -> ""
-    Just packageName -> " for package " <> show (T.unpack packageName)
+    Just packageName -> " for package " <> T.pack (show (T.unpack packageName))
 
 parseTestArgs :: String -> [String]
 parseTestArgs raw =
@@ -187,17 +207,3 @@ data ParserState = ParserState
     currentArg :: String,
     mode :: ParserMode
   }
-
-renderExecutionDiagnostic :: Diagnostic -> [String]
-renderExecutionDiagnostic diagnostic@Diagnostic {diagnosticReason, diagnosticHints} =
-  T.unpack (renderDiagnosticSummary diagnostic)
-    : reasonLines
-      <> hintLines
-  where
-    reasonLines =
-      case diagnosticReason of
-        Nothing -> []
-        Just reasonText -> ["  reason: " <> T.unpack reasonText]
-
-    hintLines =
-      map (\hintText -> "  hint: " <> T.unpack hintText) diagnosticHints

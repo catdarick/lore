@@ -1,5 +1,8 @@
 module Lore.Mcp.Tools.Shared.Diagnostics
-  ( compactDiagnosticMessage,
+  ( diagnosticMessageBody,
+    diagnosticSeverityTitle,
+    diagnosticSummaryDoc,
+    compactDiagnosticMessage,
     renderDiagnosticSummary,
     renderSummaryLine,
   )
@@ -11,10 +14,42 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Lore (Diagnostic (..))
+import Lore.Mcp.Internal.LoreDoc (LoreDoc, bulletList, paragraph)
+
+diagnosticSummaryDoc :: [Diagnostic] -> LoreDoc
+diagnosticSummaryDoc diagnostics =
+  case diagnostics of
+    [] ->
+      bulletList [paragraph "No diagnostics were produced."]
+    _ ->
+      bulletList (map (paragraph . diagnosticSummaryText) diagnostics)
+
+diagnosticSeverityTitle :: Diagnostic -> Text
+diagnosticSeverityTitle diagnostic =
+  case renderSeverityLabel diagnostic.diagnosticSeverity of
+    "fatal" -> "Fatal"
+    "error" -> "Error"
+    "warning" -> "Warning"
+    "info" -> "Info"
+    "diagnostic" -> "Diagnostic"
+    other ->
+      T.toTitle (T.pack other)
+
+diagnosticMessageBody :: Diagnostic -> Text
+diagnosticMessageBody diagnostic =
+  case compactDiagnosticMessage diagnostic.diagnosticMessage of
+    [] ->
+      "<empty>"
+    lines' ->
+      T.intercalate "\n" (map T.pack lines')
 
 renderDiagnosticSummary :: Diagnostic -> Text
-renderDiagnosticSummary Diagnostic {diagnosticMessage} =
-  "- " <> summarizedMessage
+renderDiagnosticSummary diagnostic =
+  "- " <> diagnosticSummaryText diagnostic
+
+diagnosticSummaryText :: Diagnostic -> Text
+diagnosticSummaryText Diagnostic {diagnosticMessage} =
+  summarizedMessage
   where
     summarizedMessage =
       case compactDiagnosticMessage diagnosticMessage of

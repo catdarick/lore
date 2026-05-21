@@ -1,5 +1,6 @@
 module Lore.Mcp.Tools.Shared.CompactClassInstance
   ( CompactClassInstance (..),
+    renderCompactClassInstanceLabel,
   )
 where
 
@@ -11,22 +12,21 @@ import qualified GHC.Core.InstEnv as InstEnv
 import qualified GHC.Plugins as Plugins
 import qualified GHC.Types.TyThing as TyThing
 import Lore (SymbolInfo (..))
-import Lore.Mcp.Internal.Render (Renderable (renderText))
 import Lore.Mcp.Tools.Shared.Outputable (renderOutputable)
 
 data CompactClassInstance = CompactClassInstance SymbolInfo InstEnv.ClsInst
 
-instance Renderable CompactClassInstance where
-  renderText (CompactClassInstance symbolInfo classInstance) =
-    case symbolContext symbolInfo of
-      SymbolContextTypeLike
-        | classParameterCount classInstance <= 1 ->
-            classNameText classInstance
-      SymbolContextClass
-        | classParameterCount classInstance == 2 ->
-            classArgumentsText classInstance
-      _ ->
-        stripInstancePrefix (compactRenderedInstanceText (renderOutputable classInstance))
+renderCompactClassInstanceLabel :: CompactClassInstance -> Text
+renderCompactClassInstanceLabel (CompactClassInstance symbolInfo classInstance) =
+  case symbolContext symbolInfo of
+    SymbolContextTypeLike
+      | classParameterCount classInstance <= 1 ->
+          classNameText classInstance
+    SymbolContextClass
+      | classParameterCount classInstance == 2 ->
+          classArgumentsText classInstance
+    _ ->
+      stripInstancePrefix (compactRenderedInstanceText (renderOutputable classInstance))
 
 data SymbolContext
   = SymbolContextTypeLike
