@@ -25,15 +25,17 @@ import Lore.Mcp.Tools.GetDefinition.Shared
     CommonGetDefinitionArgs (..),
     FilteredDefinitions (..),
     GetDefinitionResult,
-    PaginatedDefinitionSources (..),
-    buildPaginatedDefinitionSourceFiles,
     defaultRecursionDepth,
     getDefinitionHandlerWithStrategy,
     maxRenderedDefinitionResults,
     mkOmittedDefinitions,
-    paginateDefinitionSources,
   )
 import Lore.Mcp.Tools.Shared (Paginated (..))
+import Lore.Mcp.Tools.Shared.DefinitionSourceRendering
+  ( PaginatedDefinitionSources (..),
+    buildPaginatedDefinitionSourceFiles,
+    paginateDefinitionSources,
+  )
 import Lore.Mcp.Tools.Shared.Source (declarationBodyText)
 import Text.Printf (printf)
 

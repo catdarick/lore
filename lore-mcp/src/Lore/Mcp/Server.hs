@@ -29,6 +29,7 @@ import Lore.Mcp.Tools.LookupInstances (lookupInstancesTool)
 import Lore.Mcp.Tools.LookupSymbolInfo (lookupSymbolInfoTool)
 import Lore.Mcp.Tools.NotifyKnowledgeReset (notifyKnowledgeResetTool)
 import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
+import Lore.Mcp.Tools.ResolveInstance (resolveInstanceTool)
 import Lore.Mcp.Tools.RunTestSuite (runTestSuiteTool)
 import Lore.Mcp.Tools.SearchSymbols (searchSymbolsTool)
 import System.Environment (lookupEnv)
@@ -75,6 +76,7 @@ runLoreMcpServer = do
             searchSymbolsTool,
             lookupSymbolInfoTool,
             getDefinitionTool,
+            resolveInstanceTool,
             findReferencesTool,
             lookupInstancesTool,
             createTemporalModuleTool,

@@ -12,6 +12,7 @@ import qualified LookupInstancesSpec
 import qualified LoreDocMarkdownSpec
 import qualified ProtocolRequestSpec
 import qualified ReloadHomeModulesSpec
+import qualified ResolveInstanceSpec
 import qualified RunTestSuiteSpec
 import qualified SearchSymbolsSpec
 import Test.Hspec
@@ -28,6 +29,7 @@ main =
     LoreDocMarkdownSpec.spec
     LookupInstancesSpec.spec
     SearchSymbolsSpec.spec
+    ResolveInstanceSpec.spec
     ToolBlockedSpec.spec
     ReloadHomeModulesSpec.spec
     RunTestSuiteSpec.spec

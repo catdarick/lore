@@ -13,6 +13,9 @@ module Lore.Lookup
     SymbolCategory (..),
     SymbolInfo (..),
     Instances (..),
+    ChosenInstanceError (..),
+    ChosenInstanceResolution (..),
+    ChosenInstanceContextStatus (..),
     PathToRoot (..),
     classifySymbolCategory,
     findMatchingSymbols,
@@ -22,6 +25,7 @@ module Lore.Lookup
     listIntersectingInstances,
     listAssociatedInstances,
     listDirectInstances,
+    resolveChosenClassInstanceFromTypeText,
     resolvePathToRoot,
     mergePathsToRootOn,
   )
@@ -41,6 +45,12 @@ import qualified GHC.Core.InstEnv as InstEnv
 import qualified GHC.Core.RoughMap as RoughMap
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
+import Lore.Internal.Lookup.InstanceResolution
+  ( ChosenInstanceContextStatus (..),
+    ChosenInstanceError (..),
+    ChosenInstanceResolution (..),
+    resolveChosenClassInstanceFromTypeText,
+  )
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, extractAndNormalizeOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap, findSimilarSymbolsInMap)

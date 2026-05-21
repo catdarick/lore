@@ -74,6 +74,9 @@ library:
   - Lore.TemporalModules
   - Lore.HomeModules
   - Lore.HomeModules.Plan
+  - Lore.Internal.Lookup.ModulePreference
+  - Lore.Internal.Lookup.SymbolResolutionCore
+  - Lore.Internal.Lookup.TypeQuery
 
 
 tests:

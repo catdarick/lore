@@ -43,6 +43,9 @@ library
       Lore.TemporalModules
       Lore.HomeModules
       Lore.HomeModules.Plan
+      Lore.Internal.Lookup.ModulePreference
+      Lore.Internal.Lookup.SymbolResolutionCore
+      Lore.Internal.Lookup.TypeQuery
   other-modules:
       Lore.Internal.Cache.Types
       Lore.Internal.Definition.Analysis
@@ -83,14 +86,19 @@ library
       Lore.Internal.Interpreter
       Lore.Internal.List
       Lore.Internal.Lookup.Cache.Types
+      Lore.Internal.Lookup.InstanceResolution
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.Name
       Lore.Internal.Lookup.NameToInstances
+      Lore.Internal.Lookup.Orphans
       Lore.Internal.Lookup.Search.Score
       Lore.Internal.Lookup.Search.Synonyms
       Lore.Internal.Lookup.Search.Tokenize
       Lore.Internal.Lookup.Search.Types
       Lore.Internal.Lookup.SymbolsMap
+      Lore.Internal.Lookup.TypeQuery.Names
+      Lore.Internal.Lookup.TypeQuery.Parse
+      Lore.Internal.Lookup.TypeQuery.Resolve
       Lore.Internal.Lookup.Types
       Lore.Internal.Monad
       Lore.Internal.Package

@@ -28,6 +28,9 @@ module Lore
     classifySymbolCategory,
     SymbolInfo (..),
     Instances (..),
+    ChosenInstanceError (..),
+    ChosenInstanceResolution (..),
+    ChosenInstanceContextStatus (..),
     PathToRoot (..),
     findMatchingSymbols,
     findSimilarSymbols,
@@ -39,6 +42,7 @@ module Lore
     listIntersectingInstances,
     listAssociatedInstances,
     listDirectInstances,
+    resolveChosenClassInstanceFromTypeText,
     resolvePathToRoot,
     mergePathsToRootOn,
     -- Source-first definition API.

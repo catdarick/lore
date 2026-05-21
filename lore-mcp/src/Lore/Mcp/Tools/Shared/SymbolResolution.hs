@@ -11,11 +11,12 @@ module Lore.Mcp.Tools.Shared.SymbolResolution
 where
 
 import Control.Monad (filterM)
-import Data.List (foldl')
+import Control.Monad.Reader (asks)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GHC
 import qualified GHC.Plugins as Plugins
 import Lore
   ( MonadLore,
@@ -26,7 +27,18 @@ import Lore
     parseAndNormalizeName,
     resolvePathToRoot,
   )
+import Lore.Internal.Lookup.ModulePreference (ModulePreferenceContext (..))
+import Lore.Internal.Lookup.SymbolResolutionCore
+  ( ResolvedRootGroup (..),
+    choosePreferredRootSymbol,
+    chooseQualifierModuleName,
+    collectHomeModuleNames,
+    dedupeTexts,
+    groupSymbolsByResolvedRoot,
+    renderRootModuleName,
+  )
 import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), paragraph)
+import Lore.Session (SessionContext (customPrelude))
 
 data ResolvedSymbolQuery = ResolvedSymbolQuery
   { queryText :: !Text,
@@ -87,24 +99,29 @@ resolveOneQuery query = do
         )
     _ -> do
       symbolsWithRoots <- mapM resolveSymbolRoot matchingSymbols
-      let rootNames = dedupeNamesBy renderName (map snd symbolsWithRoots)
-      case rootNames of
-        [singleRootName] ->
-          case symbolsWithRoots of
-            (preferredSymbol, _) : _ ->
-              pure
-                ( Right
-                    ResolvedSymbolQuery
-                      { queryText = query,
-                        parsedQuery = normalizedQuery,
-                        resolvedSymbol = preferredSymbol,
-                        resolvedRootName = singleRootName
-                      }
-                )
-            [] ->
-              pure (Left (UnresolvedSymbolQuery'Missing query))
+      let groupedByRoot = groupSymbolsByResolvedRoot symbolsWithRoots
+      homeModuleNames <- collectHomeModuleNames
+      maybeCustomPreludeName <- asks customPrelude
+      let modulePreferenceContext =
+            ModulePreferenceContext
+              { modulePreferenceHomeModules = homeModuleNames,
+                modulePreferenceCustomPrelude = GHC.mkModuleName . T.unpack <$> maybeCustomPreludeName
+              }
+      case groupedByRoot of
+        [singleRootGroup] -> do
+          let preferredSymbol =
+                choosePreferredRootSymbol modulePreferenceContext singleRootGroup
+          pure
+            ( Right
+                ResolvedSymbolQuery
+                  { queryText = query,
+                    parsedQuery = normalizedQuery,
+                    resolvedSymbol = preferredSymbol,
+                    resolvedRootName = singleRootGroup.resolvedRootName
+                  }
+            )
         _ -> do
-          disambiguationHints <- renderDisambiguationHints query normalizedQuery matchingSymbols rootNames
+          disambiguationHints <- renderDisambiguationHints query normalizedQuery modulePreferenceContext groupedByRoot
           pure (Left (UnresolvedSymbolQuery'Ambiguous query disambiguationHints))
 
 resolveSymbolRoot :: (MonadLore m) => Symbol -> m (Symbol, Plugins.Name)
@@ -139,27 +156,33 @@ renderUnresolvedSymbolQuery unresolvedQuery =
             <> ["", "Run the tool again with a fully qualified symbol name from the list above."]
         )
 
-renderDisambiguationHints :: (MonadLore m) => Text -> NormalizedName -> [Symbol] -> [Plugins.Name] -> m [Text]
-renderDisambiguationHints queryText parsedQuery matchedSymbols matchedRoots = do
-  ownerQualifiedHints <- resolveOwnerQualifiedHints queryText matchedRoots
+renderDisambiguationHints :: (MonadLore m) => Text -> NormalizedName -> ModulePreferenceContext -> [ResolvedRootGroup] -> m [Text]
+renderDisambiguationHints queryText parsedQuery context groupedByRoot = do
+  ownerQualifiedHints <- resolveOwnerQualifiedHints queryText (map (.resolvedRootName) groupedByRoot)
   pure $
     case parsedQuery.ownerHint of
       Just _ ->
         dedupeTexts (ownerQualifiedHints <> moduleQualifiedHints)
       Nothing ->
-        if hasSingleDefinitionModule && not (null ownerQualifiedHints)
+        if hasSingleHintModule && not (null ownerQualifiedHints)
           then ownerQualifiedHints
           else moduleQualifiedHints
   where
-    hasSingleDefinitionModule =
-      length definitionModules <= 1
+    hasSingleHintModule =
+      length hintModules <= 1
 
-    definitionModules =
-      dedupeTexts (map renderSymbolModuleName matchedSymbols)
+    hintModules =
+      dedupeTexts $
+        map
+          ( T.pack
+              . Plugins.moduleNameString
+              . chooseQualifierModuleName context
+          )
+          groupedByRoot
 
     moduleQualifiedHints =
       [ moduleName <> "." <> queryBaseName queryText
-      | moduleName <- definitionModules
+      | moduleName <- hintModules
       ]
 
 resolveOwnerQualifiedHints :: (MonadLore m) => Text -> [Plugins.Name] -> m [Text]
@@ -178,26 +201,6 @@ ownerHintResolvesUniquely query = do
   pure $ case maybeResolution of
     Right (MkSymbolsResolved [_]) -> True
     _ -> False
-
-renderName :: Plugins.Name -> String
-renderName name =
-  case Plugins.nameModule_maybe name of
-    Nothing ->
-      "<no-module>." <> Plugins.getOccString name
-    Just module_ ->
-      Plugins.moduleNameString (Plugins.moduleName module_) <> "." <> Plugins.getOccString name
-
-renderSymbolModuleName :: Symbol -> Text
-renderSymbolModuleName symbol =
-  renderRootModuleName symbol.name
-
-renderRootModuleName :: Plugins.Name -> Text
-renderRootModuleName name =
-  case Plugins.nameModule_maybe name of
-    Nothing ->
-      "<no-module>"
-    Just module_ ->
-      T.pack (Plugins.moduleNameString (Plugins.moduleName module_))
 
 queryBaseName :: Text -> Text
 queryBaseName queryText =
@@ -222,17 +225,3 @@ stripOwnerHintSuffix queryText =
 quoteText :: Text -> Text
 quoteText value =
   "\"" <> value <> "\""
-
-dedupeNamesBy :: (Ord k) => (a -> k) -> [a] -> [a]
-dedupeNamesBy renderKey =
-  reverse . snd . foldl' collectUnique (Set.empty, [])
-  where
-    collectUnique (seenKeys, dedupedNames) name =
-      let key = renderKey name
-       in if key `Set.member` seenKeys
-            then (seenKeys, dedupedNames)
-            else (Set.insert key seenKeys, name : dedupedNames)
-
-dedupeTexts :: [Text] -> [Text]
-dedupeTexts =
-  dedupeNamesBy id

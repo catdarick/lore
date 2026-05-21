@@ -15,12 +15,12 @@ import Lore.Mcp.Tools.GetDefinition.Shared
     CommonGetDefinitionArgs (..),
     FilteredDefinitions (..),
     GetDefinitionResult,
-    buildPaginatedDefinitionSourceFiles,
     defaultRecursionDepth,
     getDefinitionHandlerWithStrategy,
     maxRenderedDefinitionResults,
     mkOmittedDefinitions,
   )
+import Lore.Mcp.Tools.Shared.DefinitionSourceRendering (buildPaginatedDefinitionSourceFiles)
 
 data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
   { symbols ::
