@@ -38,7 +38,7 @@ spec = do
           pure (firstCall, secondCall, forcedCall)
 
       firstCall `shouldContainText` "lookupOrZero"
-      secondCall `shouldContainText` "definitions are completely UNCHANGED"
+      secondCall `shouldContainText` "The following definitions are unchanged and were omitted:"
       secondCall `shouldContainText` "Demo: lookupOrZero"
       forcedCall `shouldContainText` "lookupOrZero"
 
@@ -51,7 +51,7 @@ spec = do
           pure (recursiveCall, directCall)
 
       recursiveCall `shouldContainText` "bumpWithSeed :: Int -> Int"
-      directCall `shouldContainText` "definitions are completely UNCHANGED"
+      directCall `shouldContainText` "The following definitions are unchanged and were omitted:"
       directCall `shouldContainText` "Demo: bumpWithSeed"
 
     it "returns previously omitted definitions after notifyKnowledgeReset" do
@@ -64,7 +64,7 @@ spec = do
           afterResetCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] None Nothing)
           pure (cachedCall, resetCall, afterResetCall)
 
-      cachedCall `shouldContainText` "definitions are completely UNCHANGED"
+      cachedCall `shouldContainText` "The following definitions are unchanged and were omitted:"
       resetCall `shouldContainText` "Knowledge reset acknowledged. Cleared "
       afterResetCall `shouldContainText` "lookupOrOne"
 
@@ -75,7 +75,7 @@ spec = do
           _ <- callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] None Nothing)
           callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] None Nothing)
 
-      secondCall `shouldContainText` "definitions are completely UNCHANGED"
+      secondCall `shouldContainText` "The following definitions are unchanged and were omitted:"
       secondCall `shouldNotContainText` "Use `notifyKnowledgeReset` tool"
 
     it "keeps non-rendered paginated definitions uncached until they are actually shown" do
@@ -95,7 +95,6 @@ spec = do
         firstPageCall `shouldNotContainText` "=== "
         firstPageCall `shouldNotContainText` "--- lines "
         firstPageCall `shouldNotContainText` "```"
-        secondPageCall `shouldContainText` "Showing all 1 definition results."
         secondPageCall `shouldContainText` "pageDef31 :: Int"
 
   describe "getDefinition (regular mode)" do
@@ -109,7 +108,7 @@ spec = do
 
       firstCall `shouldContainText` "lookupOrZero"
       secondCall `shouldContainText` "lookupOrZero"
-      secondCall `shouldNotContainText` "definitions are completely UNCHANGED"
+      secondCall `shouldNotContainText` "The following definitions are unchanged and were omitted:"
 
     it "follows constructor-specific recursive dependencies while still rendering root declarations" do
       withFixtureCopy \fixtureRoot -> do

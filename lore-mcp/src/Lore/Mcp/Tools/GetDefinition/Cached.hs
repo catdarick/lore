@@ -40,7 +40,7 @@ cachedGetDefinitionTool shouldRenderNotifyKnowledgeResetHint =
   SomeToolWithArgs
     ToolWithArgs
       { name = "getDefinition",
-        description = Just "Render source definitions for one or more exported symbols when source is available. In cached mode, repeated definitions are omitted unless force=true. Use expansion to control dependency inclusion: None (target only), Direct (maxDepth=1), Recursive (maxDepth=2, maxSymbols=200). Returned imports are minified and may not exactly match original module import formatting. This can still succeed usefully during partial load if the requested definition is available.",
+        description = Just "Return source definitions for one or more exported symbols, when source code is available. To reduce duplicate output, definitions that were already returned earlier in this session are omitted if they have not changed.",
         handler = cachedGetDefinitionHandler shouldRenderNotifyKnowledgeResetHint
       }
 
@@ -56,7 +56,7 @@ data HashedDefinitionEntry = HashedDefinitionEntry
 buildWithKnowledgeCache ::
   (MonadLoreMcp m) =>
   BuildDefinitionsStrategy m
-buildWithKnowledgeCache skip definitionEntries = do
+buildWithKnowledgeCache skip directlyRequestedSymbolNames definitionEntries = do
   hashedDefinitions <- hashDefinitionEntries definitionEntries
   let uniqueDefinitions =
         dedupeHashedDefinitionEntries hashedDefinitions
@@ -85,7 +85,8 @@ buildWithKnowledgeCache skip definitionEntries = do
   let omittedDefinitions =
         [ definition.definitionEntry.definitionName
         | definition <- uniqueDefinitions,
-          Set.member definition.definitionFingerprint visibleKnownFingerprints
+          Set.member definition.definitionFingerprint visibleKnownFingerprints,
+          Set.member definition.definitionEntry.definitionName directlyRequestedSymbolNames
         ]
   filteredDefinitionPage <-
     buildFilteredVisibleDefinitionSourceFiles

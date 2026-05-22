@@ -48,11 +48,9 @@ import Lore.Mcp.Internal.LoreDoc
   )
 import Lore.Mcp.Tools.Shared
   ( Paginated (..),
-    PaginationRenderConfig (..),
     PartialLoadWarning (..),
     ToolRun (..),
     loadedSessionPartialWarning,
-    paginationSummaryDoc,
     withLoadedSession,
     withPartialLoadWarning,
   )
@@ -78,7 +76,7 @@ data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
                     ],
     expansion ::
       Field fieldType (Maybe DefinitionExpansion)
-        `WithMeta` '[ Description "How much related definitions to return. Use \"None\" to return only the requested symbol's definitions. Use \"Direct\" to also include definitions of symbols referenced directly by the requested definitions. Use \"Recursive\" to include direct dependencies and their dependencies."
+        `WithMeta` '[ Description "How much related definitions to return. Use \"None\" to return only the requested symbol's definitions. Use \"Direct\" to also include definitions of symbols referenced directly by the requested definitions (maxDepth=1). Use \"Recursive\" to include direct dependencies and their dependencies (maxDepth=2, maxSymbols=30)."
                     ]
   }
   deriving stock (Generic)
@@ -134,6 +132,7 @@ data FilteredDefinitions = FilteredDefinitions
 
 type BuildDefinitionsStrategy m =
   Int ->
+  Set.Set GHC.Name ->
   [NamedDefinitionSource] ->
   m FilteredDefinitions
 
@@ -157,8 +156,10 @@ getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint GetDefinit
             <$> mapM
               (\resolvedQuery -> lookupSymbolInfo resolvedQuery.resolvedSymbol.name)
               resolved.resolvedQueries
+        let directlyRequestedSymbolNames =
+              Set.fromList (map (.symbolName) resolvedSymbolInfos)
         definitionEntries <- concat <$> mapM (resolveSymbolDefinitions resolvedExpansion) resolvedSymbolInfos
-        filteredDefinitions <- buildDefinitions resolvedSkip definitionEntries
+        filteredDefinitions <- buildDefinitions resolvedSkip directlyRequestedSymbolNames definitionEntries
         pure $
           GetDefinitionReadyResult
             GetDefinitionReady
@@ -239,11 +240,7 @@ quoteTexts values =
 
 omittedDefinitionsSectionHeader :: Text
 omittedDefinitionsSectionHeader =
-  "The following definitions are completely UNCHANGED and valid inside your current context window and were omitted:"
-
-allOmittedDefinitionsSectionHeader :: Text
-allOmittedDefinitionsSectionHeader =
-  "All matching definitions are completely UNCHANGED and valid inside your current context window and were omitted."
+  "The following definitions are unchanged and were omitted:"
 
 notifyKnowledgeResetHint :: Text
 notifyKnowledgeResetHint =
@@ -297,34 +294,60 @@ renderReady ready =
             paragraph $
               T.intercalate
                 "\n"
-                ([allOmittedDefinitionsSectionHeader] <> renderOmittedDefinitionsLines ready.getDefinitionOmitted <> notifyHintLines)
+                (omittedLines <> notifyHintLines)
       | otherwise ->
           withPartialLoadWarning ready.getDefinitionPartialLoadWarning $
             paragraph ("No definitions found for " <> quoteTexts ready.getDefinitionSymbols <> ".")
     Just page ->
       mconcat
-        [ paginationSummaryDoc
-            PaginationRenderConfig
-              { paginationItemLabel = "definition results",
-                paginationSkipArgName = Just "skip"
-              }
-            page,
-          mconcat (map sourceFile page.paginatedItems),
-          omittedSection,
+        [ mconcat (map sourceFile page.paginatedItems),
+          footerSection page,
           partialWarningSection
         ]
   where
-    omittedSection
-      | ready.getDefinitionOmitted.omittedDefinitionCount <= 0 =
+    footerSection page =
+      case footerLines page of
+        [] ->
           mempty
+        lines_ ->
+          paragraph (T.intercalate "\n" lines_)
+
+    footerLines page =
+      paginationOverflowLine page
+        <> omittedLines
+        <> notifyHintLines
+
+    paginationOverflowLine page
+      | remainingItems page > 0 =
+          [ "And "
+              <> T.pack (show (remainingItems page))
+              <> " more definition results (set skip to "
+              <> T.pack (show (nextSkip page))
+              <> " to get the next page if required)."
+          ]
       | otherwise =
-          paragraph $
-            T.intercalate
-              "\n"
-              ([omittedDefinitionsSectionHeader] <> renderOmittedDefinitionsLines ready.getDefinitionOmitted <> notifyHintLines)
+          []
+
+    remainingItems page =
+      max
+        0
+        ( page.paginatedTotalItems
+            - page.paginatedSkippedItems
+            - page.paginatedConsumedItems
+        )
+
+    nextSkip page =
+      page.paginatedSkippedItems + page.paginatedConsumedItems
+
+    omittedLines
+      | ready.getDefinitionOmitted.omittedDefinitionCount <= 0 =
+          []
+      | otherwise =
+          [omittedDefinitionsSectionHeader] <> renderOmittedDefinitionsLines ready.getDefinitionOmitted
 
     notifyHintLines
-      | ready.getDefinitionRenderNotifyKnowledgeResetHint =
+      | ready.getDefinitionRenderNotifyKnowledgeResetHint
+          && ready.getDefinitionOmitted.omittedDefinitionCount > 0 =
           [notifyKnowledgeResetHint]
       | otherwise =
           []
