@@ -63,6 +63,64 @@ spec = do
       result `shouldContainText` "    True -> targetSymbol"
       result `shouldContainText` "    False -> 0"
 
+    it "respects maxResults when lower than the internal result cap" do
+      result <-
+        renderFindReferencesFixtureWithArgs
+          "RenderedMaxResults"
+          maxResultsReferenceModuleSource
+          (findReferencesArgsWith "TestRefs.RenderedMaxResults.targetSymbol" (Just 2) "High")
+
+      result `shouldContainText` "useTargetOne value ="
+      result `shouldContainText` "useTargetTwo value ="
+      result `shouldNotContainText` "useTargetThree value ="
+
+    it "applies maxResults to reference usages within a single definition" do
+      result <-
+        renderFindReferencesFixtureWithArgs
+          "RenderedOccurrenceCap"
+          occurrenceCappedReferenceModuleSource
+          (findReferencesArgsWith "TestRefs.RenderedOccurrenceCap.targetSymbol" (Just 1) "Low")
+
+      result `shouldContainText` "first = targetSymbol value"
+      result `shouldNotContainText` "second = targetSymbol (value + 1)"
+      result `shouldNotContainText` "third = targetSymbol (value + 2)"
+
+    it "keeps multiline application usage blocks in low verbosity" do
+      result <-
+        renderFindReferencesFixtureWithArgs
+          "RenderedCall"
+          multilineApplicationReferenceModuleSource
+          (findReferencesArgsWith "TestRefs.RenderedCall.targetSymbol" Nothing "Low")
+
+      result `shouldContainText` "callSomeFunction"
+      result `shouldContainText` "    a"
+      result `shouldContainText` "    b"
+      result `shouldContainText` "    targetSymbol"
+      result `shouldContainText` "    c"
+
+    it "renders only the closest usage section in low verbosity" do
+      result <-
+        renderFindReferencesFixtureWithArgs
+          "RenderedVerbosity"
+          verbosityReferenceModuleSource
+          (findReferencesArgsWith "TestRefs.RenderedVerbosity.targetSymbol" Nothing "Low")
+
+      result `shouldContainText` "0 -> targetSymbol start"
+      result `shouldNotContainText` "let start = value + 10"
+      result `shouldNotContainText` "build :: Int -> Int"
+      result `shouldNotContainText` "in finish"
+
+    it "renders contextual neighbors and root edges in medium verbosity" do
+      result <-
+        renderFindReferencesFixtureWithArgs
+          "RenderedVerbosity"
+          verbosityReferenceModuleSource
+          (findReferencesArgsWith "TestRefs.RenderedVerbosity.targetSymbol" Nothing "Medium")
+
+      result `shouldContainText` "0 -> targetSymbol start"
+      result `shouldContainText` "build :: Int -> Int"
+      result `shouldContainText` "in finish"
+
     it "renders signature-only references intentionally" do
       result <-
         renderFindReferencesFixture
@@ -204,16 +262,24 @@ spec = do
 
 renderFindReferencesFixture :: FilePath -> Text -> Text -> IO Text
 renderFindReferencesFixture moduleFileName moduleSource symbol =
-  renderFindReferencesFixtureModules [(moduleFileName, moduleSource)] symbol
+  renderFindReferencesFixtureWithArgs moduleFileName moduleSource (findReferencesArgs symbol)
+
+renderFindReferencesFixtureWithArgs :: FilePath -> Text -> J.Value -> IO Text
+renderFindReferencesFixtureWithArgs moduleFileName moduleSource args =
+  renderFindReferencesFixtureModulesWithArgs [(moduleFileName, moduleSource)] args
 
 renderFindReferencesFixtureModules :: [(FilePath, Text)] -> Text -> IO Text
 renderFindReferencesFixtureModules modulesToWrite symbol =
+  renderFindReferencesFixtureModulesWithArgs modulesToWrite (findReferencesArgs symbol)
+
+renderFindReferencesFixtureModulesWithArgs :: [(FilePath, Text)] -> J.Value -> IO Text
+renderFindReferencesFixtureModulesWithArgs modulesToWrite args =
   withFixtureCopy \fixtureRoot -> do
     writeFixtureModules fixtureRoot modulesToWrite
 
     fixtureLoreMcpAtWithCache False fixtureRoot do
       loadFixtureHomeModules
-      callToolWithArgs findReferencesTool (findReferencesArgs symbol)
+      callToolWithArgs findReferencesTool args
 
 writeFixtureModules :: FilePath -> [(FilePath, Text)] -> IO ()
 writeFixtureModules fixtureRoot modulesToWrite =
@@ -228,9 +294,15 @@ writeFixtureModules fixtureRoot modulesToWrite =
 
 findReferencesArgs :: Text -> J.Value
 findReferencesArgs symbol =
-  J.object
-    [ "symbol" J..= symbol
+  findReferencesArgsWith symbol Nothing "High"
+
+findReferencesArgsWith :: Text -> Maybe Int -> Text -> J.Value
+findReferencesArgsWith symbol maxResults verbosity =
+  J.object $
+    [ "symbol" J..= symbol,
+      "verbosity" J..= verbosity
     ]
+      <> maybe [] (\value -> ["maxResults" J..= value]) maxResults
 
 multilineApplicationReferenceModuleSource :: Text
 multilineApplicationReferenceModuleSource =
@@ -253,6 +325,74 @@ multilineApplicationReferenceModuleSource =
       "",
       "callSomeFunction :: Int -> Int -> Int -> Int -> Int",
       "callSomeFunction a b c d = a + b + c + d"
+    ]
+
+maxResultsReferenceModuleSource :: Text
+maxResultsReferenceModuleSource =
+  T.unlines
+    [ "module TestRefs.RenderedMaxResults",
+      "  ( targetSymbol,",
+      "    useTargetOne,",
+      "    useTargetTwo,",
+      "    useTargetThree",
+      "  ) where",
+      "",
+      "targetSymbol :: Int -> Int",
+      "targetSymbol value = value + 1",
+      "",
+      "useTargetOne :: Int -> Int",
+      "useTargetOne value =",
+      "  targetSymbol value",
+      "",
+      "useTargetTwo :: Int -> Int",
+      "useTargetTwo value =",
+      "  targetSymbol (value + 1)",
+      "",
+      "useTargetThree :: Int -> Int",
+      "useTargetThree value =",
+      "  case targetSymbol value of",
+      "    result -> result"
+    ]
+
+occurrenceCappedReferenceModuleSource :: Text
+occurrenceCappedReferenceModuleSource =
+  T.unlines
+    [ "module TestRefs.RenderedOccurrenceCap",
+      "  ( targetSymbol,",
+      "    aggregate",
+      "  ) where",
+      "",
+      "targetSymbol :: Int -> Int",
+      "targetSymbol value = value + 1",
+      "",
+      "aggregate :: Int -> Int",
+      "aggregate value =",
+      "  let first = targetSymbol value",
+      "      second = targetSymbol (value + 1)",
+      "      third = targetSymbol (value + 2)",
+      "   in first + second + third"
+    ]
+
+verbosityReferenceModuleSource :: Text
+verbosityReferenceModuleSource =
+  T.unlines
+    [ "module TestRefs.RenderedVerbosity",
+      "  ( targetSymbol,",
+      "    build",
+      "  ) where",
+      "",
+      "targetSymbol :: Int -> Int",
+      "targetSymbol value = value + 1",
+      "",
+      "build :: Int -> Int",
+      "build value =",
+      "  let start = value + 10",
+      "      branch =",
+      "        case start of",
+      "          0 -> targetSymbol start",
+      "          _ -> start",
+      "      finish = branch + 3",
+      "   in finish"
     ]
 
 doBlockReferenceModuleSource :: Text

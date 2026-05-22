@@ -7,7 +7,7 @@ import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
 import Data.List (foldl', sortOn)
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
 import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -66,7 +66,7 @@ import Lore.Mcp.Tools.Shared.SymbolResolution
 data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
   { symbol ::
       Field fieldType Text
-        `WithMeta` '[ Description "Exact symbol name to find references for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope. For symbols ambiguous within one module (for example DuplicateRecordFields selectors), use owner qualification syntax: Some.Module.fieldName@OwnerType.",
+        `WithMeta` '[ Description "Exact symbol name to find references for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
                       Example "lookupOrZero",
                       Example "Some.Module.someFunction",
                       Example "Some.Module.fieldName@OwnerType"
@@ -75,9 +75,28 @@ data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
       Maybe (Field fieldType Int)
         `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
                       Example 15
+                    ],
+    maxResults ::
+      Maybe (Field fieldType Int)
+        `WithMeta` '[ Description "Optional cap for references to return.",
+                      Example 2
+                    ],
+    verbosity ::
+      Field fieldType FindReferencesVerbosity
+        `WithMeta` '[ Description "Controls source context size around each reference. Low returns just the usage, use this when you just need usage examples. Medium returns usage plus root-symbol placement where it is used. High returns broad context, including surrounding control-flow branching."
                     ]
   }
   deriving stock (Generic)
+
+data FindReferencesVerbosity
+  = Low
+  | Medium
+  | High
+  deriving stock (Eq, Generic, Show)
+
+instance J.FromJSON FindReferencesVerbosity
+
+instance ToSchema FindReferencesVerbosity
 
 instance J.FromJSON (FindReferencesArgs 'ValueType)
 
@@ -88,7 +107,7 @@ findReferencesTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "findReferences",
-        description = Just "Render all the source definitions that reference the requested symbol, including instance declarations.",
+        description = Just "Lists the references for the requested symbol.",
         handler = findReferencesHandler
       }
 
@@ -113,8 +132,13 @@ data FindReferencesReady = FindReferencesReady
     findReferencesPartialLoadWarning :: Maybe PartialLoadWarning
   }
 
+data ReferenceOccurrenceMatch = ReferenceOccurrenceMatch
+  { occurrenceMatchDefinition :: DefinitionSource,
+    occurrenceMatchHit :: ReferenceHit
+  }
+
 findReferencesHandler :: (MonadLore m) => FindReferencesArgs 'ValueType -> m FindReferencesResult
-findReferencesHandler FindReferencesArgs {symbol, skip} = do
+findReferencesHandler FindReferencesArgs {symbol, skip, maxResults, verbosity} = do
   let targetName = parseAndNormalizeName symbol
   withLoadedSession \session -> do
     let partialLoadWarning =
@@ -134,8 +158,10 @@ findReferencesHandler FindReferencesArgs {symbol, skip} = do
             let matchedSymbol = resolvedQuery.resolvedSymbol
             rootChain <- NE.toList . (.unPathToRoot) <$> resolvePathToRoot matchedSymbol.name
             references <- resolveReferenceMatchesForNames (filterRootChainByQuery targetName.occName [matchedSymbol] rootChain)
+            let occurrenceMatches =
+                  referenceMatchesToOccurrenceMatches references
             let maybeReferences =
-                  paginateReferenceMatches resolvedSkip references
+                  paginateReferenceMatches resolvedSkip resolvedMaxResults occurrenceMatches
             case maybeReferences of
               Nothing ->
                 pure $
@@ -146,7 +172,7 @@ findReferencesHandler FindReferencesArgs {symbol, skip} = do
                         findReferencesPartialLoadWarning = partialLoadWarning
                       }
               Just referencePagination -> do
-                renderedPage <- referenceMatchesToPaginatedSourceFiles referencePagination
+                renderedPage <- referenceMatchesToPaginatedSourceFiles verbosity referencePagination
                 pure $
                   FindReferencesReadyResult
                     FindReferencesReady
@@ -164,6 +190,8 @@ findReferencesHandler FindReferencesArgs {symbol, skip} = do
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
+    resolvedMaxResults =
+      min maxRenderedReferenceResults (max 1 (fromMaybe maxRenderedReferenceResults maxResults))
 
 filterRootChainByQuery :: NormalizedOccName -> [Symbol] -> [GHC.Name] -> [GHC.Name]
 filterRootChainByQuery targetOccName matchedSymbols rootChain =
@@ -210,18 +238,28 @@ filterRootChainByQuery targetOccName matchedSymbols rootChain =
       | otherwise =
           (Set.insert name seenNames, name : keptNames)
 
-paginateReferenceMatches :: Int -> [ReferenceMatch] -> Maybe (Paginated ReferenceMatch)
-paginateReferenceMatches skip referenceMatches =
-  paginateItems resolvedSkip maxRenderedReferenceResults sortedMatches
+referenceMatchesToOccurrenceMatches :: [ReferenceMatch] -> [ReferenceOccurrenceMatch]
+referenceMatchesToOccurrenceMatches referenceMatches =
+  [ ReferenceOccurrenceMatch
+      { occurrenceMatchDefinition = referenceMatch.referenceMatchDefinition,
+        occurrenceMatchHit = occurrence
+      }
+  | referenceMatch <- referenceMatches,
+    occurrence <- referenceMatch.referenceMatchOccurrences
+  ]
+
+paginateReferenceMatches :: Int -> Int -> [ReferenceOccurrenceMatch] -> Maybe (Paginated ReferenceOccurrenceMatch)
+paginateReferenceMatches skip maxResults referenceMatches =
+  paginateItems resolvedSkip maxResults sortedMatches
   where
     sortedMatches =
-      sortOn referenceMatchSortKey referenceMatches
+      sortOn referenceOccurrenceSortKey referenceMatches
     resolvedSkip = min (max 0 skip) totalItems
     totalItems = length sortedMatches
 
-referenceMatchesToPaginatedSourceFiles :: (MonadLore m) => Paginated ReferenceMatch -> m (Paginated SourceFile)
-referenceMatchesToPaginatedSourceFiles referencePagination = do
-  sourceFiles <- referenceMatchesToSourceFiles referencePagination.paginatedItems
+referenceMatchesToPaginatedSourceFiles :: (MonadLore m) => FindReferencesVerbosity -> Paginated ReferenceOccurrenceMatch -> m (Paginated SourceFile)
+referenceMatchesToPaginatedSourceFiles verbosity referencePagination = do
+  sourceFiles <- referenceMatchesToSourceFiles verbosity referencePagination.paginatedItems
   pure
     Paginated
       { paginatedTotalItems = referencePagination.paginatedTotalItems,
@@ -231,80 +269,185 @@ referenceMatchesToPaginatedSourceFiles referencePagination = do
         paginatedItems = sourceFiles
       }
 
-referenceMatchesToSourceFiles :: (MonadLore m) => [ReferenceMatch] -> m [SourceFile]
-referenceMatchesToSourceFiles referenceMatches =
-  mapM referenceModuleGroupToSourceFile (groupByModule referenceMatches)
+referenceMatchesToSourceFiles :: (MonadLore m) => FindReferencesVerbosity -> [ReferenceOccurrenceMatch] -> m [SourceFile]
+referenceMatchesToSourceFiles verbosity referenceMatches =
+  mapM (referenceModuleGroupToSourceFile verbosity) (groupByModule referenceMatches)
 
-groupByModule :: [ReferenceMatch] -> [[ReferenceMatch]]
+groupByModule :: [ReferenceOccurrenceMatch] -> [[ReferenceOccurrenceMatch]]
 groupByModule [] = []
 groupByModule (referenceMatch : rest) =
   let (matchingModule, remaining) =
-        span ((== referenceMatch.referenceMatchDefinition.definitionSourceModule) . (.referenceMatchDefinition.definitionSourceModule)) rest
+        span ((== referenceMatch.occurrenceMatchDefinition.definitionSourceModule) . (.occurrenceMatchDefinition.definitionSourceModule)) rest
    in (referenceMatch : matchingModule) : groupByModule remaining
 
-referenceModuleGroupToSourceFile :: (MonadLore m) => [ReferenceMatch] -> m SourceFile
-referenceModuleGroupToSourceFile [] =
+groupByDefinition :: [ReferenceOccurrenceMatch] -> [[ReferenceOccurrenceMatch]]
+groupByDefinition [] = []
+groupByDefinition (referenceMatch : rest) =
+  let (matchingDefinition, remaining) =
+        span ((== referenceMatch.occurrenceMatchDefinition) . (.occurrenceMatchDefinition)) rest
+   in (referenceMatch : matchingDefinition) : groupByDefinition remaining
+
+referenceModuleGroupToSourceFile :: (MonadLore m) => FindReferencesVerbosity -> [ReferenceOccurrenceMatch] -> m SourceFile
+referenceModuleGroupToSourceFile _ [] =
   pure
     SourceFile
       { sourceFilePath = "<definition source unavailable>",
         sourceFileSections = []
       }
-referenceModuleGroupToSourceFile moduleMatches@(referenceMatch : _) = do
-  renderedPath <- liftIO $ definitionSourcePath referenceMatch.referenceMatchDefinition
-  renderedSections <- mapM referenceMatchToSourceSection moduleMatches
+referenceModuleGroupToSourceFile verbosity moduleMatches@(referenceMatch : _) = do
+  renderedPath <- liftIO $ definitionSourcePath referenceMatch.occurrenceMatchDefinition
+  renderedSections <- mapM (referenceMatchToSourceSection verbosity) (groupByDefinition moduleMatches)
   pure
     SourceFile
       { sourceFilePath = renderedPath,
         sourceFileSections = renderedSections
       }
 
-referenceMatchToSourceSection :: (MonadLore m) => ReferenceMatch -> m SourceSection
-referenceMatchToSourceSection referenceMatch = do
-  let declarationSpans = referenceMatch.referenceMatchDefinition.definitionSourceSpans
-  maybeSourceTree <- getDefinitionSourceTree referenceMatch.referenceMatchDefinition
+referenceMatchToSourceSection :: (MonadLore m) => FindReferencesVerbosity -> [ReferenceOccurrenceMatch] -> m SourceSection
+referenceMatchToSourceSection _ [] =
+  pure
+    SourceSection
+      { sourceSectionTitle = "definition",
+        sourceSectionText = ""
+      }
+referenceMatchToSourceSection verbosity referenceMatches@(referenceMatch : _) = do
+  let declarationSpans = referenceMatch.occurrenceMatchDefinition.definitionSourceSpans
+  maybeSourceTree <- getDefinitionSourceTree referenceMatch.occurrenceMatchDefinition
   let referenceContexts =
         [ ( maybeSourceTree >>= \sourceTree ->
-              chooseBestReferenceContext sourceTree occurrence.referenceHitExactSpan,
-            occurrence.referenceHitExactSpan
+              chooseBestReferenceContext sourceTree occurrenceMatch.occurrenceMatchHit.referenceHitExactSpan,
+            occurrenceMatch.occurrenceMatchHit.referenceHitExactSpan
           )
-        | occurrence <- referenceMatch.referenceMatchOccurrences
+        | occurrenceMatch <- referenceMatches
         ]
-  snippetText <- liftIO $ renderReferenceSnippet declarationSpans referenceContexts
+  snippetText <- liftIO $ renderReferenceSnippet verbosity declarationSpans referenceContexts
   pure
     SourceSection
       { sourceSectionTitle = renderReferenceBlockHeader declarationSpans,
         sourceSectionText = snippetText
       }
 
-renderReferenceSnippet :: DeclarationSpans -> [(Maybe GHC.SrcSpan, GHC.SrcSpan)] -> IO Text
-renderReferenceSnippet declarationSpans referenceContexts = do
+renderReferenceSnippet :: FindReferencesVerbosity -> DeclarationSpans -> [(Maybe GHC.SrcSpan, GHC.SrcSpan)] -> IO Text
+renderReferenceSnippet verbosity declarationSpans referenceContexts = do
   declarationLines <- readSpanLines declarationSpans.declarationSpan
   signatureText <- traverse readSpanText declarationSpans.signatureSpan
   let bodyReferenceContexts =
         filter (not . isSignatureReference declarationSpans . snd) referenceContexts
-  let referenceRanges =
-        concatMap
-          (referenceSnippetRanges declarationLines declarationSpans.declarationSpan (length declarationLines) . snd)
-          bodyReferenceContexts
-      contextRanges =
-        concatMap
-          ( maybe
-              []
-              (contextSnippetRanges declarationSpans.declarationSpan (length declarationLines))
-              . fst
-          )
-          bodyReferenceContexts
   let selectedRanges =
-        mergeLineRanges $
-          [ trimDistantDeclarationPrefix declarationLines (minimumMaybe (map fst referenceRanges)) (firstDefinitionRange (length declarationLines)),
-            lastDefinitionRange (length declarationLines)
-          ]
-            <> contextRanges
-            <> referenceRanges
+        selectSnippetRanges verbosity declarationLines declarationSpans bodyReferenceContexts
       declarationSnippet =
         renderLineRanges declarationLines selectedRanges
+      shouldRenderSignature =
+        verbosity /= Low || null bodyReferenceContexts
   pure $
-    maybe declarationSnippet (<> "\n" <> declarationSnippet) signatureText
+    if shouldRenderSignature
+      then maybe declarationSnippet (<> "\n" <> declarationSnippet) signatureText
+      else declarationSnippet
+
+selectSnippetRanges :: FindReferencesVerbosity -> [Text] -> DeclarationSpans -> [(Maybe GHC.SrcSpan, GHC.SrcSpan)] -> [(Int, Int)]
+selectSnippetRanges verbosity declarationLines declarationSpans bodyReferenceContexts =
+  case verbosity of
+    Low ->
+      mergeLineRanges closestUsageRanges
+    Medium ->
+      mergeLineRanges $
+        [ firstDefinitionRange 2 declarationLineCount,
+          lastDefinitionRange declarationLineCount
+        ]
+          <> concatMap (surroundWithClosestNonEmptyLines declarationLines declarationLineCount) closestUsageRanges
+    High ->
+      mergeLineRanges $
+        [ trimDistantDeclarationPrefix declarationLines (minimumMaybe (map fst referenceRanges)) (firstDefinitionRange 3 declarationLineCount),
+          lastDefinitionRange declarationLineCount
+        ]
+          <> contextRanges
+          <> referenceRanges
+  where
+    declarationLineCount = length declarationLines
+
+    referenceRanges =
+      concatMap
+        (referenceSnippetRanges declarationLines declarationSpans.declarationSpan declarationLineCount . snd)
+        bodyReferenceContexts
+
+    contextRanges =
+      concatMap
+        ( maybe
+            []
+            (contextSnippetRanges declarationSpans.declarationSpan declarationLineCount)
+            . fst
+        )
+        bodyReferenceContexts
+
+    closestUsageRanges =
+      let ranges =
+            concatMap (closestUsageRangesForContext declarationSpans.declarationSpan) bodyReferenceContexts
+       in if null ranges then referenceRanges else ranges
+
+closestUsageRangesForContext :: GHC.SrcSpan -> (Maybe GHC.SrcSpan, GHC.SrcSpan) -> [(Int, Int)]
+closestUsageRangesForContext declarationSpan (maybeContextSpan, referenceSpan) =
+  maybeToList $
+    chooseClosestUsageRange
+      (referenceLineRange declarationSpan referenceSpan)
+      (maybeContextSpan >>= referenceLineRange declarationSpan)
+
+chooseClosestUsageRange :: Maybe (Int, Int) -> Maybe (Int, Int) -> Maybe (Int, Int)
+chooseClosestUsageRange maybeReferenceRange maybeContextRange =
+  case (maybeReferenceRange, maybeContextRange) of
+    (Nothing, Nothing) ->
+      Nothing
+    (Just referenceRange, Nothing) ->
+      Just referenceRange
+    (Nothing, Just contextRange) ->
+      Just contextRange
+    (Just referenceRange, Just contextRange) ->
+      Just $
+        if isCompactContextRange contextRange
+          then contextRange
+          else referenceRange
+
+isCompactContextRange :: (Int, Int) -> Bool
+isCompactContextRange contextRange =
+  lineRangeLength contextRange <= maxLowContextLineCount
+
+lineRangeLength :: (Int, Int) -> Int
+lineRangeLength (startLine, endLine) =
+  max 0 (endLine - startLine + 1)
+
+maxLowContextLineCount :: Int
+maxLowContextLineCount = 10
+
+surroundWithClosestNonEmptyLines :: [Text] -> Int -> (Int, Int) -> [(Int, Int)]
+surroundWithClosestNonEmptyLines declarationLines declarationLineCount (startLine, endLine) =
+  maybeToList ((\lineNumber -> (lineNumber, lineNumber)) <$> previousNonEmptyLine declarationLines (startLine - 1))
+    <> [(startLine, endLine)]
+    <> maybeToList ((\lineNumber -> (lineNumber, lineNumber)) <$> nextNonEmptyLine declarationLines declarationLineCount (endLine + 1))
+
+previousNonEmptyLine :: [Text] -> Int -> Maybe Int
+previousNonEmptyLine declarationLines lineNumber
+  | lineNumber < 1 =
+      Nothing
+  | otherwise =
+      if isNonEmptyLine declarationLines lineNumber
+        then Just lineNumber
+        else previousNonEmptyLine declarationLines (lineNumber - 1)
+
+nextNonEmptyLine :: [Text] -> Int -> Int -> Maybe Int
+nextNonEmptyLine declarationLines declarationLineCount lineNumber
+  | lineNumber > declarationLineCount =
+      Nothing
+  | otherwise =
+      if isNonEmptyLine declarationLines lineNumber
+        then Just lineNumber
+        else nextNonEmptyLine declarationLines declarationLineCount (lineNumber + 1)
+
+isNonEmptyLine :: [Text] -> Int -> Bool
+isNonEmptyLine declarationLines lineNumber =
+  case declarationLineText declarationLines lineNumber of
+    Nothing ->
+      False
+    Just lineText ->
+      not (T.null (T.strip lineText))
 
 isSignatureReference :: DeclarationSpans -> GHC.SrcSpan -> Bool
 isSignatureReference declarationSpans referenceSpan =
@@ -375,9 +518,9 @@ renderReferenceBlockHeader declarationSpans =
     Just (startLine, endLine) ->
       "lines " <> T.pack (show startLine) <> "-" <> T.pack (show endLine)
 
-firstDefinitionRange :: Int -> (Int, Int)
-firstDefinitionRange lineCount =
-  (1, min 3 lineCount)
+firstDefinitionRange :: Int -> Int -> (Int, Int)
+firstDefinitionRange renderedLines lineCount =
+  (1, min renderedLines lineCount)
 
 trimDistantDeclarationPrefix :: [Text] -> Maybe Int -> (Int, Int) -> (Int, Int)
 trimDistantDeclarationPrefix declarationLines maybeReferenceStartLine (startLine, endLine)
@@ -455,17 +598,33 @@ renderLineRanges declarationLines ranges =
         Nothing -> ""
         Just lineText -> T.takeWhile (== ' ') lineText
 
-referenceMatchSortKey :: ReferenceMatch -> (String, String, Int, Int)
-referenceMatchSortKey referenceMatch =
-  case definitionSourceRealSrcSpan referenceMatch.referenceMatchDefinition of
+referenceOccurrenceSortKey :: ReferenceOccurrenceMatch -> (String, String, Int, Int, Int, Int)
+referenceOccurrenceSortKey referenceMatch =
+  (moduleNameKey, filePathKey, definitionLineKey, definitionColumnKey, occurrenceLineKey, occurrenceColumnKey)
+  where
+    (moduleNameKey, filePathKey, definitionLineKey, definitionColumnKey) =
+      definitionSourceSortKey referenceMatch.occurrenceMatchDefinition
+
+    (occurrenceLineKey, occurrenceColumnKey) =
+      case realSrcSpanFromSrcSpan referenceMatch.occurrenceMatchHit.referenceHitExactSpan of
+        Just realSrcSpan ->
+          ( GHC.srcSpanStartLine realSrcSpan,
+            GHC.srcSpanStartCol realSrcSpan
+          )
+        Nothing ->
+          (maxBound, maxBound)
+
+definitionSourceSortKey :: DefinitionSource -> (String, String, Int, Int)
+definitionSourceSortKey definitionSource =
+  case definitionSourceRealSrcSpan definitionSource of
     Just realSrcSpan ->
-      ( GHC.moduleNameString (GHC.moduleName referenceMatch.referenceMatchDefinition.definitionSourceModule),
+      ( GHC.moduleNameString (GHC.moduleName definitionSource.definitionSourceModule),
         Plugins.unpackFS (GHC.srcSpanFile realSrcSpan),
         GHC.srcSpanStartLine realSrcSpan,
         GHC.srcSpanStartCol realSrcSpan
       )
     Nothing ->
-      (GHC.moduleNameString (GHC.moduleName referenceMatch.referenceMatchDefinition.definitionSourceModule), "", maxBound, maxBound)
+      (GHC.moduleNameString (GHC.moduleName definitionSource.definitionSourceModule), "", maxBound, maxBound)
 
 instance ToLoreDoc FindReferencesOutput where
   toLoreDoc = \case
