@@ -32,9 +32,9 @@ spec = do
       (firstCall, secondCall, forcedCall) <-
         fixtureLoreMcpWithCache True do
           loadFixtureHomeModules
-          firstCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
-          secondCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
-          forcedCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] 0 (Just True))
+          firstCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] None Nothing)
+          secondCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] None Nothing)
+          forcedCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"] None (Just True))
           pure (firstCall, secondCall, forcedCall)
 
       firstCall `shouldContainText` "lookupOrZero"
@@ -46,8 +46,8 @@ spec = do
       (recursiveCall, directCall) <-
         fixtureLoreMcpWithCache True do
           loadFixtureHomeModules
-          recursiveCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["derivedValue"] 2 Nothing)
-          directCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["bumpWithSeed"] 0 Nothing)
+          recursiveCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["derivedValue"] Recursive Nothing)
+          directCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["bumpWithSeed"] None Nothing)
           pure (recursiveCall, directCall)
 
       recursiveCall `shouldContainText` "bumpWithSeed :: Int -> Int"
@@ -58,10 +58,10 @@ spec = do
       (cachedCall, resetCall, afterResetCall) <-
         fixtureLoreMcpWithCache True do
           loadFixtureHomeModules
-          _ <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
-          cachedCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
+          _ <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] None Nothing)
+          cachedCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] None Nothing)
           resetCall <- callToolWithoutArgs notifyKnowledgeResetTool
-          afterResetCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] 0 Nothing)
+          afterResetCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] None Nothing)
           pure (cachedCall, resetCall, afterResetCall)
 
       cachedCall `shouldContainText` "definitions are completely UNCHANGED"
@@ -72,8 +72,8 @@ spec = do
       secondCall <-
         fixtureLoreMcpWithCache True do
           loadFixtureHomeModules
-          _ <- callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
-          callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
+          _ <- callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] None Nothing)
+          callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] None Nothing)
 
       secondCall `shouldContainText` "definitions are completely UNCHANGED"
       secondCall `shouldNotContainText` "Use `notifyKnowledgeReset` tool"
@@ -84,8 +84,8 @@ spec = do
         (firstPageCall, secondPageCall) <-
           fixtureLoreMcpAtWithCache True fixtureRoot do
             loadFixtureHomeModules
-            firstPageCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 0) 0 Nothing)
-            secondPageCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 30) 0 Nothing)
+            firstPageCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 0) None Nothing)
+            secondPageCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgsWithSkip paginatedDefinitionSymbols (Just 30) None Nothing)
             pure (firstPageCall, secondPageCall)
 
         firstPageCall `shouldContainText` "pageDef30 :: Int"
@@ -103,8 +103,8 @@ spec = do
       (firstCall, secondCall) <-
         fixtureLoreMcp do
           loadFixtureHomeModules
-          firstCall <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
-          secondCall <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["lookupOrZero"] 0 Nothing)
+          firstCall <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["lookupOrZero"] None Nothing)
+          secondCall <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["lookupOrZero"] None Nothing)
           pure (firstCall, secondCall)
 
       firstCall `shouldContainText` "lookupOrZero"
@@ -117,7 +117,7 @@ spec = do
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
             loadFixtureHomeModules
-            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ConstructorDeps.someFunction"] 2 Nothing)
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ConstructorDeps.someFunction"] Recursive Nothing)
 
         definitionResult `shouldContainText` "someFunction :: IO ()"
         definitionResult `shouldContainText` "data EitherFooOrBar"
@@ -130,7 +130,7 @@ spec = do
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
             loadFixtureHomeModules
-            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ClassDeps.runAlpha"] 2 Nothing)
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ClassDeps.runAlpha"] Recursive Nothing)
 
         definitionResult `shouldContainText` "runAlpha value = buildAlpha value"
         definitionResult `shouldContainText` "class BuildResult a where"
@@ -143,7 +143,7 @@ spec = do
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
             loadFixtureHomeModules
-            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ConstructorUser.someFunction"] 3 Nothing)
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.ConstructorUser.someFunction"] Recursive Nothing)
 
         definitionResult `shouldContainText` "someFunction :: IO ()"
         definitionResult `shouldContainText` "data EitherFooOrBar"
@@ -156,7 +156,7 @@ spec = do
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
             loadFixtureHomeModules
-            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.SharedTopLevel.pairRight"] 2 Nothing)
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.SharedTopLevel.pairRight"] Recursive Nothing)
 
         definitionResult `shouldContainText` "pairLeft, pairRight :: Int"
         definitionResult `shouldContainText` "mkLeft :: Int -> Int"
@@ -169,7 +169,7 @@ spec = do
         definitionResult <-
           fixtureLoreMcpAtWithCache False fixtureRoot do
             loadFixtureHomeModules
-            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.RecordFieldDeps.alphaField"] 1 Nothing)
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["TestClosure.RecordFieldDeps.alphaField"] Direct Nothing)
 
         definitionResult `shouldContainText` "data Record = Record"
         definitionResult `shouldContainText` "alphaField :: !Alpha"
@@ -184,7 +184,7 @@ spec = do
           fixtureLoreMcpAtWithCache False fixtureRoot do
             loadFixtureHomeModules
             lookupResult <- callToolWithArgs lookupSymbolInfoTool (lookupSymbolInfoArgs "Demo.AmbiguousId")
-            ambiguousDefinitionResult <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Demo.AmbiguousId"] 0 Nothing)
+            ambiguousDefinitionResult <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Demo.AmbiguousId"] None Nothing)
             pure (lookupResult, ambiguousDefinitionResult)
 
         lookupResult `shouldContainText` "Showing all 2 symbol candidates."
@@ -328,15 +328,20 @@ sameModuleDuplicateFixtureDeclarations =
       "data instance AmbiguousField AmbiguousRec AmbiguousId = AmbiguousId"
     ]
 
-getDefinitionArgs :: [Text] -> Int -> Maybe Bool -> J.Value
-getDefinitionArgs symbols recursionDepth maybeForce =
-  getDefinitionArgsWithSkip symbols Nothing recursionDepth maybeForce
+data DefinitionExpansion
+  = None
+  | Direct
+  | Recursive
 
-getDefinitionArgsWithSkip :: [Text] -> Maybe Int -> Int -> Maybe Bool -> J.Value
-getDefinitionArgsWithSkip symbols maybeSkip recursionDepth maybeForce =
+getDefinitionArgs :: [Text] -> DefinitionExpansion -> Maybe Bool -> J.Value
+getDefinitionArgs symbols expansion maybeForce =
+  getDefinitionArgsWithSkip symbols Nothing expansion maybeForce
+
+getDefinitionArgsWithSkip :: [Text] -> Maybe Int -> DefinitionExpansion -> Maybe Bool -> J.Value
+getDefinitionArgsWithSkip symbols maybeSkip expansion maybeForce =
   J.object $
     [ "symbols" J..= symbols,
-      "recursionDepth" J..= recursionDepth
+      "expansion" J..= definitionExpansionValue expansion
     ]
       <> case maybeSkip of
         Nothing -> []
@@ -344,6 +349,11 @@ getDefinitionArgsWithSkip symbols maybeSkip recursionDepth maybeForce =
       <> case maybeForce of
         Nothing -> []
         Just forceValue -> ["force" J..= forceValue]
+
+definitionExpansionValue :: DefinitionExpansion -> Text
+definitionExpansionValue None = "None"
+definitionExpansionValue Direct = "Direct"
+definitionExpansionValue Recursive = "Recursive"
 
 addPaginatedDefinitionFixture :: FilePath -> IO ()
 addPaginatedDefinitionFixture fixtureRoot = do

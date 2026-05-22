@@ -1,5 +1,8 @@
+{-# LANGUAGE DeriveAnyClass #-}
+
 module Lore.Mcp.Tools.GetDefinition.Shared
-  ( CommonGetDefinitionArgs (..),
+  ( DefinitionExpansion (..),
+    GetDefinitionArgs (..),
     GetDefinitionResult,
     GetDefinitionOutput (..),
     GetDefinitionFailed (..),
@@ -9,19 +12,22 @@ module Lore.Mcp.Tools.GetDefinition.Shared
     ModuleOmittedSymbols (..),
     FilteredDefinitions (..),
     BuildDefinitionsStrategy,
-    defaultRecursionDepth,
+    defaultDefinitionExpansion,
     maxRenderedDefinitionResults,
     getDefinitionHandlerWithStrategy,
     mkOmittedDefinitions,
   )
 where
 
+import qualified Data.Aeson as J
 import Data.List (foldl', sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
+import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
 import Lore
   ( MonadLore,
@@ -32,6 +38,7 @@ import Lore
     resolveDefinitionClosureSourcesNamed,
     resolveDefinitionSourceNamed,
   )
+import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), MinItems, WithMeta)
 import Lore.Mcp.Internal.LoreDoc
   ( LoreDoc,
     SourceFile,
@@ -57,11 +64,35 @@ import Lore.Mcp.Tools.Shared.SymbolResolution
     unresolvedSymbolQueriesMessage,
   )
 
-data CommonGetDefinitionArgs = CommonGetDefinitionArgs
-  { symbols :: [Text],
-    skip :: Maybe Int,
-    recursionDepth :: Maybe Int
+data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
+  { symbols ::
+      Field fieldType [Text]
+        `WithMeta` '[ Description "Exact symbol names to resolve and render definitions for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
+                      ExampleList '["HasIndex", "mkIndexed", "Some.Module.someFunction"],
+                      MinItems 1
+                    ],
+    skip ::
+      Maybe (Field fieldType Int)
+        `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
+                      Example 30
+                    ],
+    expansion ::
+      Field fieldType (Maybe DefinitionExpansion)
+        `WithMeta` '[ Description "How much related definitions to return. Use \"None\" to return only the requested symbol's definitions. Use \"Direct\" to also include definitions of symbols referenced directly by the requested definitions. Use \"Recursive\" to include direct dependencies and their dependencies."
+                    ]
   }
+  deriving stock (Generic)
+
+instance J.FromJSON (GetDefinitionArgs 'ValueType)
+
+instance ToSchema (GetDefinitionArgs 'MetadataType)
+
+data DefinitionExpansion
+  = None
+  | Direct
+  | Recursive
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (J.ToJSON, J.FromJSON, ToSchema)
 
 type GetDefinitionResult = ToolRun GetDefinitionOutput
 
@@ -106,8 +137,8 @@ type BuildDefinitionsStrategy m =
   [NamedDefinitionSource] ->
   m FilteredDefinitions
 
-getDefinitionHandlerWithStrategy :: (MonadLore m) => Bool -> CommonGetDefinitionArgs -> BuildDefinitionsStrategy m -> m GetDefinitionResult
-getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint CommonGetDefinitionArgs {symbols, skip, recursionDepth} buildDefinitions = do
+getDefinitionHandlerWithStrategy :: (MonadLore m) => Bool -> GetDefinitionArgs 'ValueType -> BuildDefinitionsStrategy m -> m GetDefinitionResult
+getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint GetDefinitionArgs {symbols, skip, expansion} buildDefinitions = do
   withLoadedSession \session -> do
     let partialLoadWarning =
           loadedSessionPartialWarning session "Definition results may be incomplete."
@@ -126,7 +157,7 @@ getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint CommonGetD
             <$> mapM
               (\resolvedQuery -> lookupSymbolInfo resolvedQuery.resolvedSymbol.name)
               resolved.resolvedQueries
-        definitionEntries <- concat <$> mapM (resolveSymbolDefinitions resolvedRecursionDepth) resolvedSymbolInfos
+        definitionEntries <- concat <$> mapM (resolveSymbolDefinitions resolvedExpansion) resolvedSymbolInfos
         filteredDefinitions <- buildDefinitions resolvedSkip definitionEntries
         pure $
           GetDefinitionReadyResult
@@ -140,18 +171,27 @@ getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint CommonGetD
   where
     resolvedSkip =
       max 0 (fromMaybe 0 skip)
-    resolvedRecursionDepth =
-      max 0 (fromMaybe defaultRecursionDepth recursionDepth)
+    resolvedExpansion =
+      fromMaybe defaultDefinitionExpansion expansion
 
-defaultRecursionDepth :: Int
-defaultRecursionDepth = 0
+defaultDefinitionExpansion :: DefinitionExpansion
+defaultDefinitionExpansion = None
 
-resolveSymbolDefinitions :: (MonadLore m) => Int -> SymbolInfo -> m [NamedDefinitionSource]
-resolveSymbolDefinitions recursionDepth symbolInfo
-  | recursionDepth == 0 =
+resolveSymbolDefinitions :: (MonadLore m) => DefinitionExpansion -> SymbolInfo -> m [NamedDefinitionSource]
+resolveSymbolDefinitions expansion symbolInfo =
+  case expansion of
+    None ->
       maybe [] (pure . NamedDefinitionSource symbolInfo.symbolName) <$> resolveDefinitionSourceNamed symbolInfo.symbolName
-  | otherwise =
-      resolveDefinitionClosureSourcesNamed recursionDepth symbolInfo.symbolName
+    Direct ->
+      resolveDefinitionClosureSourcesNamed directExpansionMaxDepth symbolInfo.symbolName
+    Recursive ->
+      take maxRenderedDefinitionResults <$> resolveDefinitionClosureSourcesNamed recursiveExpansionMaxDepth symbolInfo.symbolName
+
+directExpansionMaxDepth :: Int
+directExpansionMaxDepth = 1
+
+recursiveExpansionMaxDepth :: Int
+recursiveExpansionMaxDepth = 2
 
 mkOmittedDefinitions :: [GHC.Name] -> OmittedDefinitions
 mkOmittedDefinitions names =
