@@ -35,6 +35,13 @@ data DiscoverDirectoryArgs (fieldType :: FieldType) = DiscoverDirectoryArgs
                       Example ".",
                       Example "src",
                       Example "src/features"
+                    ],
+    depth ::
+      Maybe (Field fieldType Int)
+        `WithMeta` '[ Description "depth=0 lists the requested directory and its immediate entries. depth=1 also lists direct child directories. depth=2 also lists grandchildren directories.",
+                      Example 0,
+                      Example 1,
+                      Example 2
                     ]
   }
   deriving stock (Generic)
@@ -55,6 +62,7 @@ discoverDirectoryTool =
 data DiscoverDirectoryResult
   = DiscoverDirectoryFailed Text
   | DiscoverDirectoryReady DirectoryTree
+  | DiscoverDirectoryReadyCompact DirectoryTree
 
 instance ToLoreDoc DiscoverDirectoryResult where
   toLoreDoc = \case
@@ -62,22 +70,27 @@ instance ToLoreDoc DiscoverDirectoryResult where
       paragraph message
     DiscoverDirectoryReady tree ->
       paragraph (renderDirectoryTree tree)
+    DiscoverDirectoryReadyCompact tree ->
+      paragraph (renderDirectoryTreeCompact tree)
 
 discoverDirectoryHandler :: (MonadLore m) => DiscoverDirectoryArgs 'ValueType -> m DiscoverDirectoryResult
-discoverDirectoryHandler DiscoverDirectoryArgs {path} = do
+discoverDirectoryHandler DiscoverDirectoryArgs {path, depth} = do
   discoveredTree <- discoverDirectory options
   pure $
     case discoveredTree of
       Left directoryError ->
         DiscoverDirectoryFailed (T.pack (describeDirectoryError directoryError))
       Right directoryTree ->
-        DiscoverDirectoryReady directoryTree
+        if resolvedDepth == Just 0
+          then DiscoverDirectoryReadyCompact directoryTree
+          else DiscoverDirectoryReady directoryTree
   where
     options =
       defaultDirectoryTreeDiscoveryOptions
         { directoryTreeRootPath = path,
           directoryTreeFocusPaths = ["."],
           directoryTreeBudget = Just defaultDirectoryTreeDiscoveryBudget,
+          directoryTreeDepth = resolvedDepth,
           directoryTreeNoisyDirectoryOptions =
             Just
               DirectoryTreeNoisyDirectoryOptions
@@ -86,12 +99,19 @@ discoverDirectoryHandler DiscoverDirectoryArgs {path} = do
                   directoryTreeNoisyDirectoryTailEntries = 3
                 }
         }
+    resolvedDepth =
+      fmap (max 0) depth
 
 renderDirectoryTree :: DirectoryTree -> Text
 renderDirectoryTree directoryTree =
   T.unlines $
     T.pack (renderDirectoryPath directoryTree.directoryTreeRootRelativePath)
       : renderChildren "" directoryTree.directoryTreeRoot.directoryTreeNodeChildren
+
+renderDirectoryTreeCompact :: DirectoryTree -> Text
+renderDirectoryTreeCompact directoryTree =
+  T.unlines $
+    concatMap renderChildCompact directoryTree.directoryTreeRoot.directoryTreeNodeChildren
 
 renderDirectoryPath :: FilePath -> FilePath
 renderDirectoryPath path
@@ -129,6 +149,19 @@ renderChild prefix isLast child =
       if isLast
         then "    "
         else "│   "
+
+renderChildCompact :: DirectoryTreeChild -> [Text]
+renderChildCompact child =
+  case child of
+    DirectoryTreeChildFile file ->
+      [T.pack file.directoryTreeFileName]
+    DirectoryTreeChildOmitted omitted ->
+      [T.pack (renderOmittedEntries omitted)]
+    DirectoryTreeChildDirectory node ->
+      T.pack (renderDirectoryPath node.directoryTreeNodeName)
+        : if node.directoryTreeNodeOpened
+          then concatMap renderChildCompact node.directoryTreeNodeChildren
+          else []
 
 renderNodeLabel :: DirectoryTreeNode -> Text
 renderNodeLabel node =

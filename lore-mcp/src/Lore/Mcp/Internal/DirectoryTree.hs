@@ -75,6 +75,11 @@ data DirectoryTreeDiscoveryOptions = DirectoryTreeDiscoveryOptions
     --
     -- Nothing means the default budget.
     directoryTreeBudget :: Maybe Int,
+    -- | Optional maximum directory depth relative to the requested root.
+    --
+    -- Depth @0@ means render only the requested root.
+    -- Depth @1@ includes only direct children.
+    directoryTreeDepth :: Maybe Int,
     -- | Optional strategy for trimming noisy opened directories.
     --
     -- The root node is never treated as noisy.
@@ -101,6 +106,7 @@ defaultDirectoryTreeDiscoveryOptions =
     { directoryTreeRootPath = ".",
       directoryTreeFocusPaths = [],
       directoryTreeBudget = Just defaultDirectoryTreeDiscoveryBudget,
+      directoryTreeDepth = Nothing,
       directoryTreeNoisyDirectoryOptions = Nothing
     }
 
@@ -198,6 +204,7 @@ discoverDirectory options = do
     Left err -> pure (Left err)
     Right rootPath -> do
       let budget = discoveryBudget options
+          maxDepth = discoveryDepth options
           focusPaths = normalizeFocusPaths rootPath (directoryTreeFocusPaths options)
           focusPathList = Set.toAscList focusPaths
           noisyOptions = normalizeNoisyDirectoryOptions (directoryTreeNoisyDirectoryOptions options)
@@ -209,6 +216,7 @@ discoverDirectory options = do
         liftIO $
           planDirectoryTree
             budget
+            maxDepth
             rootPath
             focusPaths
             noisyOptions
@@ -232,6 +240,10 @@ discoveryBudget options =
     fromMaybe
       defaultDirectoryTreeDiscoveryBudget
       (directoryTreeBudget options)
+
+discoveryDepth :: DirectoryTreeDiscoveryOptions -> Maybe Int
+discoveryDepth options =
+  fmap (max 0) options.directoryTreeDepth
 
 data PlannedDirectory
   = PlannedOpenedDirectory [PlannedEntry] PlannedDirectoryOmission
@@ -270,12 +282,13 @@ data PlannedChildDirectory
 
 planDirectoryTree ::
   Int ->
+  Maybe Int ->
   FilePath ->
   Set.Set FilePath ->
   Maybe DirectoryTreeNoisyDirectoryOptions ->
   [GitignoredDirectoryMatcher] ->
   IO DirectoryPlan
-planDirectoryTree budget rootPath focusPaths noisyOptions gitignoredMatchers =
+planDirectoryTree budget maybeMaxDepth rootPath focusPaths noisyOptions gitignoredMatchers =
   go Set.empty (max 0 budget) ["."] Map.empty
   where
     go _ _ [] plan = pure plan
@@ -291,8 +304,15 @@ planDirectoryTree budget rootPath focusPaths noisyOptions gitignoredMatchers =
           let noisySelection =
                 selectNoisyEntries noisyOptions relativePath rawEntries
           entries <-
-            forM noisySelection.selectedEntries $
-              collapsePlainEntry rootPath relativePath
+            case maybeMaxDepth of
+              Nothing ->
+                forM noisySelection.selectedEntries $
+                  collapsePlainEntry rootPath relativePath
+              Just _ ->
+                pure $
+                  map
+                    (directPlannedEntry relativePath)
+                    noisySelection.selectedEntries
 
           let prioritizedEntries =
                 if isNoisySelectionTrimmed noisySelection
@@ -320,11 +340,14 @@ planDirectoryTree budget rootPath focusPaths noisyOptions gitignoredMatchers =
             forM renderedDirectories \directoryEntry -> do
               let childRelativePath =
                     plannedDirectoryEntryRelativePath directoryEntry
+                  shouldOpenForDepth =
+                    maybe True (directoryDepth childRelativePath <=) maybeMaxDepth
 
-              if shouldOpenDirectory
-                focusPaths
-                childRelativePath
-                gitignoredMatchers
+              if shouldOpenForDepth
+                && shouldOpenDirectory
+                  focusPaths
+                  childRelativePath
+                  gitignoredMatchers
                 then pure (PlannedChildDirectoryOpened childRelativePath)
                 else do
                   stats <- summarizeDirectory (rootPath </> childRelativePath)
@@ -357,6 +380,17 @@ planDirectoryTree budget rootPath focusPaths noisyOptions gitignoredMatchers =
               relativePath
               (PlannedClosedDirectory stats)
               plan
+
+directoryDepth :: FilePath -> Int
+directoryDepth relativePath =
+  case normalizeRelativePath relativePath of
+    "." ->
+      0
+    normalizedPath ->
+      length $
+        filter
+          (\segment -> segment /= "." && segment /= "")
+          (splitDirectories normalizedPath)
 
 insertChildDirectoryPlan :: PlannedChildDirectory -> DirectoryPlan -> DirectoryPlan
 insertChildDirectoryPlan = \case
@@ -421,6 +455,24 @@ collapsePlainEntry rootPath parentRelativePath entry =
         rootPath
         (directoryEntryName entry)
         (appendRelativePath parentRelativePath (directoryEntryName entry))
+
+directPlannedEntry :: FilePath -> DirectoryEntry -> PlannedEntry
+directPlannedEntry parentRelativePath entry =
+  case directoryEntryType entry of
+    DirectoryEntryFile ->
+      PlannedEntryFile
+        PlannedFileEntry
+          { plannedFileEntryDisplayName = directoryEntryName entry,
+            plannedFileEntryRelativePath =
+              appendRelativePath parentRelativePath (directoryEntryName entry)
+          }
+    DirectoryEntryDirectory ->
+      PlannedEntryDirectory
+        PlannedDirectoryEntry
+          { plannedDirectoryEntryDisplayName = directoryEntryName entry,
+            plannedDirectoryEntryRelativePath =
+              appendRelativePath parentRelativePath (directoryEntryName entry)
+          }
 
 collapsePlainDirectoryChain ::
   FilePath ->

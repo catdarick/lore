@@ -50,6 +50,53 @@ spec =
             "└── src/Foo.hs"
           ]
 
+    it "supports depth=0, depth=1 and depth=2 relative to the requested root" do
+      withFixtureCopy \fixtureRoot -> do
+        createDirectoryIfMissing True (fixtureRoot </> "depth-tree" </> "src" </> "nested" </> "deep")
+        createDirectoryIfMissing True (fixtureRoot </> "depth-tree" </> "test")
+        writeFile (fixtureRoot </> "depth-tree" </> "src" </> "One.hs") "module One where\n"
+        writeFile (fixtureRoot </> "depth-tree" </> "src" </> "nested" </> "Two.hs") "module Two where\n"
+        writeFile (fixtureRoot </> "depth-tree" </> "src" </> "nested" </> "deep" </> "Three.hs") "module Three where\n"
+        writeFile (fixtureRoot </> "depth-tree" </> "test" </> "Spec.hs") "module Spec where\n"
+
+        depthZeroResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            callToolWithArgs discoverDirectoryTool (directoryTreeArgsWithDepth "depth-tree" (Just 0))
+
+        depthOneResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            callToolWithArgs discoverDirectoryTool (directoryTreeArgsWithDepth "depth-tree" (Just 1))
+
+        depthTwoResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            callToolWithArgs discoverDirectoryTool (directoryTreeArgsWithDepth "depth-tree" (Just 2))
+
+        depthZeroResult `shouldContainText` "src/"
+        depthZeroResult `shouldContainText` "test/"
+        depthZeroResult `shouldNotContainText` "depth-tree/"
+        depthZeroResult `shouldNotContainText` "depth-tree/src/"
+        depthZeroResult `shouldNotContainText` "depth-tree/test/"
+        depthZeroResult `shouldNotContainText` "One.hs"
+        depthZeroResult `shouldNotContainText` "Spec.hs"
+
+        depthOneResult `shouldContainText` "depth-tree/"
+        depthOneResult `shouldContainText` "├── src/"
+        depthOneResult `shouldContainText` "│   ├── nested/"
+        depthOneResult `shouldContainText` "│   └── One.hs"
+        depthOneResult `shouldContainText` "└── test/"
+        depthOneResult `shouldContainText` "    └── Spec.hs"
+        depthOneResult `shouldNotContainText` "Two.hs"
+        depthOneResult `shouldNotContainText` "Three.hs"
+
+        depthTwoResult `shouldContainText` "├── src/"
+        depthTwoResult `shouldContainText` "│   ├── nested/"
+        depthTwoResult `shouldContainText` "│   │   ├── deep/"
+        depthTwoResult `shouldContainText` "│   │   └── Two.hs"
+        depthTwoResult `shouldContainText` "│   └── One.hs"
+        depthTwoResult `shouldContainText` "└── test/"
+        depthTwoResult `shouldContainText` "    └── Spec.hs"
+        depthTwoResult `shouldNotContainText` "Three.hs"
+
     it "returns directory validation errors for missing paths" do
       discoveryResult <-
         fixtureLoreMcp do
@@ -228,9 +275,14 @@ spec =
 
 directoryTreeArgs :: FilePath -> J.Value
 directoryTreeArgs path =
-  J.object
+  directoryTreeArgsWithDepth path Nothing
+
+directoryTreeArgsWithDepth :: FilePath -> Maybe Int -> J.Value
+directoryTreeArgsWithDepth path depth =
+  J.object $
     [ "path" J..= path
     ]
+      <> maybe [] (\value -> ["depth" J..= value]) depth
 
 pad :: Int -> String
 pad value
