@@ -240,7 +240,7 @@ quoteTexts values =
 
 omittedDefinitionsSectionHeader :: Text
 omittedDefinitionsSectionHeader =
-  "The following definitions are unchanged and were omitted:"
+  "The following definitions are unchanged and were omitted, you already have them in your context:"
 
 notifyKnowledgeResetHint :: Text
 notifyKnowledgeResetHint =

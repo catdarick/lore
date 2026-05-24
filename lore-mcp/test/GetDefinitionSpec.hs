@@ -38,7 +38,7 @@ spec = do
           pure (firstCall, secondCall, forcedCall)
 
       firstCall `shouldContainText` "lookupOrZero"
-      secondCall `shouldContainText` "The following definitions are unchanged and were omitted:"
+      secondCall `shouldContainText` "The following definitions are unchanged and were omitted, you already have them in your context:"
       secondCall `shouldContainText` "Demo: lookupOrZero"
       forcedCall `shouldContainText` "lookupOrZero"
 
@@ -51,7 +51,7 @@ spec = do
           pure (recursiveCall, directCall)
 
       recursiveCall `shouldContainText` "bumpWithSeed :: Int -> Int"
-      directCall `shouldContainText` "The following definitions are unchanged and were omitted:"
+      directCall `shouldContainText` "The following definitions are unchanged and were omitted, you already have them in your context:"
       directCall `shouldContainText` "Demo: bumpWithSeed"
 
     it "returns previously omitted definitions after notifyKnowledgeReset" do
@@ -64,7 +64,7 @@ spec = do
           afterResetCall <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"] None Nothing)
           pure (cachedCall, resetCall, afterResetCall)
 
-      cachedCall `shouldContainText` "The following definitions are unchanged and were omitted:"
+      cachedCall `shouldContainText` "The following definitions are unchanged and were omitted, you already have them in your context:"
       resetCall `shouldContainText` "Knowledge reset acknowledged. Cleared "
       afterResetCall `shouldContainText` "lookupOrOne"
 
@@ -75,7 +75,7 @@ spec = do
           _ <- callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] None Nothing)
           callToolWithArgs (cachedGetDefinitionTool False) (getDefinitionArgs ["lookupOrZero"] None Nothing)
 
-      secondCall `shouldContainText` "The following definitions are unchanged and were omitted:"
+      secondCall `shouldContainText` "The following definitions are unchanged and were omitted, you already have them in your context:"
       secondCall `shouldNotContainText` "Use `notifyKnowledgeReset` tool"
 
     it "keeps non-rendered paginated definitions uncached until they are actually shown" do
@@ -108,7 +108,7 @@ spec = do
 
       firstCall `shouldContainText` "lookupOrZero"
       secondCall `shouldContainText` "lookupOrZero"
-      secondCall `shouldNotContainText` "The following definitions are unchanged and were omitted:"
+      secondCall `shouldNotContainText` "The following definitions are unchanged and were omitted, you already have them in your context:"
 
     it "follows constructor-specific recursive dependencies while still rendering root declarations" do
       withFixtureCopy \fixtureRoot -> do
