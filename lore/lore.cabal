@@ -32,6 +32,7 @@ library
       Lore.Diagnostics
       Lore.Interpreter
       Lore.Logger
+      Lore.List
       Lore.Lookup
       Lore.Lookup.Search
       Lore.Monad
@@ -39,6 +40,8 @@ library
       Lore.Refactor.ImportCleanup.Internal
       Lore.Session
       Lore.SourceEdit
+      Lore.SourceSpan
+      Lore.SourceText
       Lore.TestSuite
       Lore.TemporalModules
       Lore.HomeModules
@@ -62,7 +65,6 @@ library
       Lore.Internal.Definition.SourceTree
       Lore.Internal.Definition.Timing
       Lore.Internal.Definition.Types
-      Lore.Internal.Directory
       Lore.Internal.File
       Lore.Internal.Ghc.AvailInfo
       Lore.Internal.Ghc.DynFlags

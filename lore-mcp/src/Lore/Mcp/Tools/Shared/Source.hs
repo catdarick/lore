@@ -20,10 +20,10 @@ import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Plugins as Plugins
 import Lore (DeclarationSpans (..), DefinitionSlice (..), DefinitionSource (..), mergeDefinitionSlices)
-import Lore.Mcp.Internal.List (maximumMaybe, minimumMaybe)
+import Lore.List (maximumMaybe, minimumMaybe)
 import Lore.Mcp.Internal.LoreDoc (SourceFile (..), SourceSection (..))
-import Lore.Mcp.Internal.SourceSpan (realSrcSpanFromSrcSpan)
-import Lore.Mcp.Internal.SourceText (readSpanText, relativeSourcePath)
+import Lore.SourceSpan (realSrcSpanFromSrcSpan)
+import Lore.SourceText (readSpanText, relativeSourcePath)
 import System.Directory (getCurrentDirectory)
 
 definitionSliceToSourceFile :: DefinitionSlice -> IO SourceFile

@@ -63,6 +63,7 @@ library:
   - Lore.Diagnostics
   - Lore.Interpreter
   - Lore.Logger
+  - Lore.List
   - Lore.Lookup
   - Lore.Lookup.Search
   - Lore.Monad
@@ -70,6 +71,8 @@ library:
   - Lore.Refactor.ImportCleanup.Internal
   - Lore.Session
   - Lore.SourceEdit
+  - Lore.SourceSpan
+  - Lore.SourceText
   - Lore.TestSuite
   - Lore.TemporalModules
   - Lore.HomeModules

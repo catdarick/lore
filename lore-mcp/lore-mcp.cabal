@@ -27,11 +27,8 @@ library
       Lore.Mcp.Internal.Annotated
       Lore.Mcp.Internal.Directory
       Lore.Mcp.Internal.DirectoryTree
-      Lore.Mcp.Internal.List
       Lore.Mcp.Internal.LoreDoc
       Lore.Mcp.Internal.LoreDoc.Markdown
-      Lore.Mcp.Internal.SourceSpan
-      Lore.Mcp.Internal.SourceText
       Lore.Mcp.Internal.Tool
       Lore.Mcp.Monad
       Lore.Mcp.Protocol.Request
@@ -62,6 +59,7 @@ library
       Lore.Mcp.Tools.Shared.DetailedSymbolInfo
       Lore.Mcp.Tools.Shared.Diagnostics
       Lore.Mcp.Tools.Shared.Outputable
+      Lore.Mcp.Tools.Shared.Rendering
       Lore.Mcp.Tools.Shared.Source
       Lore.Mcp.Tools.Shared.SymbolResolution
       Lore.Mcp.Tools.Shared.SymbolSuggestions

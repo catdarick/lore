@@ -1,10 +1,10 @@
 module HomeModulesSpec (spec) where
 
+import Data.List (isInfixOf)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Data.List (isInfixOf)
 import qualified GHC
 import Lore.Diagnostics (Diagnostic (..))
 import Lore.HomeModules (LoadHomeModulesOptions (..), LoadHomeModulesResult (..), defaultLoadHomeModulesOptions)

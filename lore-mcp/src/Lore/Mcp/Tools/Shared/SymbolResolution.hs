@@ -38,6 +38,7 @@ import Lore.Internal.Lookup.SymbolResolutionCore
     renderRootModuleName,
   )
 import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), paragraph)
+import Lore.Mcp.Tools.Shared.Rendering (quoteText)
 import Lore.Session (SessionContext (customPrelude))
 
 data ResolvedSymbolQuery = ResolvedSymbolQuery
@@ -221,7 +222,3 @@ stripOwnerHintSuffix queryText =
           queryText
       | otherwise ->
           T.dropEnd 1 prefixWithDelimiter
-
-quoteText :: Text -> Text
-quoteText value =
-  "\"" <> value <> "\""

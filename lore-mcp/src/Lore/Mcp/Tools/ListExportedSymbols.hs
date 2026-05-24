@@ -36,6 +36,7 @@ import Lore.Mcp.Tools.Shared
     paginationSummaryDoc,
     withLoadedSession,
   )
+import Lore.Mcp.Tools.Shared.Rendering (quoteText, renderSymbolName)
 
 data ListExportedSymbolsArgs (fieldType :: FieldType) = ListExportedSymbolsArgs
   { moduleName ::
@@ -197,11 +198,7 @@ categoryLabel = \case
 
 renderOccName :: Plugins.Name -> Text
 renderOccName =
-  T.pack . Plugins.getOccString
-
-quoteText :: Text -> Text
-quoteText value =
-  "\"" <> value <> "\""
+  renderSymbolName
 
 maxRenderedExportedSymbols :: Int
 maxRenderedExportedSymbols = 150

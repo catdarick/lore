@@ -30,6 +30,7 @@ import qualified GHC.Types.FieldLabel as GHC.FieldLabel
 import Lore.Internal.Definition.SourceTree (collectModuleSourceRegionCandidates)
 import Lore.Internal.Definition.Types
 import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfoNamesWithFields, fieldLabelAliasText, greNameFieldAliasText)
+import Lore.Internal.List (minimumMaybe)
 
 buildParsedModuleFacts :: GHC.Module -> GHC.ParsedSource -> ParsedModuleFacts
 buildParsedModuleFacts definingModule parsedSource =
@@ -867,10 +868,6 @@ chooseOccurrenceOwners memberIndex maybeParent occurrenceSpan
 
     narrowedParentOwners =
       Set.intersection parentOwners narrowestOwners
-
-minimumMaybe :: (Ord a) => [a] -> Maybe a
-minimumMaybe [] = Nothing
-minimumMaybe values = Just (minimum values)
 
 memberSpanSize :: GHC.SrcSpan -> Int
 memberSpanSize = \case

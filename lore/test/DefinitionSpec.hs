@@ -13,6 +13,7 @@ import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), DefinitionS
 import Lore.Definition.RenderSlice (definitionSourceToRenderSlice)
 import Lore.HomeModules (defaultLoadHomeModulesOptions)
 import qualified Lore.HomeModules as HomeModules
+import Lore.List (maximumMaybe, minimumMaybe)
 import Lore.Lookup (Symbol (..))
 import Lore.Monad (MonadLore)
 import System.Directory (createDirectoryIfMissing)
@@ -988,14 +989,6 @@ relativeSourcePath sourcePath =
   case dropWhile (/= "src") (splitDirectories sourcePath) of
     [] -> sourcePath
     pathParts -> joinPath pathParts
-
-minimumMaybe :: (Ord a) => [a] -> Maybe a
-minimumMaybe [] = Nothing
-minimumMaybe values = Just (minimum values)
-
-maximumMaybe :: (Ord a) => [a] -> Maybe a
-maximumMaybe [] = Nothing
-maximumMaybe values = Just (maximum values)
 
 findFixtureSymbol :: String -> [Symbol] -> Maybe GHC.Name
 findFixtureSymbol symbol =

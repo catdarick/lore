@@ -18,6 +18,7 @@ import Control.Monad (forM)
 import Data.Char (toLower)
 import Data.List (isPrefixOf, sortOn)
 import Data.Maybe (catMaybes)
+import Lore.Project (normalizeRelativePath)
 import System.Directory
   ( canonicalizePath,
     doesDirectoryExist,
@@ -26,8 +27,7 @@ import System.Directory
     makeAbsolute,
   )
 import System.FilePath
-  ( dropTrailingPathSeparator,
-    isAbsolute,
+  ( isAbsolute,
     isRelative,
     makeRelative,
     normalise,
@@ -124,12 +124,6 @@ displayRelativePath rootRelativePath relativePath
   | rootRelativePath == "." = normalizeRelativePath relativePath
   | relativePath == "." = rootRelativePath
   | otherwise = rootRelativePath </> relativePath
-
-normalizeRelativePath :: FilePath -> FilePath
-normalizeRelativePath path =
-  case dropTrailingPathSeparator (normalise path) of
-    "" -> "."
-    normalized -> normalized
 
 relativeProjectPath :: FilePath -> FilePath -> FilePath
 relativeProjectPath projectRootPath path =

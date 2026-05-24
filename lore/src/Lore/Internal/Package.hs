@@ -8,6 +8,7 @@ module Lore.Internal.Package
     prepareComponentsData,
     discoverProject,
     componentMainModulePathCandidates,
+    normalizeRelativePath,
     firstExistingPath,
     commonSetIntersection,
     extractDependencies,

@@ -30,8 +30,8 @@ import Lore
     resolveReferenceMatchesForNames,
   )
 import Lore.Definition.Rendering (chooseBestReferenceContext, getDefinitionSourceTree)
+import Lore.List (minimumMaybe)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.List (minimumMaybe)
 import Lore.Mcp.Internal.LoreDoc
   ( LoreDoc,
     SourceFile (..),
@@ -40,8 +40,6 @@ import Lore.Mcp.Internal.LoreDoc
     paragraph,
     sourceFile,
   )
-import Lore.Mcp.Internal.SourceSpan (realSrcSpanFromSrcSpan)
-import Lore.Mcp.Internal.SourceText (readSpanLines, readSpanText)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Tools.Shared
   ( Paginated (..),
@@ -54,6 +52,7 @@ import Lore.Mcp.Tools.Shared
     withLoadedSession,
     withPartialLoadWarning,
   )
+import Lore.Mcp.Tools.Shared.Rendering (quoteText)
 import Lore.Mcp.Tools.Shared.Source (declarationSpansLineRange, definitionSourcePath, definitionSourceRealSrcSpan)
 import Lore.Mcp.Tools.Shared.SymbolResolution
   ( ResolvedSymbolQuery (resolvedSymbol),
@@ -62,6 +61,8 @@ import Lore.Mcp.Tools.Shared.SymbolResolution
     resolveUniqueSymbolQueries,
     unresolvedSymbolQueriesMessage,
   )
+import Lore.SourceSpan (realSrcSpanFromSrcSpan)
+import Lore.SourceText (readSpanLines, readSpanText)
 
 data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
   { symbol ::
@@ -666,10 +667,6 @@ renderFindReferencesReady ready =
           mconcat (map sourceFile page.paginatedItems),
           maybe mempty toLoreDoc ready.findReferencesPartialLoadWarning
         ]
-
-quoteText :: Text -> Text
-quoteText value =
-  "\"" <> value <> "\""
 
 maxRenderedReferenceResults :: Int
 maxRenderedReferenceResults = 15

@@ -18,6 +18,7 @@ import qualified Data.Text as T
 import qualified GHC.Plugins as Plugins
 import Lore (Symbol (..), SymbolSuggestion (..), SymbolVisibility (..))
 import Lore.Mcp.Tools.Shared.Outputable (renderOutputable)
+import Lore.Mcp.Tools.Shared.Rendering (quoteText, renderModuleName)
 
 maxRenderedSymbolSuggestions :: Int
 maxRenderedSymbolSuggestions = 10
@@ -58,10 +59,6 @@ noSymbolsFound :: Text -> Text
 noSymbolsFound query =
   "No symbols found for " <> quoteText query <> "."
 
-quoteText :: Text -> Text
-quoteText value =
-  "\"" <> value <> "\""
-
 renderDefiningModulesSummary :: [Text] -> Text
 renderDefiningModulesSummary moduleNames =
   case moduleNames of
@@ -87,10 +84,6 @@ symbolDefiningModules symbol =
             Nothing -> []
         Symbol'Unexported ->
           []
-
-renderModuleName :: Plugins.Module -> Text
-renderModuleName module_ =
-  T.pack (Plugins.moduleNameString (Plugins.moduleName module_))
 
 shortestModuleName :: [Text] -> Maybe Text
 shortestModuleName [] = Nothing

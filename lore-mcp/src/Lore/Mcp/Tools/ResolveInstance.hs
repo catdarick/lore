@@ -41,6 +41,7 @@ import Lore.Mcp.Tools.Shared
   )
 import Lore.Mcp.Tools.Shared.DefinitionSourceRendering (buildDefinitionSourceFiles)
 import Lore.Mcp.Tools.Shared.Outputable (renderOutputable)
+import Lore.Mcp.Tools.Shared.Rendering (quoteText)
 
 data ResolveInstanceArgs (fieldType :: FieldType) = ResolveInstanceArgs
   { query ::
@@ -299,7 +300,3 @@ renderUnresolvedTypeQuerySymbols unresolved =
               <> map ("  - " <>) disambiguationHints
               <> ["", "Run the tool again with a fully qualified symbol name from the list above."]
           )
-
-quoteText :: Text -> Text
-quoteText value =
-  "\"" <> value <> "\""
