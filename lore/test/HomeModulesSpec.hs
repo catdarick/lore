@@ -4,6 +4,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Data.List (isInfixOf)
 import qualified GHC
 import Lore.Diagnostics (Diagnostic (..))
 import Lore.HomeModules (LoadHomeModulesOptions (..), LoadHomeModulesResult (..), defaultLoadHomeModulesOptions)
@@ -21,7 +22,7 @@ import Lore.HomeModules.Plan
     prepareHomeModulesLoadInputs,
   )
 import Lore.TemporalModules (TemporalModule (..))
-import System.Directory (doesFileExist, makeAbsolute, removeFile)
+import System.Directory (createDirectoryIfMissing, doesFileExist, makeAbsolute, removeFile)
 import System.FilePath ((</>))
 import Test.Hspec
 import TestSupport (fixtureLoreAt, withFixtureCopy)
@@ -84,6 +85,48 @@ spec =
           Set.isSubsetOf plannedFileTargets selection.fileHomeModuleSources `shouldBe` True
           homeModulesSelectionTotal selection
             `shouldBe` Set.size selection.namedHomeModules + Set.size selection.fileHomeModuleSources
+
+      it "prepareHomeModulesComponentPlan synthesizes executable Main modules into generated file targets" do
+        withFixtureCopy \fixtureRoot -> do
+          let packageFile = fixtureRoot </> "package.yaml"
+              executableMainPath = fixtureRoot </> "app" </> "Main.hs"
+
+          createDirectoryIfMissing True (fixtureRoot </> "app")
+          TIO.appendFile packageFile $
+            T.unlines
+              [ "",
+                "executables:",
+                "  demo-exe:",
+                "    source-dirs: app",
+                "    main: Main.hs"
+              ]
+          TIO.writeFile executableMainPath $
+            T.unlines
+              [ "  module   Main (main) where",
+                "main :: IO ()",
+                "main = putStrLn \"demo\""
+              ]
+
+          generatedTargets <-
+            fixtureLoreAt fixtureRoot do
+              inputs <- prepareHomeModulesLoadInputs
+              componentPlan <- prepareHomeModulesComponentPlan inputs.homeModulesPackages
+              pure
+                [ sourcePath
+                | HomeModuleSourceFile sourcePath <- Map.keys componentPlan.homeModulesWithComponentOptions,
+                  "generated-main-modules" `isInfixOf` sourcePath
+                ]
+
+          case generatedTargets of
+            [generatedTarget] -> do
+              generatedSource <- TIO.readFile generatedTarget
+              generatedTarget `shouldSatisfy` ("generated-main-modules" `isInfixOf`)
+              generatedTarget `shouldNotBe` executableMainPath
+              T.isInfixOf "module Main_" generatedSource `shouldBe` True
+              T.isInfixOf "module Main (main) where" generatedSource `shouldBe` False
+              T.isInfixOf (T.pack ("{-# LINE 1 \"" <> executableMainPath <> "\" #-}")) generatedSource `shouldBe` True
+            _ ->
+              expectationFailure ("Expected exactly one generated main module target, got: " <> show generatedTargets)
 
     describe "loadHomeModules diagnostics" do
       it "handles package definitions with no loadable components" do

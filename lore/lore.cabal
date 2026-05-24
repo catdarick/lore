@@ -73,6 +73,7 @@ library
       Lore.Internal.HomeModules.ModuleGraphPatch
       Lore.Internal.HomeModules.Plan
       Lore.Internal.HomeModules.Result
+      Lore.Internal.HomeModules.SyntheticMain
       Lore.Internal.ImportCleanup.Apply
       Lore.Internal.ImportCleanup.Diagnostics
       Lore.Internal.ImportCleanup.Edit
