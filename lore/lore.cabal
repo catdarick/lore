@@ -59,7 +59,6 @@ library
       Lore.Internal.Definition.Callbacks
       Lore.Internal.Definition.Index
       Lore.Internal.Definition.Query
-      Lore.Internal.Definition.RequiredImports
       Lore.Internal.Definition.SourceTree
       Lore.Internal.Definition.Timing
       Lore.Internal.Definition.Types

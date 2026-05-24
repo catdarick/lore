@@ -18,21 +18,15 @@ import Data.Foldable (foldl')
 import qualified Data.List as List
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe (mapMaybe, maybeToList)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC
-import qualified GHC.Data.Bag as Bag
 import qualified GHC.Data.Strict as Strict
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
 import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.FieldLabel as GHC.FieldLabel
-import Lore.Internal.Definition.RequiredImports
-  ( buildImportCandidates,
-    buildRequiredImportsById,
-    indexImportCandidates,
-  )
 import Lore.Internal.Definition.SourceTree (collectModuleSourceRegionCandidates)
 import Lore.Internal.Definition.Types
 import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfoNamesWithFields, fieldLabelAliasText, greNameFieldAliasText)
@@ -43,14 +37,10 @@ buildParsedModuleFacts definingModule parsedSource =
     { parsedOccKeys = collectParsedOccurrenceNames parsedSource,
       parsedDeclarationsById = Map.fromList declarationEntries,
       parsedDefinitionMembersById = Map.fromListWith (<>) definitionMemberEntries,
-      parsedOccurrenceSyntaxBySpan =
-        Map.fromListWith keepOldOccurrenceSyntax occurrenceSyntaxEntries,
       parsedRegionCandidates = collectModuleSourceRegionCandidates parsedSource
     }
   where
     decls = GHC.hsmodDecls $ GHC.unLoc parsedSource
-    locatedRdrNames = collectLocatedRdrNames parsedSource
-    dotFieldOccurrences = collectTyped parsedSource :: [GHC.DotFieldOcc GHC.GhcPs]
 
     declarationEntries =
       [ (definitionIdFromSpans definingModule declarationSpans, declarationSpans)
@@ -73,28 +63,6 @@ buildParsedModuleFacts definingModule parsedSource =
                   signatureSpan = GHC.getLocA <$> findSignatureDeclaration (GHC.rdrNameOcc (GHC.unLoc name)) decls
                 }
       ]
-
-    occurrenceSyntaxEntries =
-      rdrNameSyntaxEntries <> dotFieldSyntaxEntries
-
-    rdrNameSyntaxEntries =
-      [ (srcSpanKey span', syntaxForOccurrence (GHC.unLoc locatedName))
-      | locatedName <- locatedRdrNames,
-        let span' = locatedSpan locatedName
-      ]
-
-    dotFieldSyntaxEntries =
-      [ (srcSpanKey (GHC.getLocA dotFieldOccurrence.dfoLabel), ParsedOccurrenceSyntax Nothing)
-      | dotFieldOccurrence <- dotFieldOccurrences
-      ]
-
-    syntaxForOccurrence rdrName =
-      ParsedOccurrenceSyntax
-        { parsedSyntaxQualifier = fmap fst (GHC.isQual_maybe rdrName)
-        }
-
-    keepOldOccurrenceSyntax _new old =
-      old
 
 collectParsedOccurrenceNames :: GHC.ParsedSource -> Set.Set OccKey
 collectParsedOccurrenceNames parsedSource =
@@ -121,7 +89,6 @@ buildMinimalTypedModuleFacts definingModule tcg =
       typedDefinitionOccAliases = collectDefinitionOccAliases definingModule tcg,
       typedExportedNames = collectExportedNames definingModule tcg,
       typedExportedOccAliases = collectExportedOccAliases definingModule tcg,
-      typedSourceImports = collectMinimalTypedImports tcg,
       typedOccurrences = collectMinimalTypedOccurrences tcg
     }
 
@@ -175,13 +142,11 @@ buildDefinitionBindings definingModule parsedFacts typedModuleFacts =
 
 buildDefinitionOccurrences ::
   GHC.Module ->
-  ParsedModuleFacts ->
   MinimalTypedModuleFacts ->
   DefinitionBindings ->
   Map.Map DefinitionId DefinitionMemberIndex ->
-  Map.Map ImportId ImportCandidate ->
   Map.Map DefinitionId [DefinitionOccurrenceFact]
-buildDefinitionOccurrences definingModule parsedFacts typedModuleFacts bindings memberIndexesById importCandidatesById =
+buildDefinitionOccurrences definingModule typedModuleFacts bindings memberIndexesById =
   Map.map mkOccurrences bindings.bindingDefinitionsById
   where
     mkOccurrences source =
@@ -191,8 +156,6 @@ buildDefinitionOccurrences definingModule parsedFacts typedModuleFacts bindings 
             definingModule
             source.definitionSourceSpans
             memberIndex
-            parsedFacts.parsedOccurrenceSyntaxBySpan
-            importCandidatesById
             typedModuleFacts.typedOccurrences
 
 buildDefinitionMemberIndexes ::
@@ -318,8 +281,7 @@ buildDefinitionModuleIndex definingModule parsedFacts typedModuleFacts maybeCore
     { definitionsById = bindings.bindingDefinitionsById,
       definitionIdByName = bindings.bindingDefinitionIdByName,
       referenceHitsByOccKey = buildReferenceHitsByOccKey occurrencesById,
-      dependenciesById = buildDependencies bindings memberIndexesById occurrencesById maybeCoreFacts,
-      requiredImportsById = buildRequiredImportsById importCandidates occurrencesById
+      dependenciesById = buildDependencies bindings memberIndexesById occurrencesById maybeCoreFacts
     }
   where
     bindings =
@@ -328,14 +290,8 @@ buildDefinitionModuleIndex definingModule parsedFacts typedModuleFacts maybeCore
     memberIndexesById =
       buildDefinitionMemberIndexes parsedFacts typedModuleFacts bindings
 
-    importCandidates =
-      buildImportCandidates typedModuleFacts.typedSourceImports
-
-    importCandidatesById =
-      indexImportCandidates importCandidates
-
     occurrencesById =
-      buildDefinitionOccurrences definingModule parsedFacts typedModuleFacts bindings memberIndexesById importCandidatesById
+      buildDefinitionOccurrences definingModule typedModuleFacts bindings memberIndexesById
 
 buildUsedInstancesByBinder :: Set.Set GHC.Name -> [GHC.CoreBind] -> Map.Map GHC.Name [GHC.Name]
 buildUsedInstancesByBinder interestingBinders coreBinds =
@@ -426,25 +382,6 @@ collectExportedOccAliases homeModule tcg =
       Just aliasText <- [greNameFieldAliasText greName]
     ]
 
-collectMinimalTypedImports :: GHC.Tc.TcGblEnv -> [MinimalTypedImport]
-collectMinimalTypedImports tcg =
-  [ MinimalTypedImport
-      { typedImportId = ImportId importId,
-        typedImportModule = GHC.unLoc decl.ideclName,
-        typedImportPackageQualifier = pkgQualString decl.ideclPkgQual,
-        typedImportSource = decl.ideclSource == GHC.IsBoot,
-        typedImportQualifiedStyle = case decl.ideclQualified of
-          GHC.QualifiedPre -> QualifiedPre
-          GHC.QualifiedPost -> QualifiedPost
-          GHC.NotQualified -> NotQualified,
-        typedImportAlias = GHC.unLoc <$> decl.ideclAs,
-        typedImportOriginallyExplicit = decl.ideclImportList /= Nothing
-      }
-  | (importId, importDecl) <- zip [0 ..] (GHC.Tc.tcg_rn_imports tcg),
-    let decl = GHC.unLoc importDecl,
-    not decl.ideclExt.ideclImplicit
-  ]
-
 collectMinimalTypedOccurrences :: GHC.Tc.TcGblEnv -> [MinimalTypedOccurrence]
 collectMinimalTypedOccurrences tcg =
   case GHC.Tc.tcg_rn_decls tcg of
@@ -496,13 +433,7 @@ collectMinimalTypedOccurrences tcg =
             typedOccurrenceSpan = occurrenceSeed.occurrenceSeedSpan,
             typedOccurrenceParent = case GHC.gre_par gre of
               GHC.ParentIs parentName -> Just parentName
-              GHC.NoParent -> Nothing,
-            typedOccurrenceCandidates =
-              dedupeImportIds
-                [ importId
-                | importSpec <- Bag.bagToList (GHC.gre_imp gre),
-                  Just importId <- [findImportId (GHC.is_dloc (GHC.is_decl importSpec))]
-                ]
+              GHC.NoParent -> Nothing
           }
       | gre <- occurrenceSeed.occurrenceSeedGres
       ]
@@ -520,15 +451,6 @@ collectMinimalTypedOccurrences tcg =
           True
         GHC.NormalGreName _ ->
           False
-
-    findImportId importSpan =
-      ImportId . fst <$> List.find ((== importSpan) . snd) importDeclSpans
-
-    importDeclSpans =
-      [ (importId, GHC.getLocA importDecl)
-      | (importId, importDecl) <- zip [0 ..] (GHC.Tc.tcg_rn_imports tcg),
-        not (GHC.unLoc importDecl).ideclExt.ideclImplicit
-      ]
 
 data OccurrenceSeed = OccurrenceSeed
   { occurrenceSeedSpan :: !GHC.SrcSpan,
@@ -864,11 +786,9 @@ collectDefinitionOccurrenceFacts ::
   GHC.Module ->
   DeclarationSpans ->
   DefinitionMemberIndex ->
-  Map.Map SpanKey ParsedOccurrenceSyntax ->
-  Map.Map ImportId ImportCandidate ->
   [MinimalTypedOccurrence] ->
   [DefinitionOccurrenceFact]
-collectDefinitionOccurrenceFacts definingModule spans memberIndex parsedOccurrenceSyntaxBySpan importCandidatesById typedOccurrences =
+collectDefinitionOccurrenceFacts definingModule spans memberIndex typedOccurrences =
   dedupeOccurrences $
     mapMaybe toReferencedOccurrence filteredOccurrences
   where
@@ -884,9 +804,6 @@ collectDefinitionOccurrenceFacts definingModule spans memberIndex parsedOccurren
 
     toReferencedOccurrence occurrence = do
       let occurrenceName = occurrence.typedOccurrenceName
-          syntax =
-            fromMaybe (ParsedOccurrenceSyntax Nothing) $
-              Map.lookup (srcSpanKey occurrence.typedOccurrenceSpan) parsedOccurrenceSyntaxBySpan
       guardReference definingModule spans occurrenceName $
         DefinitionOccurrenceFact
           { occurrenceFactName = occurrenceName,
@@ -896,19 +813,8 @@ collectDefinitionOccurrenceFacts definingModule spans memberIndex parsedOccurren
                 memberIndex
                 occurrence.typedOccurrenceParent
                 occurrence.typedOccurrenceSpan,
-            occurrenceFactParent = occurrence.typedOccurrenceParent,
-            occurrenceFactImportCandidates =
-              dedupeImportIds
-                [ importId
-                | importId <- occurrence.typedOccurrenceCandidates,
-                  supportsOccurrence syntax importId
-                ]
+            occurrenceFactParent = occurrence.typedOccurrenceParent
           }
-
-    supportsOccurrence syntax importId =
-      case Map.lookup importId importCandidatesById of
-        Nothing -> False
-        Just importCandidate -> supportsOccurrenceSyntax syntax importCandidate.importCandidateBaseImport
 
 chooseOccurrenceOwners ::
   DefinitionMemberIndex ->
@@ -982,20 +888,6 @@ locatedSpan :: GHC.LocatedN a -> GHC.SrcSpan
 locatedSpan =
   GHC.locA . GHC.getLoc
 
-supportsOccurrenceSyntax :: ParsedOccurrenceSyntax -> RequiredImport -> Bool
-supportsOccurrenceSyntax ParsedOccurrenceSyntax {parsedSyntaxQualifier} requiredImport =
-  case parsedSyntaxQualifier of
-    Nothing ->
-      requiredImport.importQualifiedStyle == NotQualified
-    Just qualifier ->
-      requiredImport.importQualifiedStyle /= NotQualified
-        && qualifier `elem` supportedQualifiedNames requiredImport
-  where
-    supportedQualifiedNames import_ =
-      case import_.importAlias of
-        Just alias -> [alias]
-        Nothing -> [import_.importModule]
-
 isFollowableReference :: Set.Set GHC.Name -> DeclarationSpans -> GHC.Name -> Bool
 isFollowableReference definitionNames spans name =
   Set.notMember name definitionNames
@@ -1019,11 +911,6 @@ definesName declarationSpan definingModule name =
   GHC.nameModule_maybe name == Just definingModule
     && GHC.nameSrcSpan name `GHC.isSubspanOf` declarationSpan
 
-pkgQualString :: GHC.PkgQual -> Maybe String
-pkgQualString = \case
-  GHC.NoPkgQual -> Nothing
-  pkgQual -> Just (GHC.showSDocUnsafe (GHC.ppr pkgQual))
-
 dedupeOccurrences :: [DefinitionOccurrenceFact] -> [DefinitionOccurrenceFact]
 dedupeOccurrences =
   List.nubBy sameOccurrence
@@ -1033,7 +920,6 @@ dedupeOccurrences =
         && left.occurrenceFactSpan == right.occurrenceFactSpan
         && left.occurrenceFactOwners == right.occurrenceFactOwners
         && left.occurrenceFactParent == right.occurrenceFactParent
-        && left.occurrenceFactImportCandidates == right.occurrenceFactImportCandidates
 
 dedupeParsedDefinitionMembers :: [ParsedDefinitionMember] -> [ParsedDefinitionMember]
 dedupeParsedDefinitionMembers =
@@ -1059,11 +945,6 @@ dedupeMinimalTypedOccurrences =
       left.typedOccurrenceName == right.typedOccurrenceName
         && left.typedOccurrenceSpan == right.typedOccurrenceSpan
         && left.typedOccurrenceParent == right.typedOccurrenceParent
-        && left.typedOccurrenceCandidates == right.typedOccurrenceCandidates
-
-dedupeImportIds :: [ImportId] -> [ImportId]
-dedupeImportIds =
-  Set.toAscList . Set.fromList
 
 dedupeSemanticNamesExact :: [GHC.Name] -> [GHC.Name]
 dedupeSemanticNamesExact =

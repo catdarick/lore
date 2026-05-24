@@ -1,9 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 
 module Lore.Internal.Definition.Types
-  ( ImportId (..),
-    SpanKey (..),
+  ( SpanKey (..),
     OccKey (..),
     srcSpanKey,
     realSrcSpanKey,
@@ -17,12 +15,10 @@ module Lore.Internal.Definition.Types
     DefinitionSlice (..),
     NamedDefinitionSource (..),
     DeclarationSpans (..),
-    MinimalTypedImport (..),
     MinimalTypedOccurrence (..),
     MinimalTypedModuleFacts (..),
     MinimalCoreModuleFacts (..),
     ParsedModuleFacts (..),
-    ParsedOccurrenceSyntax (..),
     ParsedDefinitionMember (..),
     DefinitionMember (..),
     DefinitionMemberIndex (..),
@@ -30,10 +26,6 @@ module Lore.Internal.Definition.Types
     DefinitionSourceTree (..),
     SourceRegion (..),
     SourceRegionKind (..),
-    ImportQualifiedStyle (..),
-    RequiredImport (..),
-    RequiredImportItem (..),
-    ImportCandidate (..),
     DefinitionSource (..),
     DefinitionDependencies (..),
     DefinitionBindings (..),
@@ -46,7 +38,6 @@ module Lore.Internal.Definition.Types
 where
 
 import Control.DeepSeq (NFData)
-import Data.Data (Data)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -54,12 +45,6 @@ import qualified Data.Text as T
 import qualified GHC
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
-
-newtype ImportId = ImportId
-  { unImportId :: Int
-  }
-  deriving stock (Eq, Ord, Generic)
-  deriving anyclass (NFData)
 
 newtype SpanKey = SpanKey
   { unSpanKey :: Text
@@ -126,8 +111,7 @@ dedupeNamesByOccName =
 
 data DefinitionSlice = DefinitionSlice
   { definitionModule :: !GHC.Module,
-    declarationSpans :: ![DeclarationSpans],
-    requiredImports :: ![RequiredImport]
+    declarationSpans :: ![DeclarationSpans]
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
@@ -144,12 +128,6 @@ data DeclarationSpans = DeclarationSpans
     signatureSpan :: !(Maybe GHC.SrcSpan)
   }
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (NFData)
-
-data ParsedOccurrenceSyntax = ParsedOccurrenceSyntax
-  { parsedSyntaxQualifier :: !(Maybe GHC.ModuleName)
-  }
-  deriving stock (Eq, Generic)
   deriving anyclass (NFData)
 
 data ParsedDefinitionMember = ParsedDefinitionMember
@@ -177,46 +155,7 @@ data ParsedModuleFacts = ParsedModuleFacts
   { parsedOccKeys :: !(Set.Set OccKey),
     parsedDeclarationsById :: !(Map.Map DefinitionId DeclarationSpans),
     parsedDefinitionMembersById :: !(Map.Map DefinitionId [ParsedDefinitionMember]),
-    parsedOccurrenceSyntaxBySpan :: !(Map.Map SpanKey ParsedOccurrenceSyntax),
     parsedRegionCandidates :: ![SourceRegionCandidate]
-  }
-  deriving stock (Generic)
-  deriving anyclass (NFData)
-
-data ImportQualifiedStyle
-  = QualifiedPre
-  | QualifiedPost
-  | NotQualified
-  deriving stock (Eq, Show, Data, Generic)
-  deriving anyclass (NFData)
-
-data RequiredImport = RequiredImport
-  { importKey :: !Int,
-    importModule :: !GHC.ModuleName,
-    importPackageQualifier :: !(Maybe String),
-    importSource :: !Bool,
-    importQualifiedStyle :: !ImportQualifiedStyle,
-    importAlias :: !(Maybe GHC.ModuleName),
-    importOriginallyExplicit :: !Bool,
-    importItems :: ![RequiredImportItem]
-  }
-  deriving stock (Eq, Generic)
-  deriving anyclass (NFData)
-
-data RequiredImportItem
-  = ImportName GHC.Name
-  | ImportParent GHC.Name [GHC.Name]
-  deriving stock (Eq, Generic)
-  deriving anyclass (NFData)
-
-data MinimalTypedImport = MinimalTypedImport
-  { typedImportId :: !ImportId,
-    typedImportModule :: !GHC.ModuleName,
-    typedImportPackageQualifier :: !(Maybe String),
-    typedImportSource :: !Bool,
-    typedImportQualifiedStyle :: !ImportQualifiedStyle,
-    typedImportAlias :: !(Maybe GHC.ModuleName),
-    typedImportOriginallyExplicit :: !Bool
   }
   deriving stock (Generic)
   deriving anyclass (NFData)
@@ -224,8 +163,7 @@ data MinimalTypedImport = MinimalTypedImport
 data MinimalTypedOccurrence = MinimalTypedOccurrence
   { typedOccurrenceName :: !GHC.Name,
     typedOccurrenceSpan :: !GHC.SrcSpan,
-    typedOccurrenceParent :: !(Maybe GHC.Name),
-    typedOccurrenceCandidates :: ![ImportId]
+    typedOccurrenceParent :: !(Maybe GHC.Name)
   }
   deriving stock (Generic)
   deriving anyclass (NFData)
@@ -236,7 +174,6 @@ data MinimalTypedModuleFacts = MinimalTypedModuleFacts
     typedDefinitionOccAliases :: !(Map.Map GHC.Name (Set.Set Text)),
     typedExportedNames :: ![GHC.Name],
     typedExportedOccAliases :: !(Map.Map GHC.Name (Set.Set Text)),
-    typedSourceImports :: ![MinimalTypedImport],
     typedOccurrences :: ![MinimalTypedOccurrence]
   }
   deriving stock (Generic)
@@ -281,13 +218,6 @@ data SourceRegionCandidate = SourceRegionCandidate
   deriving stock (Generic)
   deriving anyclass (NFData)
 
-data ImportCandidate = ImportCandidate
-  { importCandidateId :: !ImportId,
-    importCandidateBaseImport :: !RequiredImport
-  }
-  deriving stock (Eq, Generic)
-  deriving anyclass (NFData)
-
 data DefinitionSource = DefinitionSource
   { definitionSourceId :: !DefinitionId,
     definitionSourceModule :: !GHC.Module,
@@ -329,8 +259,7 @@ data DefinitionOccurrenceFact = DefinitionOccurrenceFact
   { occurrenceFactName :: !GHC.Name,
     occurrenceFactSpan :: !GHC.SrcSpan,
     occurrenceFactOwners :: !(Set.Set GHC.Name),
-    occurrenceFactParent :: !(Maybe GHC.Name),
-    occurrenceFactImportCandidates :: ![ImportId]
+    occurrenceFactParent :: !(Maybe GHC.Name)
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
@@ -357,10 +286,7 @@ data DefinitionModuleIndex = DefinitionModuleIndex
     -- Exact 'GHC.Name' filtering is still required at query time.
     referenceHitsByOccKey :: !(Map.Map OccKey [ReferenceHit]),
     -- | Definition dependencies keyed by ids from 'definitionsById'.
-    dependenciesById :: !(Map.Map DefinitionId DefinitionDependencies),
-    -- | Required imports keyed by ids from 'definitionsById'.
-    -- Intentionally not strict/deeply forced to avoid eager import minimification work.
-    requiredImportsById :: Map.Map DefinitionId [RequiredImport]
+    dependenciesById :: !(Map.Map DefinitionId DefinitionDependencies)
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)

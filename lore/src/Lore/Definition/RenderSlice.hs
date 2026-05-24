@@ -3,12 +3,11 @@ module Lore.Definition.RenderSlice
   )
 where
 
-import Lore.Internal.Definition.Types (DefinitionSlice (..), DefinitionSource (..), RequiredImport)
+import Lore.Internal.Definition.Types (DefinitionSlice (..), DefinitionSource (..))
 
-definitionSourceToRenderSlice :: DefinitionSource -> [RequiredImport] -> DefinitionSlice
-definitionSourceToRenderSlice source imports =
+definitionSourceToRenderSlice :: DefinitionSource -> DefinitionSlice
+definitionSourceToRenderSlice source =
   DefinitionSlice
     { definitionModule = source.definitionSourceModule,
-      declarationSpans = [source.definitionSourceSpans],
-      requiredImports = imports
+      declarationSpans = [source.definitionSourceSpans]
     }

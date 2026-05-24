@@ -4,8 +4,6 @@ module Lore.Internal.Definition.Index
     lookupDefinitionSourceById,
     lookupDefinitionDependenciesMaybe,
     lookupDefinitionDependenciesOrEmpty,
-    lookupDefinitionRequiredImportsMaybe,
-    lookupDefinitionRequiredImportsOrEmpty,
     lookupReferenceHitsForName,
     lookupReferenceHitsForNames,
     lookupReferenceMatchesForNames,
@@ -25,7 +23,6 @@ import Lore.Internal.Definition.Types
     DefinitionSource,
     ReferenceHit (..),
     ReferenceMatch (..),
-    RequiredImport,
     nameOccKey,
     srcSpanKey,
   )
@@ -67,20 +64,6 @@ lookupDefinitionDependenciesOrEmpty ::
   DefinitionDependencies
 lookupDefinitionDependenciesOrEmpty definitionId moduleIndex =
   Map.findWithDefault emptyDefinitionDependencies definitionId moduleIndex.dependenciesById
-
-lookupDefinitionRequiredImportsMaybe ::
-  DefinitionId ->
-  DefinitionModuleIndex ->
-  Maybe [RequiredImport]
-lookupDefinitionRequiredImportsMaybe definitionId moduleIndex =
-  Map.lookup definitionId moduleIndex.requiredImportsById
-
-lookupDefinitionRequiredImportsOrEmpty ::
-  DefinitionId ->
-  DefinitionModuleIndex ->
-  [RequiredImport]
-lookupDefinitionRequiredImportsOrEmpty definitionId moduleIndex =
-  Map.findWithDefault [] definitionId moduleIndex.requiredImportsById
 
 lookupReferenceHitsForName ::
   GHC.Name ->

@@ -2,7 +2,6 @@ module Lore.Definition
   ( -- Source-first definition API.
     resolveDefinitionSourceNamed,
     resolveDefinitionClosureSourcesNamed,
-    getMinifiedImportsForDefinition,
     resolveReferenceMatchesForNames,
     matchingReferenceMatches,
     dedupeReferenceHits,
@@ -16,23 +15,18 @@ module Lore.Definition
     DeclarationSpans (..),
     ReferenceHit (..),
     ReferenceMatch (..),
-    RequiredImport (..),
-    ImportQualifiedStyle (..),
-    RequiredImportItem (..),
   )
 where
 
 import Data.Containers.ListUtils (nubOrdOn)
-import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as List
 import qualified Data.Set as Set
 import qualified GHC.Plugins as GHC
 import Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex (lookupModulesForOccurrenceKeys)
 import qualified Lore.Internal.Definition.Index as DefinitionIndex
 import qualified Lore.Internal.Definition.Query as DefinitionQuery
-import Lore.Internal.Definition.RequiredImports (normalizeImportItems)
 import Lore.Internal.Definition.Timing (withTimedSection)
-import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionId (..), DefinitionModuleIndex, DefinitionSlice (..), DefinitionSource (..), ImportQualifiedStyle (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..), RequiredImport (..), RequiredImportItem (..))
+import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionId (..), DefinitionModuleIndex, DefinitionSlice (..), DefinitionSource (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..))
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import qualified Lore.Logger as Log
@@ -42,11 +36,6 @@ resolveDefinitionSourceNamed :: (MonadLore m) => GHC.Name -> m (Maybe Definition
 resolveDefinitionSourceNamed inputName = do
   ModSummaries modSummaries <- getCachedModSummaries
   DefinitionQuery.resolveDefinitionSourceWithSummaries modSummaries inputName
-
-getMinifiedImportsForDefinition :: (MonadLore m) => DefinitionSource -> m [RequiredImport]
-getMinifiedImportsForDefinition source = do
-  ModSummaries modSummaries <- getCachedModSummaries
-  DefinitionQuery.getMinifiedImportsForDefinitionWithSummaries modSummaries source
 
 resolveReferenceMatchesForNames :: (MonadLore m) => [GHC.Name] -> m [ReferenceMatch]
 resolveReferenceMatchesForNames targetNames = do
@@ -82,28 +71,12 @@ mergeDefinitionSlices (slice : slices)
           { definitionModule = slice.definitionModule,
             declarationSpans =
               dedupeDeclarationSpans . sortDeclarationSpans $
-                concatMap declarationSpans allSlices,
-            requiredImports =
-              mergeImports $
-                concatMap requiredImports allSlices
+                concatMap declarationSpans allSlices
           }
   | otherwise =
       Nothing
   where
     allSlices = slice : slices
-
-mergeImports :: [RequiredImport] -> [RequiredImport]
-mergeImports =
-  IntMap.elems . foldl insertImport IntMap.empty
-  where
-    insertImport acc import' =
-      IntMap.insertWith mergeImport import'.importKey import' acc
-
-    mergeImport new old =
-      old
-        { importOriginallyExplicit = old.importOriginallyExplicit || new.importOriginallyExplicit,
-          importItems = normalizeImportItems (old.importItems <> new.importItems)
-        }
 
 sortDeclarationSpans :: [DeclarationSpans] -> [DeclarationSpans]
 sortDeclarationSpans =

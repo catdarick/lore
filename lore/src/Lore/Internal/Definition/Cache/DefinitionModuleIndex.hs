@@ -114,8 +114,6 @@ storeDefinitionModuleIndexCacheInContext sessionContext homeModule maybeModuleIn
     evaluate
       (DefinitionModuleIndexCache (Map.insert homeModule cachedIndex moduleIndexes))
   where
-    -- Do not NF-force DefinitionModuleIndex here.
-    -- requiredImportsById is intentionally lazy to avoid eager import minimification work.
     cachedIndex =
       case maybeModuleIndex of
         Just moduleIndex -> CachedDefinitionModuleIndexAvailable moduleIndex

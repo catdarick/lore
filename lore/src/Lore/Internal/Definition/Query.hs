@@ -2,7 +2,6 @@ module Lore.Internal.Definition.Query
   ( resolveDefinitionSourceWithSummaries,
     resolveDefinitionDependencyNames,
     resolveDefinitionClosureSourcesWithSummaries,
-    getMinifiedImportsForDefinitionWithSummaries,
     resolveReferenceMatchesForNamesWithSummaries,
     matchingReferenceMatches,
     forceReferenceMatchesForRendering,
@@ -19,7 +18,7 @@ import Lore.Internal.Definition.Cache.DefinitionModuleIndex (getCachedDefinition
 import Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex (getCachedParsedOccurrenceModuleIndex, lookupModulesForOccurrenceKeys)
 import qualified Lore.Internal.Definition.Index as DefinitionIndex
 import Lore.Internal.Definition.Timing (withTimedSection)
-import Lore.Internal.Definition.Types (DefinitionDependencies (..), DefinitionId, DefinitionModuleIndex, DefinitionSource (..), NamedDefinitionSource (..), ParsedOccurrenceModuleIndex (..), ReferenceMatch (..), RequiredImport, nameOccKey)
+import Lore.Internal.Definition.Types (DefinitionDependencies (..), DefinitionId, DefinitionModuleIndex, DefinitionSource (..), NamedDefinitionSource (..), ParsedOccurrenceModuleIndex (..), ReferenceMatch (..), nameOccKey)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import UnliftIO (pooledForConcurrently)
@@ -129,19 +128,6 @@ resolveDefinitionClosureSourcesWithSummaries modSummaries maxDepth inputName = d
         ( seenAfterRemaining,
           dependencySourceBuilder . remainingSourceBuilder
         )
-
-getMinifiedImportsForDefinitionWithSummaries ::
-  (MonadLore m) =>
-  Map.Map GHC.Module GHC.ModSummary ->
-  DefinitionSource ->
-  m [RequiredImport]
-getMinifiedImportsForDefinitionWithSummaries modSummaries source = do
-  maybeModuleIndex <- getCachedDefinitionModuleIndex modSummaries source.definitionSourceModule
-  pure $
-    maybe
-      []
-      (DefinitionIndex.lookupDefinitionRequiredImportsOrEmpty source.definitionSourceId)
-      maybeModuleIndex
 
 resolveReferenceMatchesForNamesWithSummaries ::
   (MonadLore m) =>

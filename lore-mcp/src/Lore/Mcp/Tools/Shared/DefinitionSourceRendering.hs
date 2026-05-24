@@ -9,7 +9,7 @@ where
 -- Shared MCP rendering for Lore DefinitionSource values.
 -- Used by getDefinition and resolveInstance.
 
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.List (foldl', sortOn)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -19,9 +19,7 @@ import Lore
   ( DeclarationSpans (..),
     DefinitionId (..),
     DefinitionSource (..),
-    MonadLore,
     NamedDefinitionSource (..),
-    getMinifiedImportsForDefinition,
   )
 import Lore.Definition.RenderSlice (definitionSourceToRenderSlice)
 import Lore.Mcp.Internal.LoreDoc (SourceFile)
@@ -29,7 +27,7 @@ import Lore.Mcp.Tools.Shared (Paginated (..))
 import Lore.Mcp.Tools.Shared.Source (definitionSlicesToSourceFiles)
 
 buildPaginatedDefinitionSourceFiles ::
-  (MonadLore m) =>
+  (MonadIO m) =>
   Int ->
   Int ->
   [NamedDefinitionSource] ->
@@ -65,16 +63,14 @@ buildPaginatedDefinitionSourceFiles skip maxItems definitionEntries =
             )
 
 buildDefinitionSourceFiles ::
-  (MonadLore m) =>
+  (MonadIO m) =>
   [NamedDefinitionSource] ->
   m [SourceFile]
-buildDefinitionSourceFiles definitionEntries = do
-  visibleSlices <- mapM definitionSourceToSlice definitionEntries
+buildDefinitionSourceFiles definitionEntries =
   liftIO (definitionSlicesToSourceFiles visibleSlices)
   where
-    definitionSourceToSlice definitionEntry = do
-      imports <- getMinifiedImportsForDefinition definitionEntry.definitionSource
-      pure (definitionSourceToRenderSlice definitionEntry.definitionSource imports)
+    visibleSlices =
+      map (definitionSourceToRenderSlice . (.definitionSource)) definitionEntries
 
 data PaginatedDefinitionSources = PaginatedDefinitionSources
   { sourceTotalItems :: !Int,
