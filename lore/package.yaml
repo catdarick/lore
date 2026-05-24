@@ -40,6 +40,7 @@ dependencies:
 - transformers
 - unliftio
 - megaparsec
+- yaml
 - edit-distance
 
 ghc-options:
@@ -58,6 +59,7 @@ library:
   exposed-modules:
   - Lore
   - Lore.Definition
+  - Lore.DeadCode
   - Lore.Definition.RenderSlice
   - Lore.Definition.Rendering
   - Lore.Diagnostics
@@ -88,6 +90,7 @@ tests:
     source-dirs:         test
     other-modules:
     - DefinitionSpec
+    - DeadCodeSpec
     - ImportCleanupApplySpec
     - ImportCleanupEditSpec
     - ImportCleanupImportListParserSpec

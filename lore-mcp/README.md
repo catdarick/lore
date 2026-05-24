@@ -41,6 +41,7 @@ Tool enable/disable variables (default enabled):
   - `LORE_MCP_TOOL_ENABLED_SEARCH_SYMBOLS`
   - `LORE_MCP_TOOL_ENABLED_LOOKUP_SYMBOL_INFO`
   - `LORE_MCP_TOOL_ENABLED_GET_DEFINITION`
+  - `LORE_MCP_TOOL_ENABLED_FIND_DEAD_CODE`
   - `LORE_MCP_TOOL_ENABLED_FIND_REFERENCES`
   - `LORE_MCP_TOOL_ENABLED_LOOKUP_INSTANCES`
   - `LORE_MCP_TOOL_ENABLED_CREATE_TEMPORAL_MODULE`
@@ -71,3 +72,29 @@ When the flag is disabled (default), `getDefinition` behaves as before and `noti
 When enabled, logs are written to `stderr`. This keeps MCP protocol traffic on `stdout`.
 
 Invalid values fail fast during server startup with a descriptive error message.
+
+## findDeadCode configuration (`lore.yaml`)
+
+`findDeadCode` reads `lore.yaml` from the current `projectRoot` on every tool call.
+
+Supported keys:
+
+- `alive-modules`: list of loaded home module names treated as alive roots
+- `alive-symbols`: list of symbol queries treated as alive roots (must resolve to loaded home definitions)
+
+Example:
+
+```yaml
+alive-modules:
+  - Dev
+alive-symbols:
+  - Demo.lookupOrZero
+  - Demo.Support.supportSeed
+```
+
+If `lore.yaml` is missing, empty defaults are used.
+
+Semantics note:
+
+- Definitions in test-only modules are considered alive when reachable from test `main`.
+- Definitions in non-test modules are considered alive only when reachable from non-test roots (executables/benchmarks and configured alive roots).

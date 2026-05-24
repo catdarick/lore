@@ -23,12 +23,14 @@ dependencies:
 - lore
 - text
 - time
+- insert-ordered-containers
 - openapi3
 - lens
 - vector 
 - unliftio
 - mtl
 - process
+- yaml
 
 ghc-options:
 - -Werror

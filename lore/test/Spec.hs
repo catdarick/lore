@@ -3,6 +3,7 @@ module Main
   )
 where
 
+import qualified DeadCodeSpec
 import qualified DefinitionSpec
 import qualified HomeModulesSpec
 import qualified ImportCleanupApplySpec
@@ -14,6 +15,7 @@ import qualified InterpreterSpec
 import qualified LoggerSpec
 import qualified LookupSearchSpec
 import qualified LookupSpec
+import qualified RedundantImportsSpec
 import qualified SourceEditSpec
 import qualified TemporalModulesSpec
 import Test.Hspec
@@ -22,6 +24,7 @@ main :: IO ()
 main =
   hspec do
     DefinitionSpec.spec
+    DeadCodeSpec.spec
     ImportCleanupApplySpec.spec
     ImportCleanupEditSpec.spec
     ImportCleanupImportListParserSpec.spec
@@ -34,3 +37,4 @@ main =
     SourceEditSpec.spec
     HomeModulesSpec.spec
     TemporalModulesSpec.spec
+    RedundantImportsSpec.spec

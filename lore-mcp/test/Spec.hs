@@ -6,6 +6,7 @@ where
 import qualified CreateTemporalModuleSpec
 import qualified DiscoverDirectorySpec
 import qualified DiscoverProjectSpec
+import qualified FindDeadCodeSpec
 import qualified FindReferencesSpec
 import qualified GetDefinitionSpec
 import qualified LookupInstancesSpec
@@ -25,6 +26,7 @@ main =
     CreateTemporalModuleSpec.spec
     DiscoverDirectorySpec.spec
     DiscoverProjectSpec.spec
+    FindDeadCodeSpec.spec
     FindReferencesSpec.spec
     LoreDocMarkdownSpec.spec
     LookupInstancesSpec.spec

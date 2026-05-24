@@ -1,9 +1,10 @@
 module Lore.Mcp.Internal.Tool where
 
-import Control.Lens ((%~), (&), (.~), (^.))
+import Control.Lens ((%~), (&), (.~), (?~), (^.))
 import qualified Data.Aeson as J
 import qualified Data.ByteString.Lazy as LBS
 import Data.Data (Proxy (..))
+import qualified Data.HashMap.Strict.InsOrd as IOM
 import Data.Maybe (catMaybes)
 import Data.OpenApi (ToSchema, toInlinedSchema)
 import qualified Data.OpenApi as OpenApi
@@ -88,20 +89,56 @@ moveFieldsAnnotationsIntoDescription schema =
         Just example' -> Just $ "example: " <> renderAsText example'
       baseDescription = schema ^. OpenApi.description
       newDescription =
-        case catMaybes [baseDescription, formatDescription, minimumDescription, maximumDescription, minItemsDescription, maxItemsDescription, exampleDescription] of
+        case catMaybes
+          [ baseDescription,
+            formatDescription,
+            minimumDescription,
+            maximumDescription,
+            minItemsDescription,
+            maxItemsDescription,
+            exampleDescription
+          ] of
           [] -> Nothing
           xs -> Just $ T.intercalate "\n" xs
+
+      requiredNames = schema ^. OpenApi.required
+      allProperties = IOM.keys $ schema ^. OpenApi.properties
+
+      makeNullable :: OpenApi.Schema -> OpenApi.Schema
+      makeNullable =
+        OpenApi.nullable ?~ True
+
+      tweakProperty ::
+        Text ->
+        OpenApi.Referenced OpenApi.Schema ->
+        OpenApi.Referenced OpenApi.Schema
+      tweakProperty name prop =
+        let prop' = fmap moveFieldsAnnotationsIntoDescription prop
+         in if name `elem` requiredNames
+              then prop'
+              else fmap makeNullable prop'
+
       tweakItems :: Maybe OpenApi.OpenApiItems -> Maybe OpenApi.OpenApiItems
       tweakItems = \case
-        Just (OpenApi.OpenApiItemsObject properties) -> Just $ OpenApi.OpenApiItemsObject $ fmap moveFieldsAnnotationsIntoDescription properties
-        Just (OpenApi.OpenApiItemsArray items) -> Just $ OpenApi.OpenApiItemsArray $ fmap (fmap moveFieldsAnnotationsIntoDescription) items
-        Nothing -> Nothing
+        Just (OpenApi.OpenApiItemsObject properties) ->
+          Just $
+            OpenApi.OpenApiItemsObject $
+              fmap moveFieldsAnnotationsIntoDescription properties
+        Just (OpenApi.OpenApiItemsArray items) ->
+          Just $
+            OpenApi.OpenApiItemsArray $
+              fmap (fmap moveFieldsAnnotationsIntoDescription) items
+        Nothing ->
+          Nothing
    in schema
         & OpenApi.format .~ Nothing
         & OpenApi.minimum_ .~ Nothing
         & OpenApi.maximum_ .~ Nothing
         & OpenApi.description .~ newDescription
-        & OpenApi.properties %~ fmap (fmap moveFieldsAnnotationsIntoDescription)
+        -- OpenAI strict-schema compatibility:
+        -- originally optional properties become required-but-nullable.
+        & OpenApi.required .~ allProperties
+        & OpenApi.properties %~ IOM.mapWithKey tweakProperty
         & OpenApi.allOf %~ fmap (fmap (fmap moveFieldsAnnotationsIntoDescription))
         & OpenApi.anyOf %~ fmap (fmap (fmap moveFieldsAnnotationsIntoDescription))
         & OpenApi.oneOf %~ fmap (fmap (fmap moveFieldsAnnotationsIntoDescription))

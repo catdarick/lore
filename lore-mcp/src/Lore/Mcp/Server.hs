@@ -20,6 +20,7 @@ import Lore.Mcp.Tools.DiscoverDirectory (discoverDirectoryTool)
 import Lore.Mcp.Tools.DiscoverProject (discoverProjectTool)
 import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
 import Lore.Mcp.Tools.Feedback (feedbackTool)
+import Lore.Mcp.Tools.FindDeadCode (findDeadCodeTool)
 import Lore.Mcp.Tools.FindReferences (findReferencesTool)
 import Lore.Mcp.Tools.GetDefinition.Cached (cachedGetDefinitionTool)
 import Lore.Mcp.Tools.GetDefinition.Regular (regularGetDefinitionTool)
@@ -76,6 +77,7 @@ runLoreMcpServer = do
             searchSymbolsTool,
             lookupSymbolInfoTool,
             getDefinitionTool,
+            findDeadCodeTool,
             resolveInstanceTool,
             findReferencesTool,
             lookupInstancesTool,

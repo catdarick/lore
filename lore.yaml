@@ -1,0 +1,7 @@
+alive-modules: 
+  - Demo
+  - Demo.Support
+  - Lore.Mcp.Internal.Annotated
+  - Lore.Mcp.Internal.LoreDoc
+
+alive-symbols: []

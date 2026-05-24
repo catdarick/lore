@@ -50,6 +50,10 @@ module Lore
     resolveDefinitionClosureSourcesNamed,
     resolveReferenceMatchesForNames,
     mergeDefinitionSlices,
+    findDeadCode,
+    DeadCodeOptions (..),
+    DeadDefinition (..),
+    DeadCodeResult (..),
     DefinitionId (..),
     DefinitionSource (..),
     -- Rendering DTO used by existing renderers.
@@ -82,6 +86,7 @@ module Lore
   )
 where
 
+import Lore.DeadCode
 import Lore.Definition
 import Lore.Diagnostics
 import Lore.HomeModules

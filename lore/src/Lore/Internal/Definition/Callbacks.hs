@@ -102,10 +102,16 @@ rawArtifactsTcCoreProcessedCorePass sessionContext modGuts = do
               Set.fromList typedFacts.typedDefinitionNames
             Nothing ->
               Set.empty
+        interestingDependencyNames =
+          case maybeTypedFacts of
+            Just typedFacts ->
+              Set.fromList typedFacts.typedDefinitionNames
+            Nothing ->
+              Set.empty
         coreFacts =
           MinimalCoreModuleFacts
             { coreUsedInstancesByBinder =
-                buildUsedInstancesByBinder interestingBinders (GHC.mg_binds modGuts)
+                buildUsedInstancesByBinder interestingBinders interestingDependencyNames (GHC.mg_binds modGuts)
             }
     storeCoreModuleFactsCacheInContext sessionContext homeModule coreFacts
     -- Core facts arriving after a previously built definition index would leave

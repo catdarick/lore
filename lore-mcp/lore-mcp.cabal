@@ -24,6 +24,7 @@ source-repository head
 library
   exposed-modules:
       Lore.JsonRpc.Server
+      Lore.Mcp.Config
       Lore.Mcp.Internal.Annotated
       Lore.Mcp.Internal.Directory
       Lore.Mcp.Internal.DirectoryTree
@@ -39,6 +40,7 @@ library
       Lore.Mcp.Tools.DiscoverProject
       Lore.Mcp.Tools.ExecuteCode
       Lore.Mcp.Tools.Feedback
+      Lore.Mcp.Tools.FindDeadCode
       Lore.Mcp.Tools.FindReferences
       Lore.Mcp.Tools.GetDefinition.Cached
       Lore.Mcp.Tools.GetDefinition.Regular
@@ -119,6 +121,7 @@ library
     , exceptions
     , filepath
     , ghc
+    , insert-ordered-containers
     , lens
     , lore
     , mtl
@@ -128,6 +131,7 @@ library
     , time
     , unliftio
     , vector
+    , yaml
   default-language: Haskell2010
 
 executable lore-mcp
@@ -188,6 +192,7 @@ executable lore-mcp
     , exceptions
     , filepath
     , ghc
+    , insert-ordered-containers
     , lens
     , lore
     , lore-mcp
@@ -198,6 +203,7 @@ executable lore-mcp
     , time
     , unliftio
     , vector
+    , yaml
   default-language: Haskell2010
 
 test-suite lore-mcp-test
@@ -207,6 +213,7 @@ test-suite lore-mcp-test
       CreateTemporalModuleSpec
       DiscoverDirectorySpec
       DiscoverProjectSpec
+      FindDeadCodeSpec
       FindReferencesSpec
       GetDefinitionSpec
       LookupInstancesSpec
@@ -274,6 +281,7 @@ test-suite lore-mcp-test
     , filepath
     , ghc
     , hspec
+    , insert-ordered-containers
     , lens
     , lore
     , lore-mcp
@@ -284,4 +292,5 @@ test-suite lore-mcp-test
     , time
     , unliftio
     , vector
+    , yaml
   default-language: Haskell2010

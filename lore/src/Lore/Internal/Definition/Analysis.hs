@@ -294,27 +294,68 @@ buildDefinitionModuleIndex definingModule parsedFacts typedModuleFacts maybeCore
     occurrencesById =
       buildDefinitionOccurrences definingModule typedModuleFacts bindings memberIndexesById
 
-buildUsedInstancesByBinder :: Set.Set GHC.Name -> [GHC.CoreBind] -> Map.Map GHC.Name [GHC.Name]
-buildUsedInstancesByBinder interestingBinders coreBinds =
+buildUsedInstancesByBinder ::
+  Set.Set GHC.Name ->
+  Set.Set GHC.Name ->
+  [GHC.CoreBind] ->
+  Map.Map GHC.Name [GHC.Name]
+buildUsedInstancesByBinder interestingBinders interestingDependencyNames coreBinds =
   Map.fromListWith (<>) $
     concatMap bindingEntries coreBinds
   where
+    topLevelBindingsByName =
+      collectTopLevelBindingsByName coreBinds
+
+    topLevelBindingNames =
+      Map.keysSet topLevelBindingsByName
+
     keepEntry binderName instances =
       [ (binderName, instances)
       | Set.member binderName interestingBinders,
         not (null instances)
       ]
 
+    collectSemanticDependencies binderName =
+      dedupeSemanticNamesExact $
+        collectExprUsedInstanceNames
+          interestingDependencyNames
+          topLevelBindingsByName
+          topLevelBindingNames
+          Set.empty
+          binderName
+
     bindingEntries = \case
-      GHC.NonRec binder rhs ->
-        let instances = dedupeSemanticNamesExact (collectExprUsedInstanceNames rhs)
+      GHC.NonRec binder _ ->
+        let instances =
+              collectSemanticDependencies (GHC.getName binder)
          in keepEntry (GHC.getName binder) instances
       GHC.Rec pairs ->
         concat
           [ keepEntry (GHC.getName binder) instances
           | (binder, rhs) <- pairs,
-            let instances = dedupeSemanticNamesExact (collectExprUsedInstanceNames rhs)
+            let instances =
+                  case Map.lookup (GHC.getName binder) topLevelBindingsByName of
+                    Just _ ->
+                      collectSemanticDependencies (GHC.getName binder)
+                    Nothing ->
+                      dedupeSemanticNamesExact $
+                        collectExprUsedInstanceNamesInExpr
+                          interestingDependencyNames
+                          topLevelBindingsByName
+                          topLevelBindingNames
+                          Set.empty
+                          rhs
           ]
+
+collectTopLevelBindingsByName :: [GHC.CoreBind] -> Map.Map GHC.Name GHC.CoreExpr
+collectTopLevelBindingsByName =
+  Map.fromList . concatMap toEntries
+  where
+    toEntries = \case
+      GHC.NonRec binder rhs ->
+        [(GHC.getName binder, rhs)]
+      GHC.Rec pairs ->
+        [(GHC.getName binder, rhs) | (binder, rhs) <- pairs]
 
 collectDefinitionCandidateNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
 collectDefinitionCandidateNames homeModule tcg =
@@ -458,40 +499,108 @@ data OccurrenceSeed = OccurrenceSeed
     occurrenceSeedGres :: ![GHC.GlobalRdrElt]
   }
 
-collectExprUsedInstanceNames :: GHC.CoreExpr -> [GHC.Name]
-collectExprUsedInstanceNames = \case
+collectExprUsedInstanceNames ::
+  Set.Set GHC.Name ->
+  Map.Map GHC.Name GHC.CoreExpr ->
+  Set.Set GHC.Name ->
+  Set.Set GHC.Name ->
+  GHC.Name ->
+  [GHC.Name]
+collectExprUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames binderName
+  | Set.member binderName visitedBinderNames =
+      []
+  | otherwise =
+      case Map.lookup binderName topLevelBindingsByName of
+        Nothing ->
+          []
+        Just rhs ->
+          collectExprUsedInstanceNamesInExpr
+            interestingDependencyNames
+            topLevelBindingsByName
+            topLevelBindingNames
+            (Set.insert binderName visitedBinderNames)
+            rhs
+
+collectExprUsedInstanceNamesInExpr ::
+  Set.Set GHC.Name ->
+  Map.Map GHC.Name GHC.CoreExpr ->
+  Set.Set GHC.Name ->
+  Set.Set GHC.Name ->
+  GHC.CoreExpr ->
+  [GHC.Name]
+collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames = \case
   GHC.Var variable ->
-    [GHC.getName variable | GHC.isDFunId variable]
+    let variableName = GHC.getName variable
+        semanticDependencyNames =
+          [ variableName
+          | GHC.isDFunId variable || Set.member variableName interestingDependencyNames
+          ]
+        transitiveTopLevelDependencies =
+          [ dependencyName
+          | Set.member variableName topLevelBindingNames,
+            dependencyName <-
+              collectExprUsedInstanceNames
+                interestingDependencyNames
+                topLevelBindingsByName
+                topLevelBindingNames
+                visitedBinderNames
+                variableName
+          ]
+     in semanticDependencyNames <> transitiveTopLevelDependencies
   GHC.Lit _ ->
     []
   GHC.App function argument ->
-    collectExprUsedInstanceNames function <> collectExprUsedInstanceNames argument
+    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames function
+      <> collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames argument
   GHC.Lam _ body ->
-    collectExprUsedInstanceNames body
+    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames body
   GHC.Let binding body ->
-    collectBindUsedInstanceNames binding <> collectExprUsedInstanceNames body
+    collectBindUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames binding
+      <> collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames body
   GHC.Case scrutinee _ _ alternatives ->
-    collectExprUsedInstanceNames scrutinee
-      <> concatMap collectAltUsedInstanceNames alternatives
+    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames scrutinee
+      <> concatMap
+        (collectAltUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames)
+        alternatives
   GHC.Cast expression _ ->
-    collectExprUsedInstanceNames expression
+    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames expression
   GHC.Tick _ expression ->
-    collectExprUsedInstanceNames expression
+    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames expression
   GHC.Type _ ->
     []
   GHC.Coercion _ ->
     []
 
-collectBindUsedInstanceNames :: GHC.CoreBind -> [GHC.Name]
-collectBindUsedInstanceNames = \case
+collectBindUsedInstanceNames ::
+  Set.Set GHC.Name ->
+  Map.Map GHC.Name GHC.CoreExpr ->
+  Set.Set GHC.Name ->
+  Set.Set GHC.Name ->
+  GHC.CoreBind ->
+  [GHC.Name]
+collectBindUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames = \case
   GHC.NonRec _ rhs ->
-    collectExprUsedInstanceNames rhs
+    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames rhs
   GHC.Rec bindings ->
-    concatMap (collectExprUsedInstanceNames . snd) bindings
+    concatMap
+      ( collectExprUsedInstanceNamesInExpr
+          interestingDependencyNames
+          topLevelBindingsByName
+          topLevelBindingNames
+          visitedBinderNames
+          . snd
+      )
+      bindings
 
-collectAltUsedInstanceNames :: GHC.CoreAlt -> [GHC.Name]
-collectAltUsedInstanceNames (GHC.Alt _ _ expression) =
-  collectExprUsedInstanceNames expression
+collectAltUsedInstanceNames ::
+  Set.Set GHC.Name ->
+  Map.Map GHC.Name GHC.CoreExpr ->
+  Set.Set GHC.Name ->
+  Set.Set GHC.Name ->
+  GHC.CoreAlt ->
+  [GHC.Name]
+collectAltUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames (GHC.Alt _ _ expression) =
+  collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames expression
 
 dotFieldLabelRdrNamePs :: GHC.DotFieldOcc GHC.GhcPs -> GHC.RdrName
 dotFieldLabelRdrNamePs dotFieldOccurrence =

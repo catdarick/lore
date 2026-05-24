@@ -27,6 +27,7 @@ library
   exposed-modules:
       Lore
       Lore.Definition
+      Lore.DeadCode
       Lore.Definition.RenderSlice
       Lore.Definition.Rendering
       Lore.Diagnostics
@@ -51,6 +52,7 @@ library
       Lore.Internal.Lookup.TypeQuery
   other-modules:
       Lore.Internal.Cache.Types
+      Lore.Internal.DeadCode
       Lore.Internal.Definition.Analysis
       Lore.Internal.Definition.Cache.CoreModuleFacts
       Lore.Internal.Definition.Cache.DefinitionModuleIndex
@@ -71,6 +73,7 @@ library
       Lore.Internal.Ghc.TyThing
       Lore.Internal.HomeModules
       Lore.Internal.HomeModules.AutoRefactorLoop
+      Lore.Internal.HomeModules.EntryModules
       Lore.Internal.HomeModules.LoadAttempt
       Lore.Internal.HomeModules.ModuleGraphPatch
       Lore.Internal.HomeModules.Plan
@@ -186,6 +189,7 @@ library
     , time
     , transformers
     , unliftio
+    , yaml
   default-language: Haskell2010
 
 test-suite lore-test
@@ -193,6 +197,7 @@ test-suite lore-test
   main-is: Spec.hs
   other-modules:
       DefinitionSpec
+      DeadCodeSpec
       ImportCleanupApplySpec
       ImportCleanupEditSpec
       ImportCleanupImportListParserSpec
@@ -275,4 +280,5 @@ test-suite lore-test
     , time
     , transformers
     , unliftio
+    , yaml
   default-language: Haskell2010
