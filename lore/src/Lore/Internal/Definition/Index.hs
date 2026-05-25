@@ -2,7 +2,6 @@ module Lore.Internal.Definition.Index
   ( emptyDefinitionDependencies,
     lookupDefinitionSourceByName,
     lookupDefinitionSourceById,
-    lookupDefinitionDependenciesMaybe,
     lookupDefinitionDependenciesOrEmpty,
     lookupReferenceHitsForName,
     lookupReferenceHitsForNames,
@@ -50,13 +49,6 @@ lookupDefinitionSourceById ::
   Maybe DefinitionSource
 lookupDefinitionSourceById definitionId moduleIndex =
   Map.lookup definitionId moduleIndex.definitionsById
-
-lookupDefinitionDependenciesMaybe ::
-  DefinitionId ->
-  DefinitionModuleIndex ->
-  Maybe DefinitionDependencies
-lookupDefinitionDependenciesMaybe definitionId moduleIndex =
-  Map.lookup definitionId moduleIndex.dependenciesById
 
 lookupDefinitionDependenciesOrEmpty ::
   DefinitionId ->

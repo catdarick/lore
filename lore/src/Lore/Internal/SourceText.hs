@@ -2,9 +2,7 @@ module Lore.Internal.SourceText
   ( positionToOffset,
     offsetToPosition,
     spanToOffsets,
-    splitAtSpanEnd,
     spanTextMaybe,
-    spanText,
     readSpanText,
     readSpanLines,
     sliceRealSpan,
@@ -55,19 +53,10 @@ spanToOffsets contents Span {spanStartLine, spanStartCol, spanEndLine, spanEndCo
   endOffset <- positionToOffset contents (spanEndLine, spanEndCol)
   pure (startOffset, endOffset)
 
-splitAtSpanEnd :: Text -> Span -> Maybe (Text, Text)
-splitAtSpanEnd source span' = do
-  (_, endOffset) <- spanToOffsets source span'
-  pure (T.take endOffset source, T.drop endOffset source)
-
 spanTextMaybe :: Text -> Span -> Maybe Text
 spanTextMaybe source span' = do
   (startOffset, endOffset) <- spanToOffsets source span'
   pure (T.take (endOffset - startOffset) (T.drop startOffset source))
-
-spanText :: Text -> Span -> Text
-spanText source span' =
-  maybe "" id (spanTextMaybe source span')
 
 readSpanText :: GHC.SrcSpan -> IO Text
 readSpanText span' =

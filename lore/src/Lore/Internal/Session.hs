@@ -1,7 +1,6 @@
 module Lore.Internal.Session
   ( SessionContext (..),
     SessionConfig (..),
-    defaultSessionConfig,
     prepareSessionContext,
     ParallelWorkersCount (..),
   )
@@ -26,7 +25,7 @@ import Lore.Internal.Lookup.Cache.Types
   )
 import Lore.Internal.PackageDB (resolvePackageDbPaths)
 import Lore.Internal.Session.Cache.Types (GeneratedMainModulesRegistry (..), InterpreterContextCache (..), LastLoadHomeModulesResultCache (..), TemporalModulesRegistry (..))
-import Lore.Logger (LoggerHandle, noLogHandle)
+import Lore.Logger (LoggerHandle)
 
 data SessionContext = SessionContext
   { projectRoot :: FilePath,
@@ -62,17 +61,6 @@ data SessionConfig = SessionConfig
     parallelWorkersLimit :: ParallelWorkersCount,
     isTestSuiteFunctionalityRequired :: Bool
   }
-
-defaultSessionConfig :: SessionConfig
-defaultSessionConfig =
-  SessionConfig
-    { projectRoot = ".",
-      ghcWorkDir = ".lore-work",
-      loggerHandle = noLogHandle,
-      customPrelude = Nothing,
-      parallelWorkersLimit = WorkersAsNumProcessors,
-      isTestSuiteFunctionalityRequired = False
-    }
 
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
 prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, loggerHandle, customPrelude, isTestSuiteFunctionalityRequired} = do

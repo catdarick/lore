@@ -14,27 +14,20 @@ module Lore.Mcp.Tools.Shared
     Paginated (..),
     PaginationRenderConfig (..),
     paginationSummaryDoc,
-    PaginatedDefinitionSlices (..),
-    paginateDefinitionSlices,
-    renderDiagnosticSummary,
   )
 where
 
-import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Lore
-  ( DefinitionSlice (..),
-    LoadHomeModulesOptions (..),
+  ( LoadHomeModulesOptions (..),
     LoadHomeModulesResult (..),
     MonadLore,
     interpreterContextIsReady,
     loadHomeModules,
     lookupLastLoadHomeModulesResult,
-    mergeDefinitionSlices,
   )
 import Lore.Mcp.Internal.LoreDoc (LoreDoc, ToLoreDoc (toLoreDoc), paragraph)
-import Lore.Mcp.Tools.Shared.Diagnostics (renderDiagnosticSummary)
 
 data ToolRun a
   = ToolRunBlocked ToolBlocked
@@ -202,52 +195,6 @@ paginationSummaryDoc config paginated =
 
     nextSkip =
       paginated.paginatedSkippedItems + paginated.paginatedConsumedItems
-
-data PaginatedDefinitionSlices = PaginatedDefinitionSlices
-  { sliceTotalItems :: Int,
-    sliceSkippedItems :: Int,
-    visibleSlices :: [DefinitionSlice]
-  }
-
-paginateDefinitionSlices :: Int -> Int -> [DefinitionSlice] -> Maybe PaginatedDefinitionSlices
-paginateDefinitionSlices skip maxItems definitionSlices =
-  case expandDefinitionSlices definitionSlices of
-    [] ->
-      Nothing
-    expandedSlices ->
-      Just
-        PaginatedDefinitionSlices
-          { sliceTotalItems = totalItems,
-            sliceSkippedItems = skippedItems,
-            visibleSlices = take maxItems (drop skippedItems expandedSlices)
-          }
-      where
-        totalItems = length expandedSlices
-        skippedItems = min skip totalItems
-
-expandDefinitionSlices :: [DefinitionSlice] -> [DefinitionSlice]
-expandDefinitionSlices =
-  concatMap expandDefinitionSlice . mergeDefinitionModules
-
-expandDefinitionSlice :: DefinitionSlice -> [DefinitionSlice]
-expandDefinitionSlice definitionSlice =
-  [ definitionSlice {declarationSpans = [definitionSpans]}
-  | definitionSpans <- definitionSlice.declarationSpans
-  ]
-
-mergeDefinitionModules :: [DefinitionSlice] -> [DefinitionSlice]
-mergeDefinitionModules =
-  Map.elems . foldl insertSlice Map.empty
-  where
-    insertSlice acc slice =
-      Map.insertWith mergeTwo slice.definitionModule slice acc
-
-    mergeTwo new old =
-      case mergeDefinitionSlices [old, new] of
-        Just merged ->
-          merged
-        Nothing ->
-          old
 
 instance ToLoreDoc PartialLoadWarning where
   toLoreDoc =

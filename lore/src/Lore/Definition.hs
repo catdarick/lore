@@ -3,8 +3,6 @@ module Lore.Definition
     resolveDefinitionSourceNamed,
     resolveDefinitionClosureSourcesNamed,
     resolveReferenceMatchesForNames,
-    matchingReferenceMatches,
-    dedupeReferenceHits,
     lookupModulesForOccurrenceKeys,
     mergeDefinitionSlices,
     DefinitionId (..),
@@ -20,13 +18,11 @@ where
 
 import Data.Containers.ListUtils (nubOrdOn)
 import qualified Data.List as List
-import qualified Data.Set as Set
 import qualified GHC.Plugins as GHC
 import Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex (lookupModulesForOccurrenceKeys)
-import qualified Lore.Internal.Definition.Index as DefinitionIndex
 import qualified Lore.Internal.Definition.Query as DefinitionQuery
 import Lore.Internal.Definition.Timing (withTimedSection)
-import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionId (..), DefinitionModuleIndex, DefinitionSlice (..), DefinitionSource (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..))
+import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionId (..), DefinitionSlice (..), DefinitionSource (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..))
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import qualified Lore.Logger as Log
@@ -48,14 +44,6 @@ resolveReferenceMatchesForNames targetNames = do
       <> show (length forcedMatches)
       <> " matches in total"
   pure forcedMatches
-
-matchingReferenceMatches :: Set.Set GHC.Name -> DefinitionModuleIndex -> [ReferenceMatch]
-matchingReferenceMatches =
-  DefinitionQuery.matchingReferenceMatches
-
-dedupeReferenceHits :: [ReferenceHit] -> [ReferenceHit]
-dedupeReferenceHits =
-  DefinitionIndex.dedupeReferenceHits
 
 resolveDefinitionClosureSourcesNamed :: (MonadLore m) => Int -> GHC.Name -> m [NamedDefinitionSource]
 resolveDefinitionClosureSourcesNamed maxDepth inputName = do

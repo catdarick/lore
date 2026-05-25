@@ -7,7 +7,6 @@ module Lore.Internal.Definition.Cache.DefinitionModuleIndex
     lookupDefinitionModuleIndexCache,
     storeDefinitionModuleIndexCache,
     storeDefinitionModuleIndexCacheInContext,
-    invalidateDefinitionModuleIndexCacheForModule,
     invalidateDefinitionModuleIndexCacheForModuleInContext,
     invalidateDefinitionModuleIndexCache,
   )
@@ -118,11 +117,6 @@ storeDefinitionModuleIndexCacheInContext sessionContext homeModule maybeModuleIn
       case maybeModuleIndex of
         Just moduleIndex -> CachedDefinitionModuleIndexAvailable moduleIndex
         Nothing -> CachedDefinitionModuleIndexUnavailable
-
-invalidateDefinitionModuleIndexCacheForModule :: (MonadLore m) => GHC.Module -> m ()
-invalidateDefinitionModuleIndexCacheForModule homeModule = do
-  sessionContext <- asks id
-  liftIO (invalidateDefinitionModuleIndexCacheForModuleInContext sessionContext homeModule)
 
 invalidateDefinitionModuleIndexCacheForModuleInContext :: SessionContext -> GHC.Module -> IO ()
 invalidateDefinitionModuleIndexCacheForModuleInContext sessionContext homeModule =

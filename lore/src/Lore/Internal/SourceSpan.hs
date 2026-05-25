@@ -4,7 +4,6 @@ module Lore.Internal.SourceSpan
     spanStartKey,
     spanEndKey,
     spanContains,
-    spansOverlap,
     srcSpanSortKey,
     srcSpanSize,
   )
@@ -48,12 +47,6 @@ spanContains outer inner =
   outer.spanFile == inner.spanFile
     && spanStartKey outer <= spanStartKey inner
     && spanEndKey outer >= spanEndKey inner
-
-spansOverlap :: Span -> Span -> Bool
-spansOverlap left right =
-  left.spanFile == right.spanFile
-    && spanStartKey left < spanEndKey right
-    && spanStartKey right < spanEndKey left
 
 srcSpanSortKey :: GHC.SrcSpan -> (String, Int, Int, Int, Int)
 srcSpanSortKey span' =

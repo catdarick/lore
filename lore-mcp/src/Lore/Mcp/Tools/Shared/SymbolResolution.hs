@@ -3,9 +3,7 @@ module Lore.Mcp.Tools.Shared.SymbolResolution
     UnresolvedSymbolQuery (..),
     SymbolsResolved (..),
     SymbolsUnresolved (..),
-    SymbolResolutionResult (..),
     resolveUniqueSymbolQueries,
-    resolveSymbolQueries,
     unresolvedSymbolQueriesMessage,
   )
 where
@@ -60,10 +58,6 @@ newtype SymbolsUnresolved = MkSymbolsUnresolved
   { unresolvedQueries :: [UnresolvedSymbolQuery]
   }
 
-data SymbolResolutionResult
-  = SymbolQueriesResolved SymbolsResolved
-  | SymbolQueriesUnresolved SymbolsUnresolved
-
 resolveUniqueSymbolQueries :: (MonadLore m) => [Text] -> m (Either SymbolsUnresolved SymbolsResolved)
 resolveUniqueSymbolQueries queries = do
   resolutions <- mapM resolveOneQuery queries
@@ -72,13 +66,6 @@ resolveUniqueSymbolQueries queries = do
     if null unresolved
       then Right (MkSymbolsResolved [resolvedQuery | Right resolvedQuery <- resolutions])
       else Left (MkSymbolsUnresolved unresolved)
-
-resolveSymbolQueries :: (MonadLore m) => [Text] -> m SymbolResolutionResult
-resolveSymbolQueries queries = do
-  eiResolved <- resolveUniqueSymbolQueries queries
-  pure $ case eiResolved of
-    Left unresolved -> SymbolQueriesUnresolved unresolved
-    Right resolved -> SymbolQueriesResolved resolved
 
 resolveOneQuery :: (MonadLore m) => Text -> m (Either UnresolvedSymbolQuery ResolvedSymbolQuery)
 resolveOneQuery query = do

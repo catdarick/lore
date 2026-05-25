@@ -1,9 +1,6 @@
 module Lore.Internal.HomeModules.EntryModules
   ( ComponentEntryModule (..),
-    collectLoadedComponentEntryModules,
-    collectLoadedComponentEntryModulesWithDiagnostics,
     collectLoadedComponentModuleInfoWithDiagnostics,
-    collectLoadedComponentModuleKinds,
     lookupGeneratedMainModulesByKey,
     resolveLoadedComponentEntryModule,
     resolveLoadedEntryModule,
@@ -51,15 +48,6 @@ instance NFData ComponentEntryModule where
           rnf entryOriginalMainPath `seq`
             entryModule `seq`
               ()
-
-collectLoadedComponentEntryModules :: (MonadLore m) => m [ComponentEntryModule]
-collectLoadedComponentEntryModules =
-  fst <$> collectLoadedComponentEntryModulesWithDiagnostics
-
-collectLoadedComponentEntryModulesWithDiagnostics :: (MonadLore m) => m ([ComponentEntryModule], [String])
-collectLoadedComponentEntryModulesWithDiagnostics = do
-  (_, loadedEntryModules, entryResolutionErrors) <- collectLoadedComponentModuleInfoWithDiagnostics
-  pure (loadedEntryModules, entryResolutionErrors)
 
 collectLoadedComponentModuleInfoWithDiagnostics ::
   (MonadLore m) =>
@@ -111,11 +99,6 @@ collectLoadedComponentModuleInfoWithDiagnostics = do
           | (module_, componentKind) <- concat namedModulePairsByComponent <> entryPairsByComponent
           ]
   pure (moduleKindsByModule, loadedEntryModules, entryResolutionErrors)
-
-collectLoadedComponentModuleKinds :: (MonadLore m) => m (Map.Map GHC.Module (Set.Set ComponentKind))
-collectLoadedComponentModuleKinds = do
-  (moduleKindsByModule, _, _) <- collectLoadedComponentModuleInfoWithDiagnostics
-  pure moduleKindsByModule
 
 resolveLoadedComponentEntryModule ::
   (MonadLore m) =>

@@ -9,7 +9,6 @@ module Lore.Internal.Lookup.SymbolsMap
     emptyHomeSymbolsIndexCache,
     emptyExternalSymbolsIndexCache,
     emptySimilarSymbolsSearchIndexCache,
-    emptySymbolsDependencySetCache,
     getCachedSymbolsMap,
     getCachedHomeSymbolsIndex,
     getCachedExternalSymbolsIndex,
@@ -79,10 +78,6 @@ emptyExternalSymbolsIndexCache =
 emptySimilarSymbolsSearchIndexCache :: SimilarSymbolsSearchIndexCache
 emptySimilarSymbolsSearchIndexCache =
   SimilarSymbolsSearchIndexCache Nothing
-
-emptySymbolsDependencySetCache :: SymbolsDependencySetCache
-emptySymbolsDependencySetCache =
-  SymbolsDependencySetCache Set.empty
 
 getCachedSymbolsMap :: (MonadLore m) => m SymbolsMap
 getCachedSymbolsMap = do

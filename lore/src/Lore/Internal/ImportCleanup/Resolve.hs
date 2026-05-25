@@ -2,11 +2,9 @@
 
 module Lore.Internal.ImportCleanup.Resolve
   ( resolveImportCleanupGroups,
-    findImportByDiagnosticSpan,
   )
 where
 
-import Data.List (find)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
@@ -102,7 +100,3 @@ resolveUniqueImport parsedImports diagnosticSpan =
       | parsedImport <- parsedImports,
         spanContains parsedImport.parsedImportSpan diagnosticSpan
       ]
-
-findImportByDiagnosticSpan :: [ParsedImport] -> Span -> Maybe ParsedImport
-findImportByDiagnosticSpan parsedImports diagnosticSpan =
-  find (\parsedImport -> spanContains parsedImport.parsedImportSpan diagnosticSpan) parsedImports

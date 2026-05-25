@@ -6,10 +6,7 @@ module Lore.Internal.SourceEdit
     EditValidationWarning (..),
     AppliedFileEdits (..),
     applyFileEdits,
-    applyReplacementEdits,
-    applyReplacementEditsValidated,
     editFilePath,
-    replacementStartKey,
     spanToOffsets,
     positionToOffset,
   )
@@ -23,7 +20,6 @@ import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Lore.Internal.SourceSpan (spanStartKey)
 import Lore.Internal.SourceSpan.Types (Span)
 import Lore.Internal.SourceText (positionToOffset, spanToOffsets)
 import qualified Lore.Logger as Log
@@ -94,18 +90,6 @@ applyFileEdits edits = do
         (\acc edit -> Map.insertWith (flip (<>)) (editFilePath edit) [edit] acc)
         Map.empty
         edits
-
-applyReplacementEdits :: Text -> [FileEdit] -> Text
-applyReplacementEdits source edits =
-  applyValidatedReplacementEdits source validatedEdits
-  where
-    (validatedEdits, _warnings) =
-      validateReplacementEdits source "<unknown-file>" edits
-
-applyReplacementEditsValidated :: Text -> FilePath -> [FileEdit] -> (Text, [EditValidationWarning])
-applyReplacementEditsValidated source filePath edits =
-  let (validatedEdits, warnings) = validateReplacementEdits source filePath edits
-   in (applyValidatedReplacementEdits source validatedEdits, warnings)
 
 applyValidatedReplacementEdits :: Text -> [OffsetFileEdit] -> Text
 applyValidatedReplacementEdits source =
@@ -238,8 +222,3 @@ editFilePath :: FileEdit -> FilePath
 editFilePath = \case
   ReplaceSpanEdit filePath _ _ -> filePath
   ReplaceSpanEditExpected filePath _ _ _ -> filePath
-
-replacementStartKey :: FileEdit -> (Int, Int)
-replacementStartKey = \case
-  ReplaceSpanEdit _ span' _ -> spanStartKey span'
-  ReplaceSpanEditExpected _ span' _ _ -> spanStartKey span'

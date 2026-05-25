@@ -15,9 +15,9 @@ import qualified Data.Aeson as J
 import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Lore
-  ( SessionConfig (..),
+  ( ParallelWorkersCount (..),
+    SessionConfig (..),
     defaultLoadHomeModulesOptions,
-    defaultSessionConfig,
     loadHomeModules,
     noLogHandle,
   )
@@ -46,10 +46,12 @@ fixtureLoreMcpAtWithCache cacheEnabled fixtureRoot action =
     runLoreMcp sessionConfig context action
   where
     sessionConfig =
-      defaultSessionConfig
+      SessionConfig
         { projectRoot = fixtureRoot,
           ghcWorkDir = fixtureRoot </> ".lore-work-test-mcp",
           loggerHandle = noLogHandle,
+          customPrelude = Nothing,
+          parallelWorkersLimit = WorkersAsNumProcessors,
           isTestSuiteFunctionalityRequired = True
         }
 

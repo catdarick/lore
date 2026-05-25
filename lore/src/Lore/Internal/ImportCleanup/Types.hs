@@ -5,9 +5,7 @@ module Lore.Internal.ImportCleanup.Types
     RedundantImportedOccurrence (..),
     RedundantImportIssue (..),
     redundantImportIssueSpan,
-    redundantImportIssueOccurrences,
     mapRedundantImportIssueSpan,
-    AutoRefactorIssue (..),
     ImportId (..),
     ParsedImportListKind (..),
     ParsedImport (..),
@@ -55,12 +53,6 @@ redundantImportIssueSpan issue =
     RedundantWholeImportIssue span' -> span'
     RedundantImportOccurrencesIssue span' _ -> span'
 
-redundantImportIssueOccurrences :: RedundantImportIssue -> Maybe (NonEmpty RedundantImportedOccurrence)
-redundantImportIssueOccurrences issue =
-  case issue of
-    RedundantWholeImportIssue _ -> Nothing
-    RedundantImportOccurrencesIssue _ occurrences -> Just occurrences
-
 mapRedundantImportIssueSpan :: (Span -> Span) -> RedundantImportIssue -> RedundantImportIssue
 mapRedundantImportIssueSpan mapSpan issue =
   case issue of
@@ -68,12 +60,6 @@ mapRedundantImportIssueSpan mapSpan issue =
       RedundantWholeImportIssue (mapSpan span')
     RedundantImportOccurrencesIssue span' occurrences ->
       RedundantImportOccurrencesIssue (mapSpan span') occurrences
-
-data AutoRefactorIssue = AutoRefactorIssue
-  { autoRefactorIssueFilePath :: FilePath,
-    autoRefactorIssueRedundantImport :: RedundantImportIssue
-  }
-  deriving (Eq, Show)
 
 newtype ImportId = ImportId Int
   deriving (Eq, Ord, Show)

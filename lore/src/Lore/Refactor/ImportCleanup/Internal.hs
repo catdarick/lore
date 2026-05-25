@@ -21,7 +21,6 @@ module Lore.Refactor.ImportCleanup.Internal
     RedundantImportIssue (..),
     redundantImportIssueFromDiagnostic,
     classifyRedundantImportIssues,
-    findImportByDiagnosticSpan,
     resolveImportCleanupGroups,
     renderImportCleanupEdits,
     cleanupImportListPayloadOccurrences,
@@ -45,8 +44,7 @@ import Lore.Internal.ImportCleanup.ImportListParser
   ( parseImportListPayload,
   )
 import Lore.Internal.ImportCleanup.Resolve
-  ( findImportByDiagnosticSpan,
-    resolveImportCleanupGroups,
+  ( resolveImportCleanupGroups,
   )
 import Lore.Internal.ImportCleanup.Rewrite
   ( cleanupImportListPayloadOccurrences,

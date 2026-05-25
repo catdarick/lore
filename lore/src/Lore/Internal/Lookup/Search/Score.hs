@@ -1,7 +1,6 @@
 module Lore.Internal.Lookup.Search.Score
   ( buildSearchIndex,
     searchOccurrences,
-    rankSearchTexts,
   )
 where
 
@@ -70,12 +69,6 @@ searchOccurrences resultLimit query index =
             [ Map.findWithDefault Set.empty match.matchedToken index.occurrencesByToken
             | match <- queryTokenMatches
             ]
-
-rankSearchTexts :: Int -> Text -> [Text] -> [Text]
-rankSearchTexts resultLimit query candidates =
-  map (.searchResultText) $
-    searchOccurrences resultLimit query $
-      buildSearchIndex [(candidate, candidate, ()) | candidate <- candidates]
 
 matchQueryTokens :: TokenSearchIndex key value -> [SearchToken] -> [QueryTokenMatch]
 matchQueryTokens index queryTokens =

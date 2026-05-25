@@ -2,7 +2,6 @@ module TestSupport
   ( fixtureLore,
     fixtureLoreAt,
     fixtureLoreAtWithConfig,
-    fixtureLoreAtWithLogger,
     withFixtureCopy,
     findSymbols,
     findRootSymbols,
@@ -14,16 +13,19 @@ module TestSupport
 where
 
 import Control.Exception (bracket)
+import Data.List (find, isInfixOf)
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Map as Map
 import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import qualified GHC.Plugins as GHC
 import qualified Lore
 import Lore.Logger (LoggerHandle, noLogHandle)
 import Lore.Monad (LoreMonadT)
-import Lore.Session (SessionConfig, defaultSessionConfig, runLore)
+import Lore.Session (SessionConfig, runLore)
 import qualified Lore.Session as Session
 import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, listDirectory, makeAbsolute, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
@@ -42,13 +44,6 @@ fixtureLoreAt fixtureRoot action =
     fixtureRoot
     action
 
-fixtureLoreAtWithLogger :: LoggerHandle -> FilePath -> LoreMonadT IO a -> IO a
-fixtureLoreAtWithLogger loggerHandle fixtureRoot action =
-  fixtureLoreAtWithConfig
-    (sessionConfigWithLogger loggerHandle)
-    fixtureRoot
-    action
-
 fixtureLoreAtWithConfig :: SessionConfig -> FilePath -> LoreMonadT IO a -> IO a
 fixtureLoreAtWithConfig sessionConfig fixtureRoot action =
   withClearedGhcEnvironment $
@@ -62,21 +57,13 @@ fixtureLoreAtWithConfig sessionConfig fixtureRoot action =
 sessionConfigWithLogger :: LoggerHandle -> SessionConfig
 sessionConfigWithLogger loggerHandle =
   Session.SessionConfig
-    { Session.projectRoot = projectRoot,
-      Session.ghcWorkDir = ghcWorkDir,
+    { Session.projectRoot = ".",
+      Session.ghcWorkDir = ".lore-work",
       Session.loggerHandle = loggerHandle,
-      Session.customPrelude = customPrelude,
-      Session.parallelWorkersLimit = parallelWorkersLimit,
-      Session.isTestSuiteFunctionalityRequired = isTestSuiteFunctionalityRequired
+      Session.customPrelude = Nothing,
+      Session.parallelWorkersLimit = Session.WorkersAsNumProcessors,
+      Session.isTestSuiteFunctionalityRequired = False
     }
-  where
-    Session.SessionConfig
-      { Session.projectRoot,
-        Session.ghcWorkDir,
-        Session.customPrelude,
-        Session.parallelWorkersLimit,
-        Session.isTestSuiteFunctionalityRequired
-      } = defaultSessionConfig
 
 withFixtureCopy :: (FilePath -> IO a) -> IO a
 withFixtureCopy action = do
@@ -123,8 +110,42 @@ findSymbols query =
   Set.toList <$> Lore.findMatchingSymbols (Lore.parseAndNormalizeName query)
 
 findRootSymbols :: (Lore.MonadLore m) => Text -> m [Lore.Symbol]
-findRootSymbols query =
-  Set.toList <$> Lore.findMatchingSymbolsRoots (Lore.parseAndNormalizeName query)
+findRootSymbols query = do
+  symbols <- findSymbols query
+  pathsToRoot <- mapM (Lore.resolvePathToRoot . (.name)) symbols
+  preferredRootNames <- pickPreferredRootNames (map (NE.last . (.unPathToRoot)) pathsToRoot)
+  pure (catMaybes (map (`findSymbolByName` symbols) preferredRootNames))
+  where
+    findSymbolByName targetName =
+      find ((== targetName) . (.name))
+
+    pickPreferredRootNames rootNames =
+      concat <$> mapM pickPreferredByOccName (Map.elems groupedByOccName)
+      where
+        groupedByOccName =
+          Map.fromListWith
+            (<>)
+            [ (Lore.occName (Lore.parseAndNormalizeName (T.pack (GHC.getOccString name))), [name])
+            | name <- rootNames
+            ]
+
+    pickPreferredByOccName [] =
+      pure []
+    pickPreferredByOccName namesForOcc = do
+      categorizedNames <- mapM classify namesForOcc
+      let nonValueNames =
+            [ name
+            | (name, category) <- categorizedNames,
+              category /= Lore.SymbolValue
+            ]
+      pure $
+        case nonValueNames of
+          preferredName : _ -> [preferredName]
+          [] -> take 1 namesForOcc
+
+    classify name = do
+      maybeInfo <- Lore.lookupSymbolInfo name
+      pure (name, maybe Lore.SymbolUnknown (Lore.classifySymbolCategory . Lore.symbolThing) maybeInfo)
 
 lookupRootSymbolInfo :: (Lore.MonadLore m) => Text -> m [Lore.SymbolInfo]
 lookupRootSymbolInfo query = do
@@ -135,7 +156,7 @@ lookupRootSymbolChains :: (Lore.MonadLore m) => Text -> m [[GHC.Name]]
 lookupRootSymbolChains query = do
   symbols <- findSymbols query
   pathsToRoot <- mapM (Lore.resolvePathToRoot . (.name)) symbols
-  let mergedPaths = Lore.mergePathsToRootOn renderName pathsToRoot
+  let mergedPaths = mergePathsToRootOn renderName pathsToRoot
   pure (map (NE.toList . (.unPathToRoot)) mergedPaths)
   where
     renderName name =
@@ -144,6 +165,32 @@ lookupRootSymbolChains query = do
           "<no-module>." <> GHC.getOccString name
         Just module_ ->
           GHC.moduleNameString (GHC.moduleName module_) <> "." <> GHC.getOccString name
+
+mergePathsToRootOn :: (Ord b) => (a -> b) -> [Lore.PathToRoot a] -> [Lore.PathToRoot a]
+mergePathsToRootOn getKey paths =
+  Map.elems (Map.fromListWith mergePaths pathPairs)
+  where
+    pathPairs =
+      [ (getKey (NE.last path.unPathToRoot), path)
+      | path <- paths
+      ]
+
+    mergePaths path1 path2 =
+      let values1 = NE.toList path1.unPathToRoot
+          values2 = NE.toList path2.unPathToRoot
+          keys1 = map getKey values1
+          keys2 = map getKey values2
+       in if
+            | keys1 `isInfixOf` keys2 -> path2
+            | keys2 `isInfixOf` keys1 -> path1
+            | otherwise ->
+                let (primaryValues, secondaryValues) =
+                      if length values1 >= length values2
+                        then (values1, values2)
+                        else (values2, values1)
+                    primaryKeys = map getKey primaryValues
+                    secondaryUniquePart = filter (\value -> getKey value `notElem` primaryKeys) secondaryValues
+                 in Lore.PathToRoot (NE.fromList (secondaryUniquePart <> primaryValues))
 
 listExportedSymbolsByModule :: (Lore.MonadLore m) => Text -> Maybe Text -> m [Lore.ExportedSymbolNode]
 listExportedSymbolsByModule moduleName maybePackageName = do

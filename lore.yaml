@@ -4,4 +4,5 @@ alive-modules:
   - Lore.Mcp.Internal.Annotated
   - Lore.Mcp.Internal.LoreDoc
 
-alive-symbols: []
+alive-symbols:
+  - Lore.Session.defaultSessionConfig

@@ -3,8 +3,6 @@ module Lore.Mcp.Tools.Shared.Diagnostics
     diagnosticSeverityTitle,
     diagnosticSummaryDoc,
     compactDiagnosticMessage,
-    renderDiagnosticSummary,
-    renderSummaryLine,
   )
 where
 
@@ -43,10 +41,6 @@ diagnosticMessageBody diagnostic =
     lines' ->
       T.intercalate "\n" (map T.pack lines')
 
-renderDiagnosticSummary :: Diagnostic -> Text
-renderDiagnosticSummary diagnostic =
-  "- " <> diagnosticSummaryText diagnostic
-
 diagnosticSummaryText :: Diagnostic -> Text
 diagnosticSummaryText Diagnostic {diagnosticMessage} =
   summarizedMessage
@@ -81,14 +75,6 @@ appendToHead :: String -> [String] -> [String]
 appendToHead extra = \case
   current : rest -> (current <> " " <> extra) : rest
   [] -> [extra]
-
-renderSummaryLine :: (Show a) => Maybe a -> [String] -> String
-renderSummaryLine diagnosticSeverity compactLines =
-  renderSeverityLabel diagnosticSeverity
-    <> ": "
-    <> case compactLines of
-      firstLine : _ -> firstLine
-      [] -> "<empty>"
 
 renderSeverityLabel :: (Show a) => Maybe a -> String
 renderSeverityLabel =

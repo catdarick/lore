@@ -26,11 +26,22 @@ import Lore.Internal.Monad (LoreMonadT (..))
 import Lore.Internal.Session
   ( SessionConfig (..),
     SessionContext (..),
-    defaultSessionConfig,
     prepareSessionContext,
   )
+import Lore.Logger (noLogHandle)
 import System.Directory (createDirectoryIfMissing, getCurrentDirectory, setCurrentDirectory)
 import System.FilePath ((</>))
+
+defaultSessionConfig :: SessionConfig
+defaultSessionConfig =
+  SessionConfig
+    { projectRoot = ".",
+      ghcWorkDir = ".lore-work",
+      loggerHandle = noLogHandle,
+      customPrelude = Nothing,
+      parallelWorkersLimit = WorkersAsNumProcessors,
+      isTestSuiteFunctionalityRequired = False
+    }
 
 runLore :: (GHCException.ExceptionMonad m) => SessionConfig -> LoreMonadT m a -> m a
 runLore sessionConfig lore = do

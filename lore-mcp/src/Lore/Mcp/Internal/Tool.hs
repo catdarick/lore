@@ -36,10 +36,6 @@ data SomeTool m where
     ToolWithoutArgs m output ->
     SomeTool m
 
-getToolArgsInputSchema :: forall r m output. (ToSchema (r 'MetadataType)) => ToolWithArgs m r output -> J.Value
-getToolArgsInputSchema _tool =
-  J.toJSON (moveFieldsAnnotationsIntoDescription (toInlinedSchema @(r 'MetadataType) Proxy))
-
 getToolName :: SomeTool m -> Text
 getToolName = \case
   SomeToolWithArgs tool -> tool.name

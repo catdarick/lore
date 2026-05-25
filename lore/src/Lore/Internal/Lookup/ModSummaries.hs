@@ -4,9 +4,7 @@ module Lore.Internal.Lookup.ModSummaries
     getCachedModSummaries,
     getCachedModSummariesByFile,
     prepareModSummaries,
-    prepareFreshModSummariesByFile,
     invalidateModSummariesCache,
-    lookupModSummary,
     modSummariesToMap,
   )
 where
@@ -51,10 +49,6 @@ prepareModSummaries = do
   Log.debug $ "Prepared module summaries map with " <> show (Map.size modSummariesMap) <> " entries."
   pure $ ModSummaries modSummariesMap
 
-lookupModSummary :: GHC.Module -> ModSummaries -> Maybe GHC.ModSummary
-lookupModSummary homeModule (ModSummaries modSummariesByModule) =
-  Map.lookup homeModule modSummariesByModule
-
 modSummariesToMap :: ModSummaries -> Map.Map GHC.Module GHC.ModSummary
 modSummariesToMap (ModSummaries modSummariesByModule) =
   modSummariesByModule
@@ -66,15 +60,5 @@ getCachedModSummariesByFile = do
     Map.fromList
       [ (normalise sourceFile, summary)
       | summary <- Map.elems modSummariesByModule,
-        sourceFile <- maybeToList (GHC.ml_hs_file (GHC.ms_location summary))
-      ]
-
-prepareFreshModSummariesByFile :: (MonadLore m) => m (Map.Map FilePath GHC.ModSummary)
-prepareFreshModSummariesByFile = do
-  moduleGraph <- GHC.depanal [] False
-  pure $
-    Map.fromList
-      [ (normalise sourceFile, summary)
-      | summary <- GHC.mgModSummaries moduleGraph,
         sourceFile <- maybeToList (GHC.ml_hs_file (GHC.ms_location summary))
       ]

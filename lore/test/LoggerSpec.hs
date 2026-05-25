@@ -7,8 +7,7 @@ import Control.Exception (bracket, evaluate)
 import Data.List (isInfixOf)
 import Data.Time (UTCTime (..), fromGregorian, secondsToDiffTime)
 import qualified GHC.IO.Handle as IO
-import Lore.Logger (LogLevel (..), LogMessage (..), prettyLoggerHandle, putLog)
-import Lore.Session (SessionConfig (..), defaultSessionConfig)
+import Lore.Logger (LogLevel (..), LogMessage (..), noLogHandle, prettyLoggerHandle, putLog)
 import System.Directory (removeFile)
 import System.IO (hClose, hFlush, openTempFile, stderr)
 import System.IO.Error (catchIOError)
@@ -30,7 +29,7 @@ spec =
     it "does not print logs by default" do
       stderrOutput <-
         captureStderr do
-          putLog defaultSessionConfig.loggerHandle warningMessage
+          putLog noLogHandle warningMessage
 
       stderrOutput `shouldBe` ""
 

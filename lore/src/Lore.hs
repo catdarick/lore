@@ -34,7 +34,6 @@ module Lore
     PathToRoot (..),
     findMatchingSymbols,
     findSimilarSymbols,
-    findMatchingSymbolsRoots,
     resolveModule,
     listSymbolsExportedByModule,
     filterExportedSymbolNodesByTypeHint,
@@ -44,7 +43,6 @@ module Lore
     listDirectInstances,
     resolveChosenClassInstanceFromTypeText,
     resolvePathToRoot,
-    mergePathsToRootOn,
     -- Source-first definition API.
     resolveDefinitionSourceNamed,
     resolveDefinitionClosureSourcesNamed,

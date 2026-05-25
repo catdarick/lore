@@ -4,14 +4,12 @@ module Lore.Internal.Definition.Types
   ( SpanKey (..),
     OccKey (..),
     srcSpanKey,
-    realSrcSpanKey,
     nameOccKey,
     occNameKey,
     rdrNameOccKey,
     DefinitionId (..),
     definitionIdFromSpans,
     dedupeExactNames,
-    dedupeNamesByOccName,
     DefinitionSlice (..),
     NamedDefinitionSource (..),
     DeclarationSpans (..),
@@ -64,10 +62,6 @@ srcSpanKey :: GHC.SrcSpan -> SpanKey
 srcSpanKey =
   SpanKey . T.pack . show
 
-realSrcSpanKey :: GHC.RealSrcSpan -> SpanKey
-realSrcSpanKey =
-  SpanKey . T.pack . show
-
 nameOccKey :: GHC.Name -> OccKey
 nameOccKey =
   occNameKey . GHC.nameOccName
@@ -104,10 +98,6 @@ dedupeExactNames =
     go seen (name : names)
       | Set.member name seen = go seen names
       | otherwise = name : go (Set.insert name seen) names
-
-dedupeNamesByOccName :: [GHC.Name] -> [GHC.Name]
-dedupeNamesByOccName =
-  Map.elems . Map.fromList . map (\name -> (nameOccKey name, name))
 
 data DefinitionSlice = DefinitionSlice
   { definitionModule :: !GHC.Module,

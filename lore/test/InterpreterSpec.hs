@@ -9,7 +9,7 @@ import qualified GHC
 import qualified GHC.Utils.Outputable as Outputable
 import Lore.Diagnostics (Diagnostic (..))
 import Lore.Interpreter (executeStatement, getTypeOfExpression)
-import Lore.Session (defaultSessionConfig)
+import Lore.Logger (noLogHandle)
 import qualified Lore.Session as Session
 import System.FilePath ((</>))
 import Test.Hspec
@@ -107,22 +107,13 @@ spec =
 sessionConfigWithCustomPrelude :: Maybe T.Text -> Session.SessionConfig
 sessionConfigWithCustomPrelude customPrelude =
   Session.SessionConfig
-    { Session.projectRoot = projectRoot,
-      Session.ghcWorkDir = ghcWorkDir,
-      Session.loggerHandle = loggerHandle,
+    { Session.projectRoot = ".",
+      Session.ghcWorkDir = ".lore-work",
+      Session.loggerHandle = noLogHandle,
       Session.customPrelude = customPrelude,
-      Session.parallelWorkersLimit = parallelWorkersLimit,
-      Session.isTestSuiteFunctionalityRequired = isTestSuiteFunctionalityRequired
+      Session.parallelWorkersLimit = Session.WorkersAsNumProcessors,
+      Session.isTestSuiteFunctionalityRequired = False
     }
-  where
-    Session.SessionConfig
-      { Session.projectRoot,
-        Session.ghcWorkDir,
-        Session.loggerHandle,
-        Session.customPrelude = _defaultCustomPrelude,
-        Session.parallelWorkersLimit,
-        Session.isTestSuiteFunctionalityRequired
-      } = defaultSessionConfig
 
 renderType :: GHC.Type -> String
 renderType =

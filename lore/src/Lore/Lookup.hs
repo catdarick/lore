@@ -20,22 +20,19 @@ module Lore.Lookup
     classifySymbolCategory,
     findMatchingSymbols,
     findSimilarSymbols,
-    findMatchingSymbolsRoots,
     lookupSymbolInfo,
     listIntersectingInstances,
     listAssociatedInstances,
     listDirectInstances,
     resolveChosenClassInstanceFromTypeText,
     resolvePathToRoot,
-    mergePathsToRootOn,
   )
 where
 
-import Control.Monad (filterM, forM)
-import Data.List (foldl', isInfixOf, sortOn)
+import Control.Monad (filterM)
+import Data.List (foldl', sortOn)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
 import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -51,7 +48,7 @@ import Lore.Internal.Lookup.InstanceResolution
     ChosenInstanceResolution (..),
     resolveChosenClassInstanceFromTypeText,
   )
-import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, extractAndNormalizeOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
+import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap, findSimilarSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
@@ -121,46 +118,6 @@ findSimilarSymbols suggestionLimit targetName = do
       | newSuggestion.suggestionScore < oldSuggestion.suggestionScore = oldSuggestion
       | otherwise = oldSuggestion
 
-findMatchingSymbolsRoots :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
-findMatchingSymbolsRoots targetName = do
-  symbolsMap <- SymbolsMap.getCachedSymbolsMap
-  matchingSymbols <-
-    filterSymbolsByOwnerHint
-      targetName.ownerHint
-      (findMatchingSymbolsInMap targetName symbolsMap)
-  pathsToRoot <- forM (Set.toList matchingSymbols) $ \symbol -> do
-    resolvePathToRoot symbol.name
-  dedupedRootNames <- dedupeRootNamesByNormalizedOcc (map getPathRoot pathsToRoot)
-  pure $ Set.fromList $ map (unsafeMkSymbolFromName symbolsMap) dedupedRootNames
-
-dedupeRootNamesByNormalizedOcc :: (MonadLore m) => [GHC.Name] -> m [GHC.Name]
-dedupeRootNamesByNormalizedOcc names =
-  concat <$> mapM pickPreferredName (Map.elems namesByNormalized)
-  where
-    namesByNormalized =
-      Map.fromListWith
-        (<>)
-        [ (normalizeName name, [name])
-        | name <- names
-        ]
-
-    pickPreferredName [] =
-      pure []
-    pickPreferredName namesForNormalizedOcc = do
-      categorizedNames <-
-        forM namesForNormalizedOcc $ \name -> do
-          maybeTyThing <- GHC.lookupName name
-          pure (name, maybe SymbolUnknown classifySymbolCategory maybeTyThing)
-      let nonValueNames =
-            [ name
-            | (name, category) <- categorizedNames,
-              category /= SymbolValue
-            ]
-      pure
-        case nonValueNames of
-          [] -> take 1 namesForNormalizedOcc
-          (preferredName : _) -> [preferredName]
-
 lookupSymbolInfo :: (MonadLore m) => GHC.Name -> m (Maybe SymbolInfo)
 lookupSymbolInfo name = do
   symbolsMap <- SymbolsMap.getCachedSymbolsMap
@@ -189,17 +146,6 @@ lookupSymbolInfo name = do
 getNameVisibility :: SymbolsMap -> GHC.Name -> SymbolVisibility
 getNameVisibility symbolsMap name = do
   maybe Symbol'Unexported (.visibility) (lookupSymbolInMap symbolsMap name)
-
-unsafeMkSymbolFromName :: SymbolsMap -> GHC.Name -> Symbol
-unsafeMkSymbolFromName symbolsMap name =
-  fromMaybe
-    ( Symbol
-        { name,
-          visibility = Symbol'Unexported,
-          aliases = Set.singleton (extractAndNormalizeOccName name)
-        }
-    )
-    (lookupSymbolInMap symbolsMap name)
 
 lookupSymbolInMap :: SymbolsMap -> GHC.Name -> Maybe Symbol
 lookupSymbolInMap symbolsMap name =
@@ -345,9 +291,6 @@ newtype PathToRoot a = PathToRoot
   }
   deriving newtype (Functor)
 
-getPathRoot :: PathToRoot a -> a
-getPathRoot = NE.last . unPathToRoot
-
 resolvePathToRoot :: (MonadLore m) => GHC.Name -> m (PathToRoot GHC.Name)
 resolvePathToRoot name = do
   maybeTyThing <- GHC.lookupName name
@@ -360,23 +303,3 @@ resolvePathToRoot name = do
   where
     collectRootTyThingChain tyThing =
       tyThing : maybe [] collectRootTyThingChain (GHC.tyThingParent_maybe tyThing)
-
-mergePathsToRootOn :: (Ord b) => (a -> b) -> [PathToRoot a] -> [PathToRoot a]
-mergePathsToRootOn getKey pathes =
-  let foo = [(getKey (getPathRoot path), path) | path <- pathes]
-      merged = Map.fromListWith mergePaths foo
-   in Map.elems merged
-  where
-    mergePaths nePath1 nePath2 =
-      let path1 = NE.toList (unPathToRoot nePath1)
-          path2 = NE.toList (unPathToRoot nePath2)
-          path1Keys = map getKey path1
-          path2Keys = map getKey path2
-       in if
-            | path1Keys `isInfixOf` path2Keys -> nePath2
-            | path2Keys `isInfixOf` path1Keys -> nePath1
-            | otherwise ->
-                let (primaryPath, secondaryPath) = if length path1 >= length path2 then (path1, path2) else (path2, path1)
-                    primaryPathKeys = map getKey primaryPath
-                    secondaryUniquePart = filter (\a -> getKey a `notElem` primaryPathKeys) secondaryPath
-                 in PathToRoot $ NE.fromList (secondaryUniquePart <> primaryPath)
