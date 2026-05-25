@@ -37,6 +37,7 @@ spec = do
       result `shouldNotContainText` "$fToSchema"
       result `shouldNotContainText` "$fIsFieldMetadata"
       result `shouldNotContainText` "$fIsExample"
+      result `shouldNotContainText` "$f"
       result `shouldNotContainText` "testMainHelper"
 
     it "supports module filtering" do

@@ -6,7 +6,7 @@ where
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.OpenApi (ToSchema)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -170,7 +170,8 @@ findDeadCodeHandler FindDeadCodeArgs {modules, skip} = do
                             deadCodeAliveModules = resolvedAliveModules,
                             deadCodeAliveNames = aliveRootNames
                           }
-                    let deadDefinitions = deadCodeResult.deadCodeDeadDefinitions
+                    let deadDefinitions =
+                          filterRenderableDeadDefinitions deadCodeResult.deadCodeDeadDefinitions
                         summaryLine = renderSummary deadCodeResult deadDefinitions
                         maybePage = paginateItems resolvedSkip maxResults deadDefinitions
                     case maybePage of
@@ -420,3 +421,23 @@ renderDeadCodeWarnings warnings =
     [ paragraph ("Warning: " <> warningText)
     | warningText <- warnings
     ]
+
+filterRenderableDeadDefinitions :: [DeadDefinition] -> [DeadDefinition]
+filterRenderableDeadDefinitions =
+  mapMaybe normalizeDeadDefinition
+
+normalizeDeadDefinition :: DeadDefinition -> Maybe DeadDefinition
+normalizeDeadDefinition deadDefinition =
+  let renderableNames =
+        Set.filter isRenderableDeadCodeName deadDefinition.deadDefinitionNames
+   in if Set.null renderableNames
+        then Nothing
+        else
+          Just
+            deadDefinition
+              { deadDefinitionNames = renderableNames
+              }
+
+isRenderableDeadCodeName :: GHC.Name -> Bool
+isRenderableDeadCodeName name =
+  not ("$" `T.isPrefixOf` renderSymbolName name)
