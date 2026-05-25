@@ -7,6 +7,7 @@ module Lore.Mcp.Tools.Shared.Source
     declarationSpansTitle,
     declarationSpansLineRange,
     definitionSourceRealSrcSpan,
+    definitionSourcePathFromCurrentDirectory,
     definitionSourcePath,
   )
 where
@@ -56,16 +57,27 @@ definitionSourceRealSrcSpan definitionSource =
 
 definitionSourcePath :: DefinitionSource -> IO Text
 definitionSourcePath definitionSource =
-  realSrcSpanPath (definitionSourceRealSrcSpan definitionSource)
+  do
+    currentDirectory <- getCurrentDirectory
+    pure (definitionSourcePathFromCurrentDirectory currentDirectory definitionSource)
+
+definitionSourcePathFromCurrentDirectory :: FilePath -> DefinitionSource -> Text
+definitionSourcePathFromCurrentDirectory currentDirectory definitionSource =
+  realSrcSpanPathFromCurrentDirectory currentDirectory (definitionSourceRealSrcSpan definitionSource)
 
 realSrcSpanPath :: Maybe GHC.RealSrcSpan -> IO Text
 realSrcSpanPath maybeSpan =
+  do
+    currentDirectory <- getCurrentDirectory
+    pure (realSrcSpanPathFromCurrentDirectory currentDirectory maybeSpan)
+
+realSrcSpanPathFromCurrentDirectory :: FilePath -> Maybe GHC.RealSrcSpan -> Text
+realSrcSpanPathFromCurrentDirectory currentDirectory maybeSpan =
   case maybeSpan of
     Nothing ->
-      pure "<definition source unavailable>"
-    Just realSrcSpan -> do
-      currentDirectory <- getCurrentDirectory
-      pure . T.pack $
+      "<definition source unavailable>"
+    Just realSrcSpan ->
+      T.pack $
         relativeSourcePath currentDirectory (Plugins.unpackFS (GHC.srcSpanFile realSrcSpan))
 
 declarationSpansRealSrcSpan :: DeclarationSpans -> Maybe GHC.RealSrcSpan

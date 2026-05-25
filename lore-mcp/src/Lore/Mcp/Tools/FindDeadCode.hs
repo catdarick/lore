@@ -45,7 +45,7 @@ import Lore.Mcp.Tools.Shared
     withLoadedSession,
   )
 import Lore.Mcp.Tools.Shared.Rendering (quoteText, renderModuleName, renderSymbolName)
-import Lore.Mcp.Tools.Shared.Source (declarationSpansLineRange, definitionSourcePath)
+import Lore.Mcp.Tools.Shared.Source (declarationSpansLineRange, definitionSourcePathFromCurrentDirectory)
 import Lore.Mcp.Tools.Shared.SymbolResolution
   ( ResolvedSymbolQuery (..),
     SymbolsResolved (resolvedQueries),
@@ -53,6 +53,7 @@ import Lore.Mcp.Tools.Shared.SymbolResolution
     resolveUniqueSymbolQueries,
     unresolvedSymbolQueriesMessage,
   )
+import System.Directory (getCurrentDirectory)
 
 data FindDeadCodeArgs (fieldType :: FieldType) = FindDeadCodeArgs
   { modules ::
@@ -171,7 +172,8 @@ findDeadCodeHandler FindDeadCodeArgs {modules, skip} = do
                           }
                     let deadDefinitions = deadCodeResult.deadCodeDeadDefinitions
                         summaryLine = renderSummary deadCodeResult deadDefinitions
-                    case paginateItems resolvedSkip maxResults deadDefinitions of
+                        maybePage = paginateItems resolvedSkip maxResults deadDefinitions
+                    case maybePage of
                       Nothing ->
                         pure $
                           FindDeadCodeReadyResult
@@ -330,15 +332,17 @@ renderDeadDefinitionPage ::
   Paginated DeadDefinition ->
   m (Paginated RenderedDeadDefinition)
 renderDeadDefinitionPage page = do
-  renderedItems <- mapM renderDeadDefinition page.paginatedItems
+  currentDirectory <- liftIO getCurrentDirectory
+  renderedItems <- mapM (renderDeadDefinition currentDirectory) page.paginatedItems
   pure
     page
       { paginatedItems = renderedItems
       }
 
-renderDeadDefinition :: (MonadLore m) => DeadDefinition -> m RenderedDeadDefinition
-renderDeadDefinition deadDefinition = do
-  renderedPath <- liftIO (definitionSourcePath deadDefinition.deadDefinitionSource)
+renderDeadDefinition :: (MonadLore m) => FilePath -> DeadDefinition -> m RenderedDeadDefinition
+renderDeadDefinition currentDirectory deadDefinition = do
+  let renderedPath =
+        definitionSourcePathFromCurrentDirectory currentDirectory deadDefinition.deadDefinitionSource
   let renderedModuleName =
         renderModuleName deadDefinition.deadDefinitionSource.definitionSourceModule
       renderedNames =

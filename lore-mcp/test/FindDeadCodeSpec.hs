@@ -78,12 +78,10 @@ spec = do
       result <-
         runFindDeadCodeFixture $
           J.object
-            [ "skip" J..= (0 :: Int),
-              "maxResults" J..= (1 :: Int)
+            [ "skip" J..= (1 :: Int)
             ]
-      result `shouldContainText` "Showing 1 of"
-      result `shouldContainText` "deadRoot"
-      result `shouldNotContainText` "deadDependency"
+      result `shouldContainText` "Showing 29 of"
+      result `shouldNotContainText` "DeadCode.Lib.deadRoot"
 
     it "renders warnings when entry modules cannot be resolved" do
       result <-

@@ -2,6 +2,7 @@ module Lore.Internal.HomeModules.EntryModules
   ( ComponentEntryModule (..),
     collectLoadedComponentEntryModules,
     collectLoadedComponentEntryModulesWithDiagnostics,
+    collectLoadedComponentModuleInfoWithDiagnostics,
     collectLoadedComponentModuleKinds,
     lookupGeneratedMainModulesByKey,
     resolveLoadedComponentEntryModule,
@@ -10,6 +11,7 @@ module Lore.Internal.HomeModules.EntryModules
 where
 
 import qualified Control.Concurrent.MVar as MVar
+import Control.DeepSeq (NFData (..))
 import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
@@ -41,12 +43,28 @@ data ComponentEntryModule = ComponentEntryModule
     entryModule :: GHC.Module
   }
 
+instance NFData ComponentEntryModule where
+  rnf ComponentEntryModule {entryPackageName, entryComponentName, entryComponentKind, entryOriginalMainPath, entryModule} =
+    rnf entryPackageName `seq`
+      rnf entryComponentName `seq`
+        rnf entryComponentKind `seq`
+          rnf entryOriginalMainPath `seq`
+            entryModule `seq`
+              ()
+
 collectLoadedComponentEntryModules :: (MonadLore m) => m [ComponentEntryModule]
 collectLoadedComponentEntryModules =
   fst <$> collectLoadedComponentEntryModulesWithDiagnostics
 
 collectLoadedComponentEntryModulesWithDiagnostics :: (MonadLore m) => m ([ComponentEntryModule], [String])
 collectLoadedComponentEntryModulesWithDiagnostics = do
+  (_, loadedEntryModules, entryResolutionErrors) <- collectLoadedComponentModuleInfoWithDiagnostics
+  pure (loadedEntryModules, entryResolutionErrors)
+
+collectLoadedComponentModuleInfoWithDiagnostics ::
+  (MonadLore m) =>
+  m (Map.Map GHC.Module (Set.Set ComponentKind), [ComponentEntryModule], [String])
+collectLoadedComponentModuleInfoWithDiagnostics = do
   packages <- prepareComponentsData
   generatedMainModulesByKey <- lookupGeneratedMainModulesByKey
   modSummariesByFile <- getCachedModSummariesByFile
@@ -56,6 +74,9 @@ collectLoadedComponentEntryModulesWithDiagnostics = do
         | pkg <- packages,
           component <- pkg.components
         ]
+  rootedComponentsWithSourceDirs <- forM rootedComponents \(packageName, packageRoot, component) -> do
+    resolvedSourceDirs <- resolveComponentSourceDirs packageRoot component
+    pure (packageName, packageRoot, component, resolvedSourceDirs)
   componentEntriesWithErrors <- forM rootedComponents \(packageName, packageRoot, component) ->
     resolveLoadedComponentEntryModule packageName packageRoot component generatedMainModulesByKey modSummariesByFile modSummariesByModule
   let entryResolutionErrors =
@@ -71,48 +92,30 @@ collectLoadedComponentEntryModulesWithDiagnostics = do
         [ entryModule
         | Right entryModule <- componentEntriesWithErrors
         ]
-  pure (loadedEntryModules, entryResolutionErrors)
+      namedModulePairsByComponent =
+        [ [ (module_, component.componentKind)
+          | (module_, modSummary) <- Map.toList modSummariesByModule,
+            let moduleName = GHC.moduleNameString (GHC.moduleName module_),
+            Set.member (GHC.mkModuleName moduleName) component.modules,
+            summaryBelongsToAnySourceDir modSummary resolvedSourceDirs
+          ]
+        | (_, _, component, resolvedSourceDirs) <- rootedComponentsWithSourceDirs
+        ]
+      entryPairsByComponent =
+        [ (entry.entryModule, entry.entryComponentKind)
+        | Right entry <- componentEntriesWithErrors
+        ]
+      moduleKindsByModule =
+        Map.fromListWith Set.union $
+          [ (module_, Set.singleton componentKind)
+          | (module_, componentKind) <- concat namedModulePairsByComponent <> entryPairsByComponent
+          ]
+  pure (moduleKindsByModule, loadedEntryModules, entryResolutionErrors)
 
 collectLoadedComponentModuleKinds :: (MonadLore m) => m (Map.Map GHC.Module (Set.Set ComponentKind))
 collectLoadedComponentModuleKinds = do
-  packages <- prepareComponentsData
-  generatedMainModulesByKey <- lookupGeneratedMainModulesByKey
-  modSummariesByFile <- getCachedModSummariesByFile
-  ModSummaries modSummariesByModule <- getCachedModSummaries
-  let rootedComponents =
-        [ (pkg.packageName, pkg.packageRoot, component)
-        | pkg <- packages,
-          component <- pkg.components
-        ]
-  namedModulePairsByComponent <- forM rootedComponents \(_, packageRoot, component) -> do
-    resolvedSourceDirs <- resolveComponentSourceDirs packageRoot component
-    pure $
-      [ (module_, component.componentKind)
-      | (module_, modSummary) <- Map.toList modSummariesByModule,
-        let moduleName = GHC.moduleNameString (GHC.moduleName module_),
-        Set.member (GHC.mkModuleName moduleName) component.modules,
-        summaryBelongsToAnySourceDir modSummary resolvedSourceDirs
-      ]
-  entryPairsByComponent <- forM rootedComponents \(packageName, packageRoot, component) -> do
-    eiEntry <-
-      resolveLoadedComponentEntryModule
-        packageName
-        packageRoot
-        component
-        generatedMainModulesByKey
-        modSummariesByFile
-        modSummariesByModule
-    pure $
-      case eiEntry of
-        Right entry ->
-          [(entry.entryModule, entry.entryComponentKind)]
-        Left _ ->
-          []
-  pure $
-    Map.fromListWith Set.union $
-      [ (module_, Set.singleton componentKind)
-      | (module_, componentKind) <- concat namedModulePairsByComponent <> concat entryPairsByComponent
-      ]
+  (moduleKindsByModule, _, _) <- collectLoadedComponentModuleInfoWithDiagnostics
+  pure moduleKindsByModule
 
 resolveLoadedComponentEntryModule ::
   (MonadLore m) =>

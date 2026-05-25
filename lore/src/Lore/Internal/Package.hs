@@ -16,6 +16,7 @@ module Lore.Internal.Package
   )
 where
 
+import Control.DeepSeq (NFData (..))
 import Control.Monad (forM, unless)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.RWS (asks)
@@ -53,6 +54,10 @@ data ComponentKind
   | ComponentKindTest
   | ComponentKindBenchmark
   deriving (Eq, Ord, Show)
+
+instance NFData ComponentKind where
+  rnf componentKind =
+    componentKind `seq` ()
 
 data PackageData = PackageData
   { packageYamlPath :: FilePath,

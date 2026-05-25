@@ -15,6 +15,9 @@ where
 import Data.Containers.ListUtils (nubOrd)
 import Data.Data (Data, Typeable, cast, gmapQ)
 import Data.Foldable (foldl')
+import qualified Data.Graph as Graph
+import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.List as List
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
@@ -27,6 +30,7 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
 import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.FieldLabel as GHC.FieldLabel
+import qualified GHC.Types.Unique as GHCUnique
 import Lore.Internal.Definition.SourceTree (collectModuleSourceRegionCandidates)
 import Lore.Internal.Definition.Types
 import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfoNamesWithFields, fieldLabelAliasText, greNameFieldAliasText)
@@ -300,62 +304,155 @@ buildUsedInstancesByBinder ::
   [GHC.CoreBind] ->
   Map.Map GHC.Name [GHC.Name]
 buildUsedInstancesByBinder interestingBinders interestingDependencyNames coreBinds =
-  Map.fromListWith (<>) $
-    concatMap bindingEntries coreBinds
+  Map.fromList
+    [ (binderName, semanticDependencies)
+    | (binderKey, (binderName, _)) <- IntMap.toList topLevelBindingsByKey,
+      IntSet.member binderKey interestingBinderKeys,
+      Just semanticDependencies <- [IntMap.lookup binderKey semanticDependenciesByKey],
+      not (null semanticDependencies)
+    ]
   where
-    topLevelBindingsByName =
-      collectTopLevelBindingsByName coreBinds
+    interestingBinderKeys =
+      IntSet.fromList (map nameUniqueKey (Set.toList interestingBinders))
 
-    topLevelBindingNames =
-      Map.keysSet topLevelBindingsByName
+    interestingDependencyKeys =
+      IntSet.fromList (map nameUniqueKey (Set.toList interestingDependencyNames))
 
-    keepEntry binderName instances =
-      [ (binderName, instances)
-      | Set.member binderName interestingBinders,
-        not (null instances)
-      ]
+    topLevelBindingsByKey =
+      collectTopLevelBindingsByKey coreBinds
 
-    collectSemanticDependencies binderName =
-      dedupeSemanticNamesExact $
-        collectExprUsedInstanceNames
-          interestingDependencyNames
-          topLevelBindingsByName
-          topLevelBindingNames
-          Set.empty
-          binderName
+    topLevelBindingKeys =
+      IntMap.keysSet topLevelBindingsByKey
 
-    bindingEntries = \case
-      GHC.NonRec binder _ ->
-        let instances =
-              collectSemanticDependencies (GHC.getName binder)
-         in keepEntry (GHC.getName binder) instances
-      GHC.Rec pairs ->
-        concat
-          [ keepEntry (GHC.getName binder) instances
-          | (binder, rhs) <- pairs,
-            let instances =
-                  case Map.lookup (GHC.getName binder) topLevelBindingsByName of
-                    Just _ ->
-                      collectSemanticDependencies (GHC.getName binder)
-                    Nothing ->
-                      dedupeSemanticNamesExact $
-                        collectExprUsedInstanceNamesInExpr
-                          interestingDependencyNames
-                          topLevelBindingsByName
-                          topLevelBindingNames
-                          Set.empty
-                          rhs
-          ]
+    directDependenciesByKey =
+      IntMap.map
+        (collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys . snd)
+        topLevelBindingsByKey
 
-collectTopLevelBindingsByName :: [GHC.CoreBind] -> Map.Map GHC.Name GHC.CoreExpr
-collectTopLevelBindingsByName =
-  Map.fromList . concatMap toEntries
+    semanticDependenciesByKey =
+      buildTransitiveCoreSemanticDependencies directDependenciesByKey
+
+buildTransitiveCoreSemanticDependencies ::
+  IntMap.IntMap CoreDirectDependencies ->
+  IntMap.IntMap [GHC.Name]
+buildTransitiveCoreSemanticDependencies directDependenciesByKey =
+  IntMap.fromList
+    [ (binderKey, componentSemanticDependencies)
+    | (componentId, componentKeys) <- IntMap.toList componentKeysByComponent,
+      let componentSemanticDependencies =
+            IntMap.findWithDefault [] componentId semanticDependenciesByComponent,
+      binderKey <- IntSet.toList componentKeys
+    ]
+  where
+    componentKeysByComponent =
+      IntMap.fromList
+        [ (componentId, IntSet.fromList componentKeys)
+        | (componentId, componentKeys) <- zip [0 ..] (map sccKeys dependencySccs)
+        ]
+
+    componentByKey =
+      IntMap.fromList
+        [ (binderKey, componentId)
+        | (componentId, componentKeys) <- IntMap.toList componentKeysByComponent,
+          binderKey <- IntSet.toList componentKeys
+        ]
+
+    dependencySccs =
+      Graph.stronglyConnComp
+        [ (binderKey, binderKey, coreDirectTopLevelBinderKeys directDependencies)
+        | (binderKey, directDependencies) <- IntMap.toList directDependenciesByKey
+        ]
+
+    componentDirectSemanticNames =
+      IntMap.map
+        ( \componentKeys ->
+            concat
+              [ coreDirectSemanticNames directDependencies
+              | binderKey <- IntSet.toList componentKeys,
+                Just directDependencies <- [IntMap.lookup binderKey directDependenciesByKey]
+              ]
+        )
+        componentKeysByComponent
+
+    componentDependencyComponents =
+      IntMap.mapWithKey
+        ( \componentId componentKeys ->
+            IntSet.fromList
+              [ dependencyComponentId
+              | binderKey <- IntSet.toList componentKeys,
+                Just directDependencies <- [IntMap.lookup binderKey directDependenciesByKey],
+                dependencyKey <- coreDirectTopLevelBinderKeys directDependencies,
+                Just dependencyComponentId <- [IntMap.lookup dependencyKey componentByKey],
+                dependencyComponentId /= componentId
+              ]
+        )
+        componentKeysByComponent
+
+    semanticDependenciesByComponent =
+      foldl'
+        addComponentSemanticDependencies
+        IntMap.empty
+        (IntMap.toAscList componentDirectSemanticNames)
+
+    addComponentSemanticDependencies accumulatedDependenciesByComponent (componentId, directSemanticNames) =
+      IntMap.insert
+        componentId
+        ( dedupeSemanticNamesByUnique $
+            directSemanticNames
+              <> concat
+                [ IntMap.findWithDefault [] dependencyComponentId accumulatedDependenciesByComponent
+                | dependencyComponentId <-
+                    IntSet.toList $
+                      IntMap.findWithDefault IntSet.empty componentId componentDependencyComponents
+                ]
+        )
+        accumulatedDependenciesByComponent
+
+sccKeys :: Graph.SCC Int -> [Int]
+sccKeys = \case
+  Graph.AcyclicSCC key ->
+    [key]
+  Graph.CyclicSCC keys ->
+    keys
+
+data CoreDirectDependencies = CoreDirectDependencies
+  { coreDirectSemanticNames :: [GHC.Name],
+    coreDirectTopLevelBinderKeys :: [Int]
+  }
+
+emptyCoreDirectDependencies :: CoreDirectDependencies
+emptyCoreDirectDependencies =
+  CoreDirectDependencies
+    { coreDirectSemanticNames = [],
+      coreDirectTopLevelBinderKeys = []
+    }
+
+appendCoreDirectDependencies :: CoreDirectDependencies -> CoreDirectDependencies -> CoreDirectDependencies
+appendCoreDirectDependencies left right =
+  CoreDirectDependencies
+    { coreDirectSemanticNames =
+        left.coreDirectSemanticNames <> right.coreDirectSemanticNames,
+      coreDirectTopLevelBinderKeys =
+        left.coreDirectTopLevelBinderKeys <> right.coreDirectTopLevelBinderKeys
+    }
+
+concatCoreDirectDependencies :: [CoreDirectDependencies] -> CoreDirectDependencies
+concatCoreDirectDependencies =
+  foldr appendCoreDirectDependencies emptyCoreDirectDependencies
+
+collectTopLevelBindingsByKey :: [GHC.CoreBind] -> IntMap.IntMap (GHC.Name, GHC.CoreExpr)
+collectTopLevelBindingsByKey =
+  IntMap.fromList . concatMap toEntries
   where
     toEntries = \case
       GHC.NonRec binder rhs ->
-        [(GHC.getName binder, rhs)]
+        let binderName = GHC.getName binder
+         in [(nameUniqueKey binderName, (binderName, rhs))]
       GHC.Rec pairs ->
-        [(GHC.getName binder, rhs) | (binder, rhs) <- pairs]
+        [ let binderName = GHC.getName binder
+           in (nameUniqueKey binderName, (binderName, rhs))
+        | (binder, rhs) <- pairs
+        ]
 
 collectDefinitionCandidateNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
 collectDefinitionCandidateNames homeModule tcg =
@@ -499,108 +596,71 @@ data OccurrenceSeed = OccurrenceSeed
     occurrenceSeedGres :: ![GHC.GlobalRdrElt]
   }
 
-collectExprUsedInstanceNames ::
-  Set.Set GHC.Name ->
-  Map.Map GHC.Name GHC.CoreExpr ->
-  Set.Set GHC.Name ->
-  Set.Set GHC.Name ->
-  GHC.Name ->
-  [GHC.Name]
-collectExprUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames binderName
-  | Set.member binderName visitedBinderNames =
-      []
-  | otherwise =
-      case Map.lookup binderName topLevelBindingsByName of
-        Nothing ->
-          []
-        Just rhs ->
-          collectExprUsedInstanceNamesInExpr
-            interestingDependencyNames
-            topLevelBindingsByName
-            topLevelBindingNames
-            (Set.insert binderName visitedBinderNames)
-            rhs
-
-collectExprUsedInstanceNamesInExpr ::
-  Set.Set GHC.Name ->
-  Map.Map GHC.Name GHC.CoreExpr ->
-  Set.Set GHC.Name ->
-  Set.Set GHC.Name ->
+collectDirectCoreDependenciesInExpr ::
+  IntSet.IntSet ->
+  IntSet.IntSet ->
   GHC.CoreExpr ->
-  [GHC.Name]
-collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames = \case
+  CoreDirectDependencies
+collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys = \case
   GHC.Var variable ->
     let variableName = GHC.getName variable
-        semanticDependencyNames =
+        variableKey = nameUniqueKey variableName
+        semanticDependencies =
           [ variableName
-          | GHC.isDFunId variable || Set.member variableName interestingDependencyNames
+          | GHC.isDFunId variable || IntSet.member variableKey interestingDependencyKeys
           ]
-        transitiveTopLevelDependencies =
-          [ dependencyName
-          | Set.member variableName topLevelBindingNames,
-            dependencyName <-
-              collectExprUsedInstanceNames
-                interestingDependencyNames
-                topLevelBindingsByName
-                topLevelBindingNames
-                visitedBinderNames
-                variableName
+        topLevelDependencies =
+          [ variableKey
+          | IntSet.member variableKey topLevelBindingKeys
           ]
-     in semanticDependencyNames <> transitiveTopLevelDependencies
+     in CoreDirectDependencies
+          { coreDirectSemanticNames = semanticDependencies,
+            coreDirectTopLevelBinderKeys = topLevelDependencies
+          }
   GHC.Lit _ ->
-    []
+    emptyCoreDirectDependencies
   GHC.App function argument ->
-    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames function
-      <> collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames argument
+    collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys function
+      `appendCoreDirectDependencies` collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys argument
   GHC.Lam _ body ->
-    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames body
+    collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys body
   GHC.Let binding body ->
-    collectBindUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames binding
-      <> collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames body
+    collectDirectCoreDependenciesInBind interestingDependencyKeys topLevelBindingKeys binding
+      `appendCoreDirectDependencies` collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys body
   GHC.Case scrutinee _ _ alternatives ->
-    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames scrutinee
-      <> concatMap
-        (collectAltUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames)
-        alternatives
+    collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys scrutinee
+      `appendCoreDirectDependencies` concatCoreDirectDependencies
+        (map (collectDirectCoreDependenciesInAlt interestingDependencyKeys topLevelBindingKeys) alternatives)
   GHC.Cast expression _ ->
-    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames expression
+    collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys expression
   GHC.Tick _ expression ->
-    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames expression
+    collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys expression
   GHC.Type _ ->
-    []
+    emptyCoreDirectDependencies
   GHC.Coercion _ ->
-    []
+    emptyCoreDirectDependencies
 
-collectBindUsedInstanceNames ::
-  Set.Set GHC.Name ->
-  Map.Map GHC.Name GHC.CoreExpr ->
-  Set.Set GHC.Name ->
-  Set.Set GHC.Name ->
+collectDirectCoreDependenciesInBind ::
+  IntSet.IntSet ->
+  IntSet.IntSet ->
   GHC.CoreBind ->
-  [GHC.Name]
-collectBindUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames = \case
+  CoreDirectDependencies
+collectDirectCoreDependenciesInBind interestingDependencyKeys topLevelBindingKeys = \case
   GHC.NonRec _ rhs ->
-    collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames rhs
+    collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys rhs
   GHC.Rec bindings ->
-    concatMap
-      ( collectExprUsedInstanceNamesInExpr
-          interestingDependencyNames
-          topLevelBindingsByName
-          topLevelBindingNames
-          visitedBinderNames
-          . snd
-      )
-      bindings
+    concatCoreDirectDependencies
+      [ collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys rhs
+      | (_, rhs) <- bindings
+      ]
 
-collectAltUsedInstanceNames ::
-  Set.Set GHC.Name ->
-  Map.Map GHC.Name GHC.CoreExpr ->
-  Set.Set GHC.Name ->
-  Set.Set GHC.Name ->
+collectDirectCoreDependenciesInAlt ::
+  IntSet.IntSet ->
+  IntSet.IntSet ->
   GHC.CoreAlt ->
-  [GHC.Name]
-collectAltUsedInstanceNames interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames (GHC.Alt _ _ expression) =
-  collectExprUsedInstanceNamesInExpr interestingDependencyNames topLevelBindingsByName topLevelBindingNames visitedBinderNames expression
+  CoreDirectDependencies
+collectDirectCoreDependenciesInAlt interestingDependencyKeys topLevelBindingKeys (GHC.Alt _ _ expression) =
+  collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys expression
 
 dotFieldLabelRdrNamePs :: GHC.DotFieldOcc GHC.GhcPs -> GHC.RdrName
 dotFieldLabelRdrNamePs dotFieldOccurrence =
@@ -1052,9 +1112,24 @@ dedupeMinimalTypedOccurrences =
         && left.typedOccurrenceSpan == right.typedOccurrenceSpan
         && left.typedOccurrenceParent == right.typedOccurrenceParent
 
-dedupeSemanticNamesExact :: [GHC.Name] -> [GHC.Name]
-dedupeSemanticNamesExact =
-  dedupeExactNames
+dedupeSemanticNamesByUnique :: [GHC.Name] -> [GHC.Name]
+dedupeSemanticNamesByUnique =
+  go IntSet.empty
+  where
+    go _ [] =
+      []
+    go seenKeys (name : names)
+      | IntSet.member nameKey seenKeys =
+          go seenKeys names
+      | otherwise =
+          name : go (IntSet.insert nameKey seenKeys) names
+      where
+        nameKey =
+          nameUniqueKey name
+
+nameUniqueKey :: GHC.Name -> Int
+nameUniqueKey =
+  GHCUnique.getKey . GHC.getUnique
 
 spanWithin :: [GHC.SrcSpan] -> GHC.SrcSpan -> Bool
 spanWithin targetSpans span' =

@@ -6,29 +6,47 @@ module Lore.Internal.DeadCode
   )
 where
 
+import Control.DeepSeq (NFData (..))
+import Control.Exception (evaluate)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Foldable (foldl')
+import qualified Data.IntMap.Strict as IntMap
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (maybeToList)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.Conc (getNumCapabilities)
+import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
-import Lore.Internal.Definition.Cache.DefinitionModuleIndex (getCachedDefinitionModuleIndexes)
+import qualified GHC.Types.Unique as GHCUnique
+import Lore.Internal.Definition.Analysis
+  ( buildDefinitionBindings,
+  )
+import Lore.Internal.Definition.Cache.ModuleArtifacts
+  ( DefinitionModuleArtifacts (..),
+    lookupDefinitionModuleArtifactsForModules,
+  )
 import Lore.Internal.Definition.Types
   ( DeclarationSpans (..),
-    DefinitionDependencies (..),
+    DefinitionBindings (..),
     DefinitionId,
-    DefinitionModuleIndex (..),
     DefinitionSource (..),
+    MinimalCoreModuleFacts (..),
+    MinimalTypedModuleFacts (..),
+    MinimalTypedOccurrence (..),
   )
 import Lore.Internal.HomeModules.EntryModules
   ( ComponentEntryModule (..),
-    collectLoadedComponentEntryModulesWithDiagnostics,
-    collectLoadedComponentModuleKinds,
+    collectLoadedComponentModuleInfoWithDiagnostics,
   )
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries, modSummariesToMap)
 import Lore.Internal.Package (ComponentKind (..))
 import Lore.Monad (MonadLore)
 import Lore.SourceSpan (realSrcSpanFromSrcSpan)
+import UnliftIO (evaluateDeep)
+import qualified UnliftIO.Async as Async
 
 data DeadCodeOptions = DeadCodeOptions
   { deadCodeTargetModules :: Maybe (Set.Set GHC.Module),
@@ -40,6 +58,7 @@ data DeadDefinition = DeadDefinition
   { deadDefinitionSource :: DefinitionSource,
     deadDefinitionNames :: Set.Set GHC.Name
   }
+  deriving stock (Eq, Generic)
 
 data DeadCodeResult = DeadCodeResult
   { deadCodeTotalDefinitions :: Int,
@@ -47,27 +66,54 @@ data DeadCodeResult = DeadCodeResult
     deadCodeDeadDefinitions :: [DeadDefinition],
     deadCodeWarnings :: [Text]
   }
+  deriving stock (Eq, Generic)
 
 data ProjectDefinitionIndex = ProjectDefinitionIndex
   { projectDefinitionsById :: Map.Map DefinitionId DefinitionSource,
     projectDefinitionIdByName :: Map.Map GHC.Name DefinitionId,
-    projectDependenciesById :: Map.Map DefinitionId DefinitionDependencies
+    projectDependenciesById :: Map.Map DefinitionId ProjectDependencyNames
   }
+  deriving stock (Eq, Generic)
+
+data ProjectDependencyNames = ProjectDependencyNames
+  { projectDependencyDirectReferenceNames :: !(Set.Set GHC.Name),
+    projectDependencyCoreSemanticNames :: ![GHC.Name]
+  }
+  deriving stock (Eq, Generic)
+
+instance NFData DeadDefinition where
+  rnf DeadDefinition {deadDefinitionSource, deadDefinitionNames} =
+    rnf deadDefinitionSource `seq`
+      rnf deadDefinitionNames
+
+instance NFData DeadCodeResult where
+  rnf DeadCodeResult {deadCodeTotalDefinitions, deadCodeAliveDefinitions, deadCodeDeadDefinitions, deadCodeWarnings} =
+    rnf deadCodeTotalDefinitions `seq`
+      rnf deadCodeAliveDefinitions `seq`
+        rnf deadCodeDeadDefinitions `seq`
+          rnf deadCodeWarnings
+
+instance NFData ProjectDefinitionIndex where
+  rnf ProjectDefinitionIndex {projectDefinitionsById, projectDefinitionIdByName, projectDependenciesById} =
+    Map.size projectDefinitionsById `seq`
+      Map.size projectDefinitionIdByName `seq`
+        Map.size projectDependenciesById `seq`
+          ()
+
+instance NFData ProjectDependencyNames where
+  rnf dependencies =
+    projectDependencyWeight dependencies `seq` ()
 
 findDeadCode :: (MonadLore m) => DeadCodeOptions -> m DeadCodeResult
 findDeadCode options = do
   projectIndex <- loadProjectDefinitionIndex
-  moduleKindsByModule <- collectLoadedComponentModuleKinds
-  (componentEntries, entryModuleDiagnostics) <- collectLoadedComponentEntryModulesWithDiagnostics
-  let dependencyGraph =
-        buildDependencyGraph projectIndex
-      nonTestMainRoots =
-        collectMainRootsForKind projectIndex componentEntries componentIsNonTestRoot
-      testMainRoots =
-        collectMainRootsForKind projectIndex componentEntries componentIsTestRoot
+  (moduleKindsByModule, componentEntries, entryModuleDiagnostics) <-
+    collectLoadedComponentModuleInfoWithDiagnostics
+  dependencyGraph <- buildDependencyGraph projectIndex
+  let (nonTestMainRoots, testMainRoots) =
+        collectMainRootsByKind projectIndex componentEntries
       aliveOptionRoots =
-        aliveModuleRoots options projectIndex
-          <> aliveNameRoots options projectIndex
+        aliveModuleRoots options projectIndex <> aliveNameRoots options projectIndex
       reachableFromNonTestRoots =
         reachableDefinitions dependencyGraph (nonTestMainRoots <> aliveOptionRoots)
       reachableFromTestRoots =
@@ -86,106 +132,336 @@ findDeadCode options = do
           ]
       allDefinitionIds =
         Map.keysSet projectIndex.projectDefinitionsById
-      deadDefinitionIds =
-        allDefinitionIds `Set.difference` aliveDefinitionIds
       deadDefinitions =
-        sortOn deadDefinitionSortKey $
-          [ DeadDefinition
-              { deadDefinitionSource = source,
-                deadDefinitionNames = source.definitionSourceNames
-              }
-          | definitionId <- Set.toList deadDefinitionIds,
-            Just source <- [Map.lookup definitionId projectIndex.projectDefinitionsById],
-            isReportableDefinition source
-          ]
-  pure
-    DeadCodeResult
-      { deadCodeTotalDefinitions = Set.size allDefinitionIds,
-        deadCodeAliveDefinitions = Set.size aliveDefinitionIds,
-        deadCodeDeadDefinitions = deadDefinitions,
-        deadCodeWarnings = map T.pack entryModuleDiagnostics
-      }
-  where
-    isReportableDefinition source =
-      case options.deadCodeTargetModules of
-        Nothing ->
-          True
-        Just targetModules ->
-          source.definitionSourceModule `Set.member` targetModules
+        collectDeadDefinitions options projectIndex aliveDefinitionIds
+  let result =
+        DeadCodeResult
+          { deadCodeTotalDefinitions = Set.size allDefinitionIds,
+            deadCodeAliveDefinitions = Set.size aliveDefinitionIds,
+            deadCodeDeadDefinitions = deadDefinitions,
+            deadCodeWarnings = map T.pack entryModuleDiagnostics
+          }
+  evaluateDeep result
+
+forceProjectDefinitionIndex :: (MonadIO m) => ProjectDefinitionIndex -> m ProjectDefinitionIndex
+forceProjectDefinitionIndex projectIndex = do
+  forceDefinitionSourceMap projectIndex.projectDefinitionsById
+  forceDefinitionIdMap projectIndex.projectDefinitionIdByName
+  _ <- forceDependenciesById projectIndex.projectDependenciesById
+  pure projectIndex
+
+forceDefinitionBindings :: (MonadIO m) => DefinitionBindings -> m DefinitionBindings
+forceDefinitionBindings bindings = do
+  forceDefinitionSourceMap bindings.bindingDefinitionsById
+  forceDefinitionIdMap bindings.bindingDefinitionIdByName
+  pure bindings
+
+forceDefinitionSourceMap :: (MonadIO m) => Map.Map DefinitionId DefinitionSource -> m ()
+forceDefinitionSourceMap definitionsById = do
+  _ <-
+    liftIO $
+      evaluate $
+        Map.size definitionsById
+          + foldl'
+            ( \total source ->
+                total
+                  + Set.size source.definitionSourceNames
+            )
+            0
+            (Map.elems definitionsById)
+  pure ()
+
+forceDefinitionIdMap :: (MonadIO m) => Map.Map GHC.Name DefinitionId -> m ()
+forceDefinitionIdMap definitionIdByName =
+  liftIO (evaluate (Map.size definitionIdByName)) >> pure ()
+
+forceDependenciesById :: (MonadIO m) => Map.Map DefinitionId ProjectDependencyNames -> m (Map.Map DefinitionId ProjectDependencyNames)
+forceDependenciesById dependenciesById = do
+  _ <-
+    liftIO $
+      evaluate $
+        Map.size dependenciesById
+          + foldl'
+            ( \total dependencies ->
+                total + projectDependencyWeight dependencies
+            )
+            0
+            (Map.elems dependenciesById)
+  pure dependenciesById
+
+projectDependencyWeight :: ProjectDependencyNames -> Int
+projectDependencyWeight dependencies =
+  Set.size dependencies.projectDependencyDirectReferenceNames
+    + length dependencies.projectDependencyCoreSemanticNames
 
 loadProjectDefinitionIndex :: (MonadLore m) => m ProjectDefinitionIndex
 loadProjectDefinitionIndex = do
   modSummaries <- getCachedModSummaries
-  let modSummariesByModule =
-        modSummariesToMap modSummaries
-      homeModules =
-        Map.keys modSummariesByModule
+  capabilityCount <- liftIO getNumCapabilities
+  let homeModules =
+        Map.keys (modSummariesToMap modSummaries)
+      workerCount =
+        max 1 capabilityCount
+  artifactsByModule <- lookupDefinitionModuleArtifactsForModules homeModules
   moduleIndexes <-
-    getCachedDefinitionModuleIndexes
-      modSummariesByModule
-      homeModules
-  pure
-    ProjectDefinitionIndex
-      { projectDefinitionsById =
-          Map.unions (map (.definitionsById) moduleIndexes),
-        projectDefinitionIdByName =
-          Map.unions (map (.definitionIdByName) moduleIndexes),
-        projectDependenciesById =
-          Map.unions (map (.dependenciesById) moduleIndexes)
-      }
+    Async.pooledMapConcurrentlyN
+      workerCount
+      (uncurry buildProjectIndexForModule)
+      (Map.toList artifactsByModule)
+  let mergedIndex =
+        ProjectDefinitionIndex
+          { projectDefinitionsById =
+              Map.unions (map projectDefinitionsById moduleIndexes),
+            projectDefinitionIdByName =
+              Map.unions (map projectDefinitionIdByName moduleIndexes),
+            projectDependenciesById =
+              Map.unions (map projectDependenciesById moduleIndexes)
+          }
+  forceProjectDefinitionIndex mergedIndex
+
+buildProjectIndexForModule ::
+  (MonadLore m) =>
+  GHC.Module ->
+  DefinitionModuleArtifacts ->
+  m ProjectDefinitionIndex
+buildProjectIndexForModule homeModule DefinitionModuleArtifacts {definitionArtifactParsedFacts, definitionArtifactTypedFacts, definitionArtifactCoreFacts} = do
+  let bindings =
+        buildDefinitionBindings homeModule definitionArtifactParsedFacts definitionArtifactTypedFacts
+  forcedBindings <- forceDefinitionBindings bindings
+  let directReferencesById =
+        collectDirectReferencesByDefinitionId
+          forcedBindings
+          forcedBindings.bindingDefinitionsById
+          definitionArtifactTypedFacts.typedOccurrences
+  let dependenciesById =
+        buildDeadCodeDependenciesFromDirectRefs
+          forcedBindings
+          definitionArtifactCoreFacts
+          directReferencesById
+  let projectIndex =
+        ProjectDefinitionIndex
+          { projectDefinitionsById = forcedBindings.bindingDefinitionsById,
+            projectDefinitionIdByName = forcedBindings.bindingDefinitionIdByName,
+            projectDependenciesById = dependenciesById
+          }
+  forceProjectDefinitionIndex projectIndex
+
+buildDeadCodeDependenciesFromDirectRefs ::
+  DefinitionBindings ->
+  Maybe MinimalCoreModuleFacts ->
+  Map.Map DefinitionId (Set.Set GHC.Name) ->
+  Map.Map DefinitionId ProjectDependencyNames
+buildDeadCodeDependenciesFromDirectRefs bindings maybeCoreFacts directReferencesById =
+  Map.fromList
+    [ (definitionId, dependenciesForDefinition definitionId source)
+    | (definitionId, source) <- Map.toList bindings.bindingDefinitionsById
+    ]
+  where
+    coreUsedInstancesByBinder =
+      IntMap.fromListWith
+        (<>)
+        [ (nameUniqueKey binderName, instanceNames)
+        | (binderName, instanceNames) <-
+            Map.toList (maybe Map.empty (.coreUsedInstancesByBinder) maybeCoreFacts)
+        ]
+
+    dependenciesForDefinition definitionId source =
+      ProjectDependencyNames
+        { projectDependencyDirectReferenceNames =
+            Map.findWithDefault Set.empty definitionId directReferencesById,
+          projectDependencyCoreSemanticNames =
+            [ instanceName
+            | definitionName <- Set.toList source.definitionSourceNames,
+              instanceName <- IntMap.findWithDefault [] (nameUniqueKey definitionName) coreUsedInstancesByBinder
+            ]
+        }
+
+collectDirectReferencesByDefinitionId ::
+  DefinitionBindings ->
+  Map.Map DefinitionId DefinitionSource ->
+  [MinimalTypedOccurrence] ->
+  Map.Map DefinitionId (Set.Set GHC.Name)
+collectDirectReferencesByDefinitionId bindings definitionsById typedOccurrences =
+  foldl'
+    addOccurrenceReference
+    (Map.fromSet (const Set.empty) (Map.keysSet definitionsById))
+    typedOccurrences
+  where
+    addOccurrenceReference referencesById occurrence =
+      case resolveOccurrenceOwnerId occurrence of
+        Just definitionId
+          | Just source <- Map.lookup definitionId definitionsById,
+            isFollowableReference source.definitionSourceNames source.definitionSourceSpans occurrence.typedOccurrenceName ->
+              Map.adjust (Set.insert occurrence.typedOccurrenceName) definitionId referencesById
+        _ ->
+          referencesById
+
+    resolveOccurrenceOwnerId occurrence =
+      case occurrence.typedOccurrenceParent >>= (`Map.lookup` bindings.bindingDefinitionIdByName) of
+        Just definitionId ->
+          Just definitionId
+        Nothing ->
+          resolveOwnerIdBySpan occurrence.typedOccurrenceSpan
+
+    definitionSpansById =
+      [ (definitionId, declarationTargetSpans source.definitionSourceSpans)
+      | (definitionId, source) <- Map.toList definitionsById
+      ]
+
+    resolveOwnerIdBySpan occurrenceSpan =
+      case [ definitionId
+           | (definitionId, targetSpans) <- definitionSpansById,
+             spanWithin targetSpans occurrenceSpan
+           ] of
+        (definitionId : _) ->
+          Just definitionId
+        [] ->
+          Nothing
+
+declarationTargetSpans :: DeclarationSpans -> [GHC.SrcSpan]
+declarationTargetSpans declarationSpans =
+  declarationSpans.declarationSpan
+    : maybeToList declarationSpans.signatureSpan
+
+spanWithin :: [GHC.SrcSpan] -> GHC.SrcSpan -> Bool
+spanWithin targetSpans span' =
+  any (span' `GHC.isSubspanOf`) targetSpans
+
+isFollowableReference :: Set.Set GHC.Name -> DeclarationSpans -> GHC.Name -> Bool
+isFollowableReference definitionNames spans name =
+  Set.notMember name definitionNames
+    && case GHC.nameModule_maybe name of
+      Nothing -> False
+      Just definingModule ->
+        not (definesName spans.declarationSpan definingModule name)
+
+definesName :: GHC.SrcSpan -> GHC.Module -> GHC.Name -> Bool
+definesName declarationSpan definingModule name =
+  GHC.nameModule_maybe name == Just definingModule
+    && GHC.nameSrcSpan name `GHC.isSubspanOf` declarationSpan
 
 buildDependencyGraph ::
+  (MonadLore m) =>
   ProjectDefinitionIndex ->
-  Map.Map DefinitionId (Set.Set DefinitionId)
-buildDependencyGraph projectIndex =
-  Map.unionWith Set.union emptyGraph resolvedGraph
+  m (Map.Map DefinitionId (Set.Set DefinitionId))
+buildDependencyGraph projectIndex = do
+  let dependencyItems =
+        Map.toList projectIndex.projectDependenciesById
+      dependencyCount =
+        length dependencyItems
+      definitionIdByUnique =
+        IntMap.fromList
+          [ (nameUniqueKey name, definitionId)
+          | (name, definitionId) <- Map.toList projectIndex.projectDefinitionIdByName
+          ]
+      workerCount =
+        8
+      chunkSize =
+        max 128 (dependencyCount `div` (workerCount * 8) + 1)
+      dependencyChunks =
+        chunkList chunkSize dependencyItems
+  resolvedChunks <-
+    Async.pooledMapConcurrentlyN workerCount (resolveChunk definitionIdByUnique) dependencyChunks
+  let graph =
+        Map.fromList (concat resolvedChunks)
+  evaluateDeep graph
+
+resolveChunk ::
+  (MonadLore m) =>
+  IntMap.IntMap DefinitionId ->
+  [(DefinitionId, ProjectDependencyNames)] ->
+  m [(DefinitionId, Set.Set DefinitionId)]
+resolveChunk definitionIdByUnique dependencyChunk =
+  mapM resolveDependencyItem dependencyChunk
   where
-    emptyGraph =
-      Map.fromSet (const Set.empty) (Map.keysSet projectIndex.projectDefinitionsById)
+    resolveDependencyItem (definitionId, dependencies) = do
+      let resolvedDependencies = resolveDependencies definitionIdByUnique dependencies
+          resolvedEntry = (definitionId, resolvedDependencies)
+      evaluateDeep resolvedEntry
 
-    resolvedGraph =
-      Map.map resolveDependencies projectIndex.projectDependenciesById
+resolveDependencies ::
+  IntMap.IntMap DefinitionId ->
+  ProjectDependencyNames ->
+  Set.Set DefinitionId
+resolveDependencies definitionIdByUnique dependencies =
+  foldCoreDependencyNames
+    (foldDirectDependencyNames Set.empty dependencies.projectDependencyDirectReferenceNames)
+    dependencies.projectDependencyCoreSemanticNames
+  where
+    foldDirectDependencyNames initial names =
+      Set.foldl'
+        ( \resolvedDependencyIds dependencyName ->
+            case IntMap.lookup (nameUniqueKey dependencyName) definitionIdByUnique of
+              Just dependencyId ->
+                Set.insert dependencyId resolvedDependencyIds
+              Nothing ->
+                resolvedDependencyIds
+        )
+        initial
+        names
 
-    resolveDependencies dependencies =
-      Set.fromList
-        [ dependencyId
-        | dependencyName <- Set.toList dependencyNames,
-          Just dependencyId <- [Map.lookup dependencyName projectIndex.projectDefinitionIdByName]
-        ]
-      where
-        dependencyNames =
-          dependencies.dependencyDirectReferenceNames
-            <> dependencies.dependencyUsedInstanceNames
+    foldCoreDependencyNames =
+      foldl'
+        ( \resolvedDependencyIds dependencyName ->
+            case IntMap.lookup (nameUniqueKey dependencyName) definitionIdByUnique of
+              Just dependencyId ->
+                Set.insert dependencyId resolvedDependencyIds
+              Nothing ->
+                resolvedDependencyIds
+        )
 
-collectMainRootsForKind ::
+nameUniqueKey :: GHC.Name -> Int
+nameUniqueKey =
+  GHCUnique.getKey . GHC.getUnique
+
+chunkList :: Int -> [a] -> [[a]]
+chunkList chunkSize xs
+  | chunkSize <= 0 =
+      [xs]
+  | otherwise =
+      go xs
+  where
+    go [] =
+      []
+    go remaining =
+      let (chunk, rest) = splitAt chunkSize remaining
+       in chunk : go rest
+
+collectMainRootsByKind ::
   ProjectDefinitionIndex ->
   [ComponentEntryModule] ->
-  (ComponentKind -> Bool) ->
-  Set.Set DefinitionId
-collectMainRootsForKind projectIndex componentEntries isRootComponentKind =
-  Set.unions
-    [ definitionIdsForModuleMain projectIndex entryModule
-    | ComponentEntryModule {entryComponentKind, entryModule} <- componentEntries,
-      isRootComponentKind entryComponentKind
+  (Set.Set DefinitionId, Set.Set DefinitionId)
+collectMainRootsByKind projectIndex componentEntries =
+  foldr collectRoots (Set.empty, Set.empty) componentEntries
+  where
+    mainDefinitionIdsByModule =
+      buildMainDefinitionIdsByModule projectIndex
+
+    collectRoots ComponentEntryModule {entryComponentKind, entryModule} (nonTestRoots, testRoots) =
+      let mainRootIds =
+            Map.findWithDefault Set.empty entryModule mainDefinitionIdsByModule
+       in case entryComponentKind of
+            ComponentKindTest ->
+              (nonTestRoots, testRoots <> mainRootIds)
+            ComponentKindExecutable ->
+              (nonTestRoots <> mainRootIds, testRoots)
+            ComponentKindBenchmark ->
+              (nonTestRoots <> mainRootIds, testRoots)
+            ComponentKindLibrary ->
+              (nonTestRoots, testRoots)
+            ComponentKindInternalLibrary ->
+              (nonTestRoots, testRoots)
+
+buildMainDefinitionIdsByModule ::
+  ProjectDefinitionIndex ->
+  Map.Map GHC.Module (Set.Set DefinitionId)
+buildMainDefinitionIdsByModule projectIndex =
+  Map.fromListWith
+    Set.union
+    [ (source.definitionSourceModule, Set.singleton definitionId)
+    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionsById,
+      any ((== "main") . GHC.getOccString) (Set.toList source.definitionSourceNames)
     ]
-
-componentIsNonTestRoot :: ComponentKind -> Bool
-componentIsNonTestRoot componentKind =
-  case componentKind of
-    ComponentKindExecutable -> True
-    ComponentKindBenchmark -> True
-    ComponentKindTest -> False
-    ComponentKindLibrary -> False
-    ComponentKindInternalLibrary -> False
-
-componentIsTestRoot :: ComponentKind -> Bool
-componentIsTestRoot componentKind =
-  case componentKind of
-    ComponentKindTest -> True
-    ComponentKindExecutable -> False
-    ComponentKindBenchmark -> False
-    ComponentKindLibrary -> False
-    ComponentKindInternalLibrary -> False
 
 isTestOnlyComponentModule :: Set.Set ComponentKind -> Bool
 isTestOnlyComponentModule componentKinds =
@@ -206,18 +482,6 @@ definitionIsAlive testOnlyModules definitionSource definitionId reachableFromNon
   if definitionSource.definitionSourceModule `Set.member` testOnlyModules
     then definitionId `Set.member` reachableFromTestRoots
     else definitionId `Set.member` reachableFromNonTestRoots
-
-definitionIdsForModuleMain ::
-  ProjectDefinitionIndex ->
-  GHC.Module ->
-  Set.Set DefinitionId
-definitionIdsForModuleMain projectIndex module_ =
-  Set.fromList
-    [ definitionId
-    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionsById,
-      source.definitionSourceModule == module_,
-      any ((== "main") . GHC.getOccString) (Set.toList source.definitionSourceNames)
-    ]
 
 aliveModuleRoots ::
   DeadCodeOptions ->
@@ -240,6 +504,29 @@ aliveNameRoots options projectIndex =
     | name <- Set.toList options.deadCodeAliveNames,
       Just definitionId <- [Map.lookup name projectIndex.projectDefinitionIdByName]
     ]
+
+collectDeadDefinitions ::
+  DeadCodeOptions ->
+  ProjectDefinitionIndex ->
+  Set.Set DefinitionId ->
+  [DeadDefinition]
+collectDeadDefinitions options projectIndex aliveDefinitionIds =
+  sortOn deadDefinitionSortKey $
+    [ DeadDefinition
+        { deadDefinitionSource = source,
+          deadDefinitionNames = source.definitionSourceNames
+        }
+    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionsById,
+      Set.notMember definitionId aliveDefinitionIds,
+      isReportableDefinition source
+    ]
+  where
+    isReportableDefinition source =
+      case options.deadCodeTargetModules of
+        Nothing ->
+          True
+        Just targetModules ->
+          source.definitionSourceModule `Set.member` targetModules
 
 reachableDefinitions ::
   Map.Map DefinitionId (Set.Set DefinitionId) ->
