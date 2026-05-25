@@ -15,6 +15,7 @@ where
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.Time (UTCTime, defaultTimeLocale, formatTime, getCurrentTime)
 import System.IO (hPutStrLn, stderr)
+import UnliftIO (evaluateDeep)
 
 newtype LoggerHandle = LoggerHandle
   { putLog :: LogMessage -> IO ()
@@ -38,9 +39,10 @@ class (MonadIO m) => MonadLogger m where
 
 logMsg :: (MonadLogger m) => LogLevel -> String -> m ()
 logMsg level content = do
+  evaluatedContent <- liftIO $ evaluateDeep content
   LoggerHandle putLog <- getLoggerHandle
   timestamp <- liftIO getCurrentTime
-  let logMessage = LogMessage {timestamp, level, content}
+  let logMessage = LogMessage {timestamp, level, content = evaluatedContent}
   liftIO $ putLog logMessage
 
 debug :: (MonadLogger m) => String -> m ()
