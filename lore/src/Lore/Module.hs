@@ -16,6 +16,7 @@ import qualified GHC.Types.Avail as Avail
 import GHC.Utils.Monad (mapMaybeM)
 import qualified Lore.Internal.Ghc.TyThing as TyThing
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedOccName, mkGhcModuleName)
+import Lore.Internal.Package (PackageData (packageName), discoverProject)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import UnliftIO (SomeException, handle)
@@ -34,7 +35,7 @@ resolveModule moduleName maybePackageName =
         pure Nothing
     )
     do
-      let packageQualifier = fmap (FastString.mkFastString . T.unpack) maybePackageName
+      packageQualifier <- resolvePackageQualifier maybePackageName
       Just <$> GHC.lookupModule (mkGhcModuleName moduleName) packageQualifier
   where
     renderedModuleRequest =
@@ -43,6 +44,17 @@ resolveModule moduleName maybePackageName =
           show moduleName
         Just packageName ->
           show moduleName <> " from package " <> show (T.unpack packageName)
+
+    resolvePackageQualifier Nothing =
+      pure Nothing
+    resolvePackageQualifier (Just requestedPackageName) = do
+      projectPackages <- discoverProject
+      let projectPackageNames =
+            map (T.pack . packageName) projectPackages
+      pure $
+        if requestedPackageName `elem` projectPackageNames
+          then Nothing
+          else Just (FastString.mkFastString (T.unpack requestedPackageName))
 
 listSymbolsExportedByModule :: (MonadLore m) => GHC.Module -> m [ExportedSymbolNode]
 listSymbolsExportedByModule mdl = do

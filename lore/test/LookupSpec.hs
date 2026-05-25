@@ -310,6 +310,19 @@ spec =
 
         null result `shouldBe` True
 
+      it "supports packageName when it references the loaded home package" do
+        result <-
+          fixtureLore do
+            _ <- loadHomeModules defaultLoadHomeModulesOptions
+            listExportedSymbolsByModule "Demo.Support" (Just "demo-fixture")
+
+        let occNames = exportedNodeOccNames result
+        occNames `shouldSatisfy` elem "supportSeed"
+        occNames `shouldSatisfy` elem "supportStep"
+        occNames `shouldSatisfy` elem "mkSupportRecord"
+        occNames `shouldSatisfy` elem ".+."
+        occNames `shouldSatisfy` not . elem "supportValues"
+
       it "filters by direct surface type mentions instead of transitive metadata" do
         withFixtureCopy \fixtureRoot -> do
           let moduleDir = fixtureRoot </> "src" </> "TestHint"
