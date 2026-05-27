@@ -27,6 +27,11 @@ Executable package for exposing `lore` through an MCP server.
 - `LORE_MCP_FEEDBACK_FILE`: enables/registers the `feedback` tool when set to a non-empty path
   - unset or empty: `feedback` tool is not registered
   - non-empty value: `feedback` tool appends feedback entries to the given file path
+- `LORE_MCP_DEFAULT_TEST_ARGS`: default arguments prepended to `runTestSuite` `testArgs`
+  - unset or empty: no default args
+  - non-empty value: parsed like `testArgs` and prepended before tool-provided args
+  - merge order: `LORE_MCP_DEFAULT_TEST_ARGS` first, then `runTestSuite.testArgs`
+  - example: `LORE_MCP_DEFAULT_TEST_ARGS="--arg1 --arg2 4"` and `testArgs="--match \"some test name\""` forwards `["--arg1","--arg2","4","--match","some test name"]`
 
 Tool enable/disable variables (default enabled):
 

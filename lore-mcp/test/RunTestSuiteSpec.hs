@@ -3,11 +3,13 @@ module RunTestSuiteSpec
   )
 where
 
+import Control.Exception (bracket)
 import qualified Data.Aeson as J
 import qualified Data.Text as T
 import Lore.Mcp.Tools.RunTestSuite (runTestSuiteTool)
 import McpTestSupport (callToolWithArgs, fixtureLoreMcpAtWithCache, withFixtureCopy)
 import System.Directory (createDirectoryIfMissing)
+import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.Exit (ExitCode (ExitFailure))
 import System.FilePath ((</>))
 import Test.Hspec
@@ -89,6 +91,31 @@ spec =
         result `shouldContainText` "Captured output:"
         result `shouldContainText` "fixture-test-failure-signal"
 
+    it "forwards LORE_MCP_DEFAULT_TEST_ARGS when request testArgs are omitted" do
+      withEnvVar "LORE_MCP_DEFAULT_TEST_ARGS" "--arg1 --arg2 4" do
+        withFixtureCopy \fixtureRoot -> do
+          addFixtureTestComponent fixtureRoot
+          result <-
+            fixtureLoreMcpAtWithCache False fixtureRoot do
+              callToolWithArgs runTestSuiteTool (J.object [])
+
+          result `shouldContainText` "fixture-test-args=[\"--arg1\",\"--arg2\",\"4\"]"
+
+    it "appends request testArgs after LORE_MCP_DEFAULT_TEST_ARGS" do
+      withEnvVar "LORE_MCP_DEFAULT_TEST_ARGS" "--arg1 --arg2 4" do
+        withFixtureCopy \fixtureRoot -> do
+          addFixtureTestComponent fixtureRoot
+          result <-
+            fixtureLoreMcpAtWithCache False fixtureRoot do
+              callToolWithArgs
+                runTestSuiteTool
+                ( J.object
+                    [ "testArgs" J..= ("--match \"prefix sample\"" :: String)
+                    ]
+                )
+
+          result `shouldContainText` "fixture-test-args=[\"--arg1\",\"--arg2\",\"4\",\"--match\",\"prefix sample\"]"
+
 shouldContainText :: T.Text -> T.Text -> Expectation
 shouldContainText actual expected =
   if T.isInfixOf expected actual
@@ -100,6 +127,19 @@ shouldContainText actual expected =
             <> "\n\nFull output:\n"
             <> T.unpack actual
         )
+
+withEnvVar :: String -> String -> IO a -> IO a
+withEnvVar name value action =
+  bracket
+    (lookupEnv name <* setEnv name value)
+    (restoreEnvVar name)
+    (const action)
+
+restoreEnvVar :: String -> Maybe String -> IO ()
+restoreEnvVar name maybeValue =
+  case maybeValue of
+    Nothing -> unsetEnv name
+    Just value -> setEnv name value
 
 addFixtureTestComponent :: FilePath -> IO ()
 addFixtureTestComponent fixtureRoot = do
