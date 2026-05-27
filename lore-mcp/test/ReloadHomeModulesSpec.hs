@@ -5,7 +5,8 @@ where
 
 import qualified Data.Aeson as J
 import qualified Data.Text as T
-import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool, truncateDiagnosticMessage)
+import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
+import qualified Lore.Tools.ReloadHomeModules as ToolsReload
 import McpTestSupport (callToolWithArgs, fixtureLoreMcpAtWithCache, withFixtureCopy)
 import System.FilePath ((</>))
 import Test.Hspec
@@ -59,7 +60,7 @@ spec =
 
     it "truncates diagnostic message text over 700 symbols" do
       let longMessage = T.replicate 1200 "x"
-          truncatedMessage = truncateDiagnosticMessage longMessage
+          truncatedMessage = ToolsReload.truncateDiagnosticMessage longMessage
       T.length truncatedMessage `shouldBe` 700
 
 shouldContainText :: T.Text -> T.Text -> Expectation

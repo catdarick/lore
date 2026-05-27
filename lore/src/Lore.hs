@@ -33,6 +33,8 @@ module Lore
     ChosenInstanceContextStatus (..),
     PathToRoot (..),
     findMatchingSymbols,
+    findMatchingSymbolLookupNamesByPrefix,
+    findProjectModuleNamesByPrefix,
     findSimilarSymbols,
     resolveModule,
     listSymbolsExportedByModule,

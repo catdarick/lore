@@ -22,9 +22,9 @@ import Lore.JsonRpc.Server
     runJsonRpcLoop,
   )
 import qualified Lore.Logger as Log
-import Lore.Mcp.Internal.LoreDoc (LoreDoc, ToLoreDoc (toLoreDoc))
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..), getSomeToolSpec, getToolName)
 import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Notification (..), McpRequest'Tools (..), parseMcpRequest)
+import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
 import UnliftIO (MonadUnliftIO, try)
 
 newtype McpServerState = McpServerState

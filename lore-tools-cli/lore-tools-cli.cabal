@@ -1,0 +1,128 @@
+cabal-version: 2.2
+
+-- This file has been generated from package.yaml by hpack version 0.37.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           lore-tools-cli
+version:        0.1.0.0
+description:    CLI frontend for lore-tools
+homepage:       https://github.com/githubuser/lore#readme
+bug-reports:    https://github.com/githubuser/lore/issues
+author:         Author name here
+maintainer:     example@example.com
+copyright:      2026 Author name here
+license:        BSD-3-Clause
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/githubuser/lore
+
+library
+  exposed-modules:
+      Lore.Tools.Cli
+      Lore.Tools.Cli.Interactive
+      Lore.Tools.Cli.Internal.Annotated
+      Lore.Tools.Cli.Internal.Completion
+      Lore.Tools.Cli.Internal.Help
+      Lore.Tools.Cli.Internal.Parser
+      Lore.Tools.Cli.Internal.ShellWords
+      Lore.Tools.Cli.Internal.Tool
+      Lore.Tools.Cli.Registry
+      Lore.Tools.Cli.Render
+      Lore.Tools.Cli.SingleShot
+      Lore.Tools.Cli.Tools.Common
+      Lore.Tools.Cli.Tools.CreateTemporalModule
+      Lore.Tools.Cli.Tools.DiscoverDirectory
+      Lore.Tools.Cli.Tools.DiscoverProject
+      Lore.Tools.Cli.Tools.ExecuteCode
+      Lore.Tools.Cli.Tools.FindDeadCode
+      Lore.Tools.Cli.Tools.FindReferences
+      Lore.Tools.Cli.Tools.GetDefinition
+      Lore.Tools.Cli.Tools.GetTypeOfExpression
+      Lore.Tools.Cli.Tools.ListExportedSymbols
+      Lore.Tools.Cli.Tools.LookupInstances
+      Lore.Tools.Cli.Tools.LookupSymbolInfo
+      Lore.Tools.Cli.Tools.Reload
+      Lore.Tools.Cli.Tools.ResolveInstance
+      Lore.Tools.Cli.Tools.RunTestSuite
+      Lore.Tools.Cli.Tools.SearchSymbols
+  other-modules:
+      Paths_lore_tools_cli
+  autogen-modules:
+      Paths_lore_tools_cli
+  hs-source-dirs:
+      src
+  default-extensions:
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedStrings
+      DeriveGeneric
+      DerivingStrategies
+      LambdaCase
+      FlexibleContexts
+      NumericUnderscores
+      MultiWayIf
+      BlockArguments
+      GADTs
+      TypeApplications
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , exceptions
+    , filepath
+    , haskeline
+    , lore
+    , lore-tools
+    , mtl
+    , optparse-applicative
+    , text
+    , transformers
+  default-language: Haskell2010
+
+executable lore-cli
+  main-is: Main.hs
+  other-modules:
+      Paths_lore_tools_cli
+  autogen-modules:
+      Paths_lore_tools_cli
+  hs-source-dirs:
+      app
+  default-extensions:
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedStrings
+      DeriveGeneric
+      DerivingStrategies
+      LambdaCase
+      FlexibleContexts
+      NumericUnderscores
+      MultiWayIf
+      BlockArguments
+      GADTs
+      TypeApplications
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , exceptions
+    , filepath
+    , haskeline
+    , lore
+    , lore-tools
+    , lore-tools-cli
+    , mtl
+    , optparse-applicative
+    , text
+    , transformers
+  default-language: Haskell2010

@@ -5,7 +5,7 @@ where
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Lore.Mcp.Internal.LoreDoc
+import Lore.Tools.Render.Doc
   ( LoreBlock (..),
     LoreDoc (..),
     SourceFile (..),
@@ -14,7 +14,7 @@ import Lore.Mcp.Internal.LoreDoc
     numberedListFrom,
     paragraph,
   )
-import Lore.Mcp.Internal.LoreDoc.Markdown (renderLoreDocMarkdown)
+import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
 import Test.Hspec
 
 spec :: Spec

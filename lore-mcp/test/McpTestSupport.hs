@@ -21,10 +21,10 @@ import Lore
     loadHomeModules,
     noLogHandle,
   )
-import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc))
-import Lore.Mcp.Internal.LoreDoc.Markdown (renderLoreDocMarkdown)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..))
 import Lore.Mcp.Monad (LoreMcpMonad, newLoreMcpContext, runLoreMcp)
+import Lore.Tools.Render.Doc (ToLoreDoc (toLoreDoc))
+import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
 import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, listDirectory, makeAbsolute, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.FilePath ((</>))

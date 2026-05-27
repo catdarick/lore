@@ -1,0 +1,116 @@
+cabal-version: 2.2
+
+-- This file has been generated from package.yaml by hpack version 0.37.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           lore-tools
+version:        0.1.0.0
+description:    Shared rendering and result helpers for the lore workspace
+homepage:       https://github.com/githubuser/lore#readme
+bug-reports:    https://github.com/githubuser/lore/issues
+author:         Author name here
+maintainer:     example@example.com
+copyright:      2026 Author name here
+license:        BSD-3-Clause
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/githubuser/lore
+
+library
+  exposed-modules:
+      Lore.Tools
+      Lore.Tools.Config
+      Lore.Tools.CreateTemporalModule
+      Lore.Tools.Directory
+      Lore.Tools.DirectoryTree
+      Lore.Tools.DiscoverDirectory
+      Lore.Tools.DiscoverProject
+      Lore.Tools.ExecuteCode
+      Lore.Tools.FindDeadCode
+      Lore.Tools.FindReferences
+      Lore.Tools.GetDefinition
+      Lore.Tools.GetTypeOfExpression
+      Lore.Tools.Internal.CompactClassInstance
+      Lore.Tools.Internal.DefinitionLocation
+      Lore.Tools.Internal.DefinitionSourceRendering
+      Lore.Tools.Internal.DetailedSymbolInfo
+      Lore.Tools.Internal.SymbolResolution
+      Lore.Tools.Internal.SymbolSuggestions
+      Lore.Tools.ListExportedSymbols
+      Lore.Tools.LookupInstances
+      Lore.Tools.LookupSymbolInfo
+      Lore.Tools.Pagination
+      Lore.Tools.ReloadHomeModules
+      Lore.Tools.Render.Diagnostics
+      Lore.Tools.Render.Doc
+      Lore.Tools.Render.Ghc
+      Lore.Tools.Render.Markdown
+      Lore.Tools.Render.Source
+      Lore.Tools.Render.Text
+      Lore.Tools.ResolveInstance
+      Lore.Tools.Result
+      Lore.Tools.RunTestSuite
+      Lore.Tools.SearchSymbols
+  other-modules:
+      Paths_lore_tools
+  autogen-modules:
+      Paths_lore_tools
+  hs-source-dirs:
+      src
+  default-extensions:
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , containers
+    , directory
+    , exceptions
+    , filepath
+    , ghc
+    , lore
+    , mtl
+    , text
+    , yaml
+  default-language: Haskell2010

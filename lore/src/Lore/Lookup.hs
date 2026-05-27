@@ -19,6 +19,8 @@ module Lore.Lookup
     PathToRoot (..),
     classifySymbolCategory,
     findMatchingSymbols,
+    findMatchingSymbolLookupNamesByPrefix,
+    findProjectModuleNamesByPrefix,
     findSimilarSymbols,
     lookupSymbolInfo,
     listIntersectingInstances,
@@ -48,11 +50,12 @@ import Lore.Internal.Lookup.InstanceResolution
     ChosenInstanceResolution (..),
     resolveChosenClassInstanceFromTypeText,
   )
-import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
+import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName (..), mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap, findSimilarSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
-import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolSuggestion (..), SymbolSuggestionCandidate (..), SymbolVisibility (..), SymbolsMap)
+import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolSuggestion (..), SymbolSuggestionCandidate (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
+import qualified Lore.Internal.Package as Package
 import Lore.Monad (MonadLore)
 
 data SymbolInfo = SymbolInfo
@@ -80,6 +83,43 @@ findMatchingSymbols :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
 findMatchingSymbols targetName = do
   symbolsMap <- SymbolsMap.getCachedSymbolsMap
   filterSymbolsByOwnerHint targetName.ownerHint (findMatchingSymbolsInMap targetName symbolsMap)
+
+findMatchingSymbolLookupNamesByPrefix :: (MonadLore m) => T.Text -> m [T.Text]
+findMatchingSymbolLookupNamesByPrefix rawPrefix = do
+  symbolsMap <- SymbolsMap.getCachedSymbolsMap
+  pure (matchingSymbolLookupNamesByPrefix rawPrefix symbolsMap)
+
+findProjectModuleNamesByPrefix :: (MonadLore m) => T.Text -> m [T.Text]
+findProjectModuleNamesByPrefix rawPrefix = do
+  packages <- Package.discoverProject
+  let allProjectModuleNames =
+        Set.fromList
+          [ T.pack (GHC.moduleNameString ghcModuleName)
+          | packageData <- packages,
+            componentData <- packageData.components,
+            ghcModuleName <- Set.toList componentData.modules
+          ]
+  pure
+    [ moduleName
+    | moduleName <- sortOn id (Set.toList allProjectModuleNames),
+      rawPrefix `T.isPrefixOf` moduleName
+    ]
+
+matchingSymbolLookupNamesByPrefix :: T.Text -> SymbolsMap -> [T.Text]
+matchingSymbolLookupNamesByPrefix rawPrefix SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
+  map unNormalizedOccName (sortOn unNormalizedOccName (Set.toList matchingNames))
+  where
+    SymbolsIndex homeSymbols = homeSymbolsMap
+    SymbolsIndex externalSymbols = externalSymbolsMap
+    normalizedPrefix = (parseAndNormalizeName rawPrefix).occName
+    matchingNames =
+      Set.filter
+        (isLookupNameMatchingPrefix normalizedPrefix)
+        (Map.keysSet homeSymbols <> Map.keysSet externalSymbols)
+
+isLookupNameMatchingPrefix :: NormalizedOccName -> NormalizedOccName -> Bool
+isLookupNameMatchingPrefix prefix lookupName =
+  unNormalizedOccName prefix `T.isPrefixOf` unNormalizedOccName lookupName
 
 findSimilarSymbols :: (MonadLore m) => Int -> NormalizedName -> m [SymbolSuggestion]
 findSimilarSymbols suggestionLimit targetName = do

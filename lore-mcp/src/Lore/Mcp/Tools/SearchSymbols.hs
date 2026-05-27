@@ -6,22 +6,17 @@ where
 import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
-import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Lore (MonadLore, findSimilarSymbols, parseAndNormalizeName)
+import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), numberedListFrom, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared (PartialLoadWarning, ToolRun, loadedSessionPartialWarning, withLoadedSession)
-import Lore.Mcp.Tools.Shared.SymbolSuggestions
-  ( GroupedSymbolSuggestion,
-    groupSymbolSuggestions,
-    groupedSymbolSuggestionLabel,
-    maxSearchSymbolSuggestions,
-    noSymbolsFound,
-    quoteText,
-    symbolSuggestionFetchLimit,
+import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
+import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
+import Lore.Tools.Result (ResultLimit (..), ToolRun (..))
+import Lore.Tools.SearchSymbols
+  ( SearchSymbolsOptions (..),
   )
+import qualified Lore.Tools.SearchSymbols as ToolsSearchSymbols
 
 data SearchSymbolsArgs (fieldType :: FieldType) = SearchSymbolsArgs
   { query ::
@@ -38,29 +33,6 @@ instance J.FromJSON (SearchSymbolsArgs 'ValueType)
 
 instance ToSchema (SearchSymbolsArgs 'MetadataType)
 
-type SearchSymbolsResult = ToolRun SearchSymbolsReady
-
-data SearchSymbolsReady = SearchSymbolsReady
-  { searchSymbolsQuery :: Text,
-    searchSymbolsSuggestions :: [GroupedSymbolSuggestion],
-    searchSymbolsPartialLoadWarning :: Maybe PartialLoadWarning
-  }
-
-instance ToLoreDoc SearchSymbolsReady where
-  toLoreDoc ready =
-    case ready.searchSymbolsSuggestions of
-      [] ->
-        mconcat
-          [ paragraph (noSymbolsFound ready.searchSymbolsQuery),
-            maybe mempty toLoreDoc ready.searchSymbolsPartialLoadWarning
-          ]
-      suggestions ->
-        mconcat
-          [ paragraph ("Found " <> T.pack (show (length suggestions)) <> " similar symbols for " <> quoteText ready.searchSymbolsQuery <> ":"),
-            numberedListFrom 1 (map (paragraph . groupedSymbolSuggestionLabel) suggestions),
-            maybe mempty toLoreDoc ready.searchSymbolsPartialLoadWarning
-          ]
-
 searchSymbolsTool :: (MonadLore m) => SomeTool m
 searchSymbolsTool =
   SomeToolWithArgs
@@ -73,13 +45,18 @@ searchSymbolsTool =
         handler = searchSymbolsHandler
       }
 
-searchSymbolsHandler :: (MonadLore m) => SearchSymbolsArgs 'ValueType -> m SearchSymbolsResult
+searchSymbolsHandler :: (MonadLore m) => SearchSymbolsArgs 'ValueType -> m LoreDoc
 searchSymbolsHandler SearchSymbolsArgs {query} = do
-  withLoadedSession \session -> do
-    suggestions <- findSimilarSymbols symbolSuggestionFetchLimit (parseAndNormalizeName query)
-    pure
-      SearchSymbolsReady
+  result <-
+    ToolsSearchSymbols.searchSymbols
+      SearchSymbolsOptions
         { searchSymbolsQuery = query,
-          searchSymbolsSuggestions = take maxSearchSymbolSuggestions (groupSymbolSuggestions suggestions),
-          searchSymbolsPartialLoadWarning = loadedSessionPartialWarning session "Search results may be incomplete."
+          searchSymbolsSuggestionLimit =
+            Limit (limitToIntWithDefault 10 (symbolSuggestionsLimit mcpDefaultToolPolicy))
         }
+  pure $
+    case result of
+      ToolRunBlocked blocked ->
+        toLoreDoc blocked
+      ToolRunReady ready ->
+        ToolsSearchSymbols.renderSearchSymbolsReady ready

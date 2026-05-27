@@ -3,37 +3,22 @@ module Lore.Mcp.Tools.GetTypeOfExpression
   )
 where
 
-import qualified Control.Exception as Exception
-import Control.Monad.Catch (Handler (..), catches)
 import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified GHC
 import GHC.Generics (Generic)
-import qualified GHC.Types.SourceError as GHC.SourceError
-import qualified GHC.Utils.Outputable as Outputable
-import Lore
-  ( MonadLore,
-    getTypeOfExpression,
-  )
-import Lore.Diagnostics
-  ( Diagnostic (..),
-    DiagnosticClass (..),
-    DiagnosticSpan (..),
-    ghcMessagesToDiagnostics,
-  )
+import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), heading2, paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
-import Lore.Mcp.Tools.Shared
-  ( PartialLoadWarning,
-    ToolRun,
-    loadedSessionPartialWarning,
-    withInterpreterSession,
-    withPartialLoadWarning,
+import Lore.Tools.GetTypeOfExpression
+  ( GetTypeOfExpressionOptions (..),
+    getTypeOfExpression,
+    renderTypeExpressionOutput,
   )
-import Lore.Mcp.Tools.Shared.Diagnostics (diagnosticSummaryDoc)
+import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
+import Lore.Tools.Result
+  ( ToolRun (..),
+  )
 
 newtype GetTypeOfExpressionArgs (fieldType :: FieldType) = GetTypeOfExpressionArgs
   { expression ::
@@ -48,23 +33,6 @@ instance J.FromJSON (GetTypeOfExpressionArgs 'ValueType)
 
 instance ToSchema (GetTypeOfExpressionArgs 'MetadataType)
 
-type GetTypeOfExpressionResult = ToolRun TypeExpressionOutput
-
-data TypeExpressionOutput
-  = TypeExpressionSucceeded (Maybe PartialLoadWarning) Text
-  | TypeExpressionFailed (Maybe PartialLoadWarning) [Diagnostic]
-
-instance ToLoreDoc TypeExpressionOutput where
-  toLoreDoc = \case
-    TypeExpressionSucceeded warning renderedType ->
-      withPartialLoadWarning warning $
-        heading2 "Type"
-          <> paragraph renderedType
-    TypeExpressionFailed warning diagnostics ->
-      withPartialLoadWarning warning $
-        heading2 "Type inference failed"
-          <> diagnosticSummaryDoc diagnostics
-
 getTypeOfExpressionTool :: (MonadLore m) => SomeTool m
 getTypeOfExpressionTool =
   SomeToolWithArgs
@@ -74,34 +42,12 @@ getTypeOfExpressionTool =
         handler = getTypeOfExpressionHandler
       }
 
-getTypeOfExpressionHandler :: (MonadLore m) => GetTypeOfExpressionArgs 'ValueType -> m GetTypeOfExpressionResult
-getTypeOfExpressionHandler GetTypeOfExpressionArgs {expression} =
-  withInterpreterSession \session -> do
-    typeResult <-
-      catches
-        (Right <$> getTypeOfExpression expression)
-        [ Handler \sourceError ->
-            pure (Left (ghcMessagesToDiagnostics (GHC.SourceError.srcErrorMessages sourceError))),
-          Handler \runtimeException ->
-            pure (Left [runtimeExceptionDiagnostic runtimeException])
-        ]
-    let partialWarning = loadedSessionPartialWarning session "Type inference may be incomplete."
-    pure $
-      case typeResult of
-        Right inferredType ->
-          TypeExpressionSucceeded partialWarning (T.pack (Outputable.showSDocUnsafe (Outputable.ppr inferredType)))
-        Left diagnostics ->
-          TypeExpressionFailed partialWarning diagnostics
-
-runtimeExceptionDiagnostic :: Exception.SomeException -> Diagnostic
-runtimeExceptionDiagnostic runtimeException =
-  Diagnostic
-    { diagnosticClass = DiagInteractive,
-      diagnosticSeverity = Just GHC.SevError,
-      diagnosticReason = Nothing,
-      diagnosticWarningFlag = Nothing,
-      diagnosticCode = Nothing,
-      diagnosticSpan = UnhelpfulDiagnosticSpan "getTypeOfExpression",
-      diagnosticMessage = T.pack (show runtimeException),
-      diagnosticHints = []
-    }
+getTypeOfExpressionHandler :: (MonadLore m) => GetTypeOfExpressionArgs 'ValueType -> m LoreDoc
+getTypeOfExpressionHandler GetTypeOfExpressionArgs {expression} = do
+  result <- getTypeOfExpression GetTypeOfExpressionOptions {typeOfExpressionInput = expression}
+  pure $
+    case result of
+      ToolRunBlocked blocked ->
+        toLoreDoc blocked
+      ToolRunReady output ->
+        renderTypeExpressionOutput output

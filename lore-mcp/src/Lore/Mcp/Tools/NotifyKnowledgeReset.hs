@@ -5,9 +5,9 @@ where
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithoutArgs (..))
 import Lore.Mcp.Monad (MonadLoreMcp, clearSentDefinitionHashes)
+import Lore.Tools.Render.Doc (ToLoreDoc (toLoreDoc), paragraph)
 
 notifyKnowledgeResetTool :: (MonadLoreMcp m) => SomeTool m
 notifyKnowledgeResetTool =

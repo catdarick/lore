@@ -3,10 +3,13 @@ module Lore.Mcp.Tools.CreateTemporalModule
   )
 where
 
-import qualified Data.Text as T
-import Lore (MonadLore, createTemporalModule)
-import Lore.Mcp.Internal.LoreDoc (LoreDoc, bulletList, heading2, numberedListFrom, paragraph)
+import Lore (MonadLore)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithoutArgs (..))
+import Lore.Tools.CreateTemporalModule
+  ( createTemporalModule,
+    renderCreateTemporalModule,
+  )
+import Lore.Tools.Render.Doc (LoreDoc)
 
 createTemporalModuleTool :: (MonadLore m) => SomeTool m
 createTemporalModuleTool =
@@ -22,19 +25,5 @@ createTemporalModuleTool =
 
 createTemporalModuleHandler :: (MonadLore m) => m LoreDoc
 createTemporalModuleHandler = do
-  path <- createTemporalModule
-  pure $
-    paragraph ("Temporal module initialized at: " <> T.pack path)
-      <> heading2 "Workflow"
-      <> numberedListFrom
-        1
-        [ paragraph "Write custom logic and necessary imports directly into this file.",
-          paragraph "Call reloadHomeModules to compile and load it into the session.",
-          paragraph "Use executeCode to run your target functions."
-        ]
-      <> heading2 "Notes"
-      <> bulletList
-        [ paragraph "Active Haskell extensions set may be different.",
-          paragraph "Reuse this file until your debugging task is done.",
-          paragraph "Delete it when finished to detach."
-        ]
+  output <- createTemporalModule
+  pure (renderCreateTemporalModule output)

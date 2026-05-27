@@ -4,29 +4,19 @@ module Lore.Mcp.Tools.DiscoverDirectory
 where
 
 import qualified Data.Aeson as J
-import Data.List (intercalate)
 import Data.OpenApi (ToSchema)
-import Data.Text (Text)
-import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.DirectoryTree
-  ( DirectoryTree (..),
-    DirectoryTreeChild (..),
-    DirectoryTreeDiscoveryOptions (..),
-    DirectoryTreeFile (..),
-    DirectoryTreeNode (..),
-    DirectoryTreeNoisyDirectoryOptions (..),
-    DirectoryTreeOmittedEntries (..),
-    DirectoryTreeStats (..),
-    defaultDirectoryTreeDiscoveryBudget,
-    defaultDirectoryTreeDiscoveryOptions,
-    describeDirectoryError,
-    discoverDirectory,
-  )
-import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Tools.DiscoverDirectory
+  ( DiscoverDirectoryOptions (..),
+    DiscoverDirectoryRenderMode (..),
+    discoverDirectory,
+    renderDiscoverDirectory,
+  )
+import Lore.Tools.Pagination (ToolPolicy (..), limitToMaybeInt, mcpDefaultToolPolicy)
+import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
 
 data DiscoverDirectoryArgs (fieldType :: FieldType) = DiscoverDirectoryArgs
   { path ::
@@ -59,154 +49,27 @@ discoverDirectoryTool =
         handler = discoverDirectoryHandler
       }
 
-data DiscoverDirectoryResult
-  = DiscoverDirectoryFailed Text
-  | DiscoverDirectoryReady DirectoryTree
-  | DiscoverDirectoryReadyCompact DirectoryTree
+newtype DiscoverDirectoryResult = DiscoverDirectoryResult
+  { discoverDirectoryRendered :: LoreDoc
+  }
 
 instance ToLoreDoc DiscoverDirectoryResult where
-  toLoreDoc = \case
-    DiscoverDirectoryFailed message ->
-      paragraph message
-    DiscoverDirectoryReady tree ->
-      paragraph (renderDirectoryTree tree)
-    DiscoverDirectoryReadyCompact tree ->
-      paragraph (renderDirectoryTreeCompact tree)
+  toLoreDoc = (.discoverDirectoryRendered)
 
 discoverDirectoryHandler :: (MonadLore m) => DiscoverDirectoryArgs 'ValueType -> m DiscoverDirectoryResult
 discoverDirectoryHandler DiscoverDirectoryArgs {path, depth} = do
-  discoveredTree <- discoverDirectory options
-  pure $
-    case discoveredTree of
-      Left directoryError ->
-        DiscoverDirectoryFailed (T.pack (describeDirectoryError directoryError))
-      Right directoryTree ->
-        if resolvedDepth == Just 0
-          then DiscoverDirectoryReadyCompact directoryTree
-          else DiscoverDirectoryReady directoryTree
+  output <- discoverDirectory options
+  pure (DiscoverDirectoryResult (renderDiscoverDirectory renderMode output))
   where
     options =
-      defaultDirectoryTreeDiscoveryOptions
-        { directoryTreeRootPath = path,
-          directoryTreeFocusPaths = ["."],
-          directoryTreeBudget = Just defaultDirectoryTreeDiscoveryBudget,
-          directoryTreeDepth = resolvedDepth,
-          directoryTreeNoisyDirectoryOptions =
-            Just
-              DirectoryTreeNoisyDirectoryOptions
-                { directoryTreeNoisyDirectoryMinEntries = 20,
-                  directoryTreeNoisyDirectoryHeadEntries = 3,
-                  directoryTreeNoisyDirectoryTailEntries = 3
-                }
+      DiscoverDirectoryOptions
+        { discoverDirectoryPath = path,
+          discoverDirectoryDepth = resolvedDepth,
+          discoverDirectoryBudget = limitToMaybeInt (directoryEntryBudget mcpDefaultToolPolicy)
         }
+    renderMode =
+      if resolvedDepth == Just 0
+        then DiscoverDirectoryRenderCompact
+        else DiscoverDirectoryRenderTree
     resolvedDepth =
       fmap (max 0) depth
-
-renderDirectoryTree :: DirectoryTree -> Text
-renderDirectoryTree directoryTree =
-  T.unlines $
-    T.pack (renderDirectoryPath directoryTree.directoryTreeRootRelativePath)
-      : renderChildren "" directoryTree.directoryTreeRoot.directoryTreeNodeChildren
-
-renderDirectoryTreeCompact :: DirectoryTree -> Text
-renderDirectoryTreeCompact directoryTree =
-  T.unlines $
-    concatMap renderChildCompact directoryTree.directoryTreeRoot.directoryTreeNodeChildren
-
-renderDirectoryPath :: FilePath -> FilePath
-renderDirectoryPath path
-  | path == "." = "./"
-  | otherwise = path <> "/"
-
-renderChildren :: Text -> [DirectoryTreeChild] -> [Text]
-renderChildren prefix children =
-  concatMap renderChildWithIndex (zip [0 :: Int ..] children)
-  where
-    lastIndex = length children - 1
-
-    renderChildWithIndex (index, child) =
-      renderChild prefix (index == lastIndex) child
-
-renderChild :: Text -> Bool -> DirectoryTreeChild -> [Text]
-renderChild prefix isLast child =
-  case child of
-    DirectoryTreeChildFile file ->
-      [prefix <> marker <> T.pack file.directoryTreeFileName]
-    DirectoryTreeChildOmitted omitted ->
-      [prefix <> marker <> T.pack (renderOmittedEntries omitted)]
-    DirectoryTreeChildDirectory node ->
-      (prefix <> marker <> renderNodeLabel node)
-        : if node.directoryTreeNodeOpened
-          then renderChildren (prefix <> childIndent) node.directoryTreeNodeChildren
-          else []
-  where
-    marker =
-      if isLast
-        then "└── "
-        else "├── "
-
-    childIndent =
-      if isLast
-        then "    "
-        else "│   "
-
-renderChildCompact :: DirectoryTreeChild -> [Text]
-renderChildCompact child =
-  case child of
-    DirectoryTreeChildFile file ->
-      [T.pack file.directoryTreeFileName]
-    DirectoryTreeChildOmitted omitted ->
-      [T.pack (renderOmittedEntries omitted)]
-    DirectoryTreeChildDirectory node ->
-      T.pack (renderDirectoryPath node.directoryTreeNodeName)
-        : if node.directoryTreeNodeOpened
-          then concatMap renderChildCompact node.directoryTreeNodeChildren
-          else []
-
-renderNodeLabel :: DirectoryTreeNode -> Text
-renderNodeLabel node =
-  T.pack node.directoryTreeNodeName
-    <> "/"
-    <> directorySuffix node
-
-directorySuffix :: DirectoryTreeNode -> Text
-directorySuffix node
-  | node.directoryTreeNodeOpened =
-      case node.directoryTreeNodeInlineOmitted of
-        Nothing -> ""
-        Just omitted -> " (" <> T.pack (renderInlineOmittedEntries omitted) <> ")"
-  | otherwise =
-      closedDirectorySummary node.directoryTreeNodeStats
-
-closedDirectorySummary :: Maybe DirectoryTreeStats -> Text
-closedDirectorySummary maybeStats =
-  case maybeStats of
-    Nothing -> ""
-    Just stats ->
-      " (" <> T.pack (show stats.directoryTreeStatsTotalFiles) <> " files)"
-
-renderInlineOmittedEntries :: DirectoryTreeOmittedEntries -> String
-renderInlineOmittedEntries omitted =
-  show omitted.directoryTreeOmittedDirectories
-    <> " dirs, "
-    <> show omitted.directoryTreeOmittedFiles
-    <> " files"
-
-renderOmittedEntries :: DirectoryTreeOmittedEntries -> String
-renderOmittedEntries omitted =
-  case nonEmptyParts of
-    [] -> "... omitted"
-    _ -> "... omitted: " <> intercalate ", " nonEmptyParts
-  where
-    nonEmptyParts =
-      filter (not . null) [directoriesPart, filesPart]
-
-    directoriesPart
-      | omitted.directoryTreeOmittedDirectories > 0 =
-          show omitted.directoryTreeOmittedDirectories <> " dirs"
-      | otherwise = ""
-
-    filesPart
-      | omitted.directoryTreeOmittedFiles > 0 =
-          show omitted.directoryTreeOmittedFiles <> " files"
-      | otherwise = ""

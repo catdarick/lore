@@ -12,56 +12,55 @@ module Lore.Mcp.Tools.GetDefinition.Shared
     ModuleOmittedSymbols (..),
     FilteredDefinitions (..),
     BuildDefinitionsStrategy,
-    defaultDefinitionExpansion,
     maxRenderedDefinitionResults,
-    getDefinitionHandlerWithStrategy,
     mkOmittedDefinitions,
+    toGetDefinitionRequest,
+    toGetDefinitionResult,
   )
 where
 
 import qualified Data.Aeson as J
-import Data.List (foldl', sortOn)
-import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, fromMaybe)
 import Data.OpenApi (ToSchema)
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import qualified GHC.Plugins as GHC
-import Lore
-  ( MonadLore,
-    NamedDefinitionSource (..),
-    Symbol (..),
-    SymbolInfo (..),
-    lookupSymbolInfo,
-    resolveDefinitionClosureSourcesNamed,
-    resolveDefinitionSourceNamed,
-  )
 import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), MinItems, WithMeta)
-import Lore.Mcp.Internal.LoreDoc
+import Lore.Tools.GetDefinition
+  ( BuildDefinitionsStrategy,
+    FilteredDefinitions (..),
+    GetDefinitionCoreFailed (..),
+    GetDefinitionCoreFailure,
+    GetDefinitionCoreOutput (..),
+    GetDefinitionCoreReady (..),
+    GetDefinitionRequest (..),
+    ModuleOmittedSymbols (..),
+    OmittedDefinitions (..),
+    RecursiveExpansionOptions (..),
+    mkOmittedDefinitions,
+  )
+import qualified Lore.Tools.GetDefinition as Core
+import Lore.Tools.Internal.SymbolResolution
+  ( SymbolsUnresolved,
+    unresolvedSymbolQueriesMessage,
+  )
+import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
+import Lore.Tools.Render.Doc
   ( LoreDoc,
     SourceFile,
     ToLoreDoc (toLoreDoc),
     paragraph,
     sourceFile,
   )
-import Lore.Mcp.Tools.Shared
-  ( Paginated (..),
+import Lore.Tools.Result
+  ( PageRequest (..),
+    Paginated (..),
     PartialLoadWarning (..),
+    ResultLimit (..),
     ToolRun (..),
-    loadedSessionPartialWarning,
-    withLoadedSession,
     withPartialLoadWarning,
   )
-import Lore.Mcp.Tools.Shared.SymbolResolution
-  ( ResolvedSymbolQuery (resolvedSymbol),
-    SymbolsResolved (resolvedQueries),
-    SymbolsUnresolved,
-    resolveUniqueSymbolQueries,
-    unresolvedSymbolQueriesMessage,
-  )
 
+-- Schema-annotated args stay in MCP.
 data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
   { symbols ::
       Field fieldType [Text]
@@ -115,152 +114,77 @@ data GetDefinitionReady = GetDefinitionReady
     getDefinitionRenderNotifyKnowledgeResetHint :: Bool
   }
 
-data OmittedDefinitions = OmittedDefinitions
-  { omittedDefinitionSymbolsByModule :: [ModuleOmittedSymbols],
-    omittedDefinitionCount :: Int
-  }
-
-data ModuleOmittedSymbols = ModuleOmittedSymbols
-  { moduleOmittedSymbolsModuleName :: Text,
-    moduleOmittedSymbolsSymbolNames :: [Text]
-  }
-
-data FilteredDefinitions = FilteredDefinitions
-  { filteredDefinitionPage :: Maybe (Paginated SourceFile),
-    filteredOmittedDefinitions :: OmittedDefinitions
-  }
-
-type BuildDefinitionsStrategy m =
-  Int ->
-  Set.Set GHC.Name ->
-  [NamedDefinitionSource] ->
-  m FilteredDefinitions
-
-getDefinitionHandlerWithStrategy :: (MonadLore m) => Bool -> GetDefinitionArgs 'ValueType -> BuildDefinitionsStrategy m -> m GetDefinitionResult
-getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint GetDefinitionArgs {symbols, skip, expansion} buildDefinitions = do
-  withLoadedSession \session -> do
-    let partialLoadWarning =
-          loadedSessionPartialWarning session "Definition results may be incomplete."
-    eiResolvedQueries <- resolveUniqueSymbolQueries symbols
-    case eiResolvedQueries of
-      Left unresolvedQueries ->
-        pure $
-          GetDefinitionFailedResult
-            GetDefinitionFailed
-              { getDefinitionFailure = GetDefinitionUnresolvedSymbols unresolvedQueries,
-                getDefinitionFailedPartialLoadWarning = partialLoadWarning
-              }
-      Right resolved -> do
-        resolvedSymbolInfos <-
-          catMaybes
-            <$> mapM
-              (\resolvedQuery -> lookupSymbolInfo resolvedQuery.resolvedSymbol.name)
-              resolved.resolvedQueries
-        let directlyRequestedSymbolNames =
-              Set.fromList (map (.symbolName) resolvedSymbolInfos)
-        definitionEntries <- concat <$> mapM (resolveSymbolDefinitions resolvedExpansion) resolvedSymbolInfos
-        filteredDefinitions <- buildDefinitions resolvedSkip directlyRequestedSymbolNames definitionEntries
-        pure $
-          GetDefinitionReadyResult
-            GetDefinitionReady
-              { getDefinitionSymbols = symbols,
-                getDefinitionPage = filteredDefinitions.filteredDefinitionPage,
-                getDefinitionOmitted = filteredDefinitions.filteredOmittedDefinitions,
-                getDefinitionPartialLoadWarning = partialLoadWarning,
-                getDefinitionRenderNotifyKnowledgeResetHint = shouldRenderNotifyKnowledgeResetHint
-              }
-  where
-    resolvedSkip =
-      max 0 (fromMaybe 0 skip)
-    resolvedExpansion =
-      fromMaybe defaultDefinitionExpansion expansion
-
-defaultDefinitionExpansion :: DefinitionExpansion
-defaultDefinitionExpansion = None
-
-resolveSymbolDefinitions :: (MonadLore m) => DefinitionExpansion -> SymbolInfo -> m [NamedDefinitionSource]
-resolveSymbolDefinitions expansion symbolInfo =
-  case expansion of
-    None ->
-      maybe [] (pure . NamedDefinitionSource symbolInfo.symbolName) <$> resolveDefinitionSourceNamed symbolInfo.symbolName
-    Direct ->
-      resolveDefinitionClosureSourcesNamed directExpansionMaxDepth symbolInfo.symbolName
-    Recursive ->
-      take maxRenderedDefinitionResults <$> resolveDefinitionClosureSourcesNamed recursiveExpansionMaxDepth symbolInfo.symbolName
-
-directExpansionMaxDepth :: Int
-directExpansionMaxDepth = 1
-
-recursiveExpansionMaxDepth :: Int
-recursiveExpansionMaxDepth = 2
-
-mkOmittedDefinitions :: [GHC.Name] -> OmittedDefinitions
-mkOmittedDefinitions names =
-  OmittedDefinitions
-    { omittedDefinitionSymbolsByModule =
-        sortOn (.moduleOmittedSymbolsModuleName) (map toModuleOmittedSymbols (Map.toList grouped)),
-      omittedDefinitionCount = length names
+toGetDefinitionRequest :: GetDefinitionArgs 'ValueType -> GetDefinitionRequest
+toGetDefinitionRequest GetDefinitionArgs {symbols, skip, expansion} =
+  GetDefinitionRequest
+    { getDefinitionRequestSymbols = symbols,
+      getDefinitionRequestPageRequest =
+        Just
+          PageRequest
+            { pageOffset = max 0 (maybe 0 id skip),
+              pageLimit = Unlimited
+            },
+      getDefinitionRequestExpansion = fmap toCoreDefinitionExpansion expansion
     }
-  where
-    grouped =
-      foldl' collectDefinition Map.empty names
 
-    collectDefinition groupedByModule name =
-      Map.insertWith (<>) (definitionModuleName name) [definitionSymbolName name] groupedByModule
-
-    toModuleOmittedSymbols (moduleName, symbolNames) =
-      ModuleOmittedSymbols
-        { moduleOmittedSymbolsModuleName = moduleName,
-          moduleOmittedSymbolsSymbolNames = dedupeTexts symbolNames
+toCoreDefinitionExpansion :: DefinitionExpansion -> Core.DefinitionExpansion
+toCoreDefinitionExpansion = \case
+  None ->
+    Core.NoExpansion
+  Direct ->
+    Core.ExpandRecursive
+      RecursiveExpansionOptions
+        { recursiveExpansionMaxDepth = Just 1,
+          recursiveExpansionMaxDefinitions = Limit maxRenderedDefinitionResults
+        }
+  Recursive ->
+    Core.ExpandRecursive
+      RecursiveExpansionOptions
+        { recursiveExpansionMaxDepth = Just 2,
+          recursiveExpansionMaxDefinitions = Limit maxRenderedDefinitionResults
         }
 
-definitionModuleName :: GHC.Name -> Text
-definitionModuleName name =
-  case GHC.nameModule_maybe name of
-    Just module_ -> T.pack (GHC.moduleNameString (GHC.moduleName module_))
-    Nothing -> "<unknown module>"
+maxRenderedDefinitionResults :: Int
+maxRenderedDefinitionResults =
+  limitToIntWithDefault 30 (definitionLimit mcpDefaultToolPolicy)
 
-definitionSymbolName :: GHC.Name -> Text
-definitionSymbolName =
-  T.pack . GHC.getOccString
+toGetDefinitionResult :: Bool -> ToolRun GetDefinitionCoreOutput -> GetDefinitionResult
+toGetDefinitionResult shouldRenderNotifyKnowledgeResetHint = \case
+  ToolRunBlocked blocked ->
+    ToolRunBlocked blocked
+  ToolRunReady coreOutput ->
+    ToolRunReady (toGetDefinitionOutput shouldRenderNotifyKnowledgeResetHint coreOutput)
 
-dedupeTexts :: [Text] -> [Text]
-dedupeTexts =
-  reverse . snd . foldl' dedupeText (Set.empty, [])
-  where
-    dedupeText (seenTexts, deduped) value
-      | Set.member value seenTexts =
-          (seenTexts, deduped)
-      | otherwise =
-          (Set.insert value seenTexts, value : deduped)
+toGetDefinitionOutput :: Bool -> GetDefinitionCoreOutput -> GetDefinitionOutput
+toGetDefinitionOutput shouldRenderNotifyKnowledgeResetHint = \case
+  GetDefinitionCoreFailedResult failure ->
+    GetDefinitionFailedResult (toGetDefinitionFailed failure)
+  GetDefinitionCoreReadyResult ready ->
+    GetDefinitionReadyResult (toGetDefinitionReady shouldRenderNotifyKnowledgeResetHint ready)
 
-quoteTexts :: [Text] -> Text
-quoteTexts values =
-  "[" <> T.intercalate ", " (map (\value -> "\"" <> value <> "\"") values) <> "]"
+toGetDefinitionFailed :: GetDefinitionCoreFailed -> GetDefinitionFailed
+toGetDefinitionFailed GetDefinitionCoreFailed {getDefinitionCoreFailure, getDefinitionCoreFailedPartialLoadWarning} =
+  GetDefinitionFailed
+    { getDefinitionFailure = toGetDefinitionFailure getDefinitionCoreFailure,
+      getDefinitionFailedPartialLoadWarning = getDefinitionCoreFailedPartialLoadWarning
+    }
 
-omittedDefinitionsSectionHeader :: Text
-omittedDefinitionsSectionHeader =
-  "The following definitions are unchanged and were omitted, you already have them in your context:"
+toGetDefinitionFailure :: GetDefinitionCoreFailure -> GetDefinitionFailure
+toGetDefinitionFailure = \case
+  Core.GetDefinitionUnresolvedSymbols unresolvedQueries ->
+    GetDefinitionUnresolvedSymbols unresolvedQueries
+  Core.GetDefinitionInternalError message ->
+    GetDefinitionInternalError message
 
-notifyKnowledgeResetHint :: Text
-notifyKnowledgeResetHint =
-  "IF AND ONLY IF your active conversation history was just wiped, or you have suffered a total memory reset and literally cannot see these definitions in your previous turns, you should execute the `notifyKnowledgeReset` tool to resync the server cache."
-
-renderOmittedDefinitionsLines :: OmittedDefinitions -> [Text]
-renderOmittedDefinitionsLines omittedDefinitions =
-  map ("  - " <>) (map renderModuleLine omittedDefinitions.omittedDefinitionSymbolsByModule)
-  where
-    renderModuleLine moduleSymbols =
-      moduleSymbols.moduleOmittedSymbolsModuleName
-        <> ": "
-        <> T.intercalate ", " (take maxRenderedOmittedSymbolsPerModule moduleSymbols.moduleOmittedSymbolsSymbolNames)
-        <> overflowSuffix moduleSymbols
-
-    overflowSuffix moduleSymbols =
-      let hiddenCount = length moduleSymbols.moduleOmittedSymbolsSymbolNames - maxRenderedOmittedSymbolsPerModule
-       in if hiddenCount > 0
-            then " and " <> T.pack (show hiddenCount) <> " more"
-            else ""
+toGetDefinitionReady :: Bool -> GetDefinitionCoreReady -> GetDefinitionReady
+toGetDefinitionReady shouldRenderNotifyKnowledgeResetHint ready =
+  GetDefinitionReady
+    { getDefinitionSymbols = ready.getDefinitionCoreSymbols,
+      getDefinitionPage = ready.getDefinitionCorePage,
+      getDefinitionOmitted = ready.getDefinitionCoreOmitted,
+      getDefinitionPartialLoadWarning = ready.getDefinitionCorePartialLoadWarning,
+      getDefinitionRenderNotifyKnowledgeResetHint = shouldRenderNotifyKnowledgeResetHint
+    }
 
 instance ToLoreDoc GetDefinitionOutput where
   toLoreDoc = \case
@@ -355,8 +279,33 @@ renderReady ready =
     partialWarningSection =
       maybe mempty toLoreDoc ready.getDefinitionPartialLoadWarning
 
-maxRenderedDefinitionResults :: Int
-maxRenderedDefinitionResults = 30
+omittedDefinitionsSectionHeader :: Text
+omittedDefinitionsSectionHeader =
+  "The following definitions are unchanged and were omitted, you already have them in your context:"
+
+notifyKnowledgeResetHint :: Text
+notifyKnowledgeResetHint =
+  "IF AND ONLY IF your active conversation history was just wiped, or you have suffered a total memory reset and literally cannot see these definitions in your previous turns, you should execute the `notifyKnowledgeReset` tool to resync the server cache."
+
+renderOmittedDefinitionsLines :: OmittedDefinitions -> [Text]
+renderOmittedDefinitionsLines omittedDefinitions =
+  map ("  - " <>) (map renderModuleLine omittedDefinitions.omittedDefinitionSymbolsByModule)
+  where
+    renderModuleLine moduleSymbols =
+      moduleSymbols.moduleOmittedSymbolsModuleName
+        <> ": "
+        <> T.intercalate ", " (take maxRenderedOmittedSymbolsPerModule moduleSymbols.moduleOmittedSymbolsSymbolNames)
+        <> overflowSuffix moduleSymbols
+
+    overflowSuffix moduleSymbols =
+      let hiddenCount = length moduleSymbols.moduleOmittedSymbolsSymbolNames - maxRenderedOmittedSymbolsPerModule
+       in if hiddenCount > 0
+            then " and " <> T.pack (show hiddenCount) <> " more"
+            else ""
+
+quoteTexts :: [Text] -> Text
+quoteTexts values =
+  "[" <> T.intercalate ", " (map (\value -> "\"" <> value <> "\"") values) <> "]"
 
 maxRenderedOmittedSymbolsPerModule :: Int
 maxRenderedOmittedSymbolsPerModule = 10

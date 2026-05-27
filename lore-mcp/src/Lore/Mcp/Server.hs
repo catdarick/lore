@@ -11,7 +11,6 @@ import qualified Data.Set as Set
 import Data.Text (pack)
 import qualified Data.Text as T
 import Lore (LogLevel (..), LoggerHandle, ParallelWorkersCount (..), SessionConfig (..), noLogHandle, prettyLoggerHandle)
-import Lore.Mcp.Internal.LoreDoc.Markdown (renderLoreDocMarkdown)
 import Lore.Mcp.Internal.Tool (SomeTool, getToolName)
 import Lore.Mcp.Monad (newLoreMcpContext, runLoreMcp)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
@@ -33,6 +32,7 @@ import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
 import Lore.Mcp.Tools.ResolveInstance (resolveInstanceTool)
 import Lore.Mcp.Tools.RunTestSuite (runTestSuiteTool)
 import Lore.Mcp.Tools.SearchSymbols (searchSymbolsTool)
+import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
 

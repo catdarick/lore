@@ -13,8 +13,8 @@ import qualified Data.Text.IO as TIO
 import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc), paragraph)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Tools.Render.Doc (ToLoreDoc (toLoreDoc), paragraph)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
 

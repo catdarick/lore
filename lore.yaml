@@ -2,7 +2,7 @@ alive-modules:
   - Demo
   - Demo.Support
   - Lore.Mcp.Internal.Annotated
-  - Lore.Mcp.Internal.LoreDoc
+  - Lore.Tools.Render.Doc
 
 alive-symbols:
   - Lore.Session.defaultSessionConfig

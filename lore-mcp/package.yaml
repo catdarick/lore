@@ -20,6 +20,7 @@ dependencies:
 - exceptions
 - filepath
 - ghc
+- lore-tools
 - lore
 - text
 - time

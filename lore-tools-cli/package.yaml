@@ -1,0 +1,65 @@
+name:                lore-tools-cli
+version:             0.1.0.0
+github:              "githubuser/lore"
+license:             BSD-3-Clause
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2026 Author name here"
+
+description:         CLI frontend for lore-tools
+
+dependencies:
+- base >= 4.7 && < 5
+- lore
+- lore-tools
+- text
+- aeson
+- bytestring
+- mtl
+- exceptions
+- transformers
+- containers
+- filepath
+- optparse-applicative
+- haskeline
+
+ghc-options:
+- -Werror
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-home-modules
+- -Wpartial-fields
+- -Wredundant-constraints
+
+library:
+  source-dirs:
+  - src
+
+executables:
+  lore-cli:
+    main: Main.hs
+    source-dirs:
+    - app
+    dependencies:
+    - lore-tools-cli
+
+language: Haskell2010
+
+default-extensions:
+  - RecordWildCards
+  - NamedFieldPuns
+  - DuplicateRecordFields
+  - OverloadedStrings
+  - DeriveGeneric
+  - DerivingStrategies
+  - LambdaCase
+  - FlexibleContexts
+  - NumericUnderscores
+  - MultiWayIf
+  - BlockArguments
+  - GADTs
+  - TypeApplications
+  - OverloadedRecordDot

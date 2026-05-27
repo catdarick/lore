@@ -2,6 +2,8 @@ module Lore.Mcp.Internal.Tool where
 
 import Control.Lens ((%~), (&), (.~), (?~), (^.))
 import qualified Data.Aeson as J
+import qualified Data.Aeson.Key as JK
+import qualified Data.Aeson.KeyMap as JKM
 import qualified Data.ByteString.Lazy as LBS
 import Data.Data (Proxy (..))
 import qualified Data.HashMap.Strict.InsOrd as IOM
@@ -11,8 +13,9 @@ import qualified Data.OpenApi as OpenApi
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import qualified Data.Vector as V
 import Lore.Mcp.Internal.Annotated (FieldType (..))
-import Lore.Mcp.Internal.LoreDoc (ToLoreDoc)
+import Lore.Tools.Render.Doc (ToLoreDoc)
 
 data ToolWithArgs m r output = ToolWithArgs
   { name :: Text,
@@ -55,13 +58,76 @@ getSomeToolSpec someTool =
     ]
   where
     toolInputSchema = case someTool of
-      SomeToolWithArgs (_tool :: ToolWithArgs m r output) -> J.toJSON (moveFieldsAnnotationsIntoDescription $ toInlinedSchema @(r 'MetadataType) Proxy)
+      SomeToolWithArgs (_tool :: ToolWithArgs m r output) ->
+        openApiNullableToJsonSchemaNullable $
+          J.toJSON $
+            moveFieldsAnnotationsIntoDescription $
+              toInlinedSchema @(r 'MetadataType) Proxy
       SomeToolWithoutArgs _ ->
         J.object
           [ "type" J..= ("object" :: Text),
             "properties" J..= J.object [],
             "additionalProperties" J..= False
           ]
+
+-- | Convert OpenAPI 3.0-style nullable schemas:
+--
+--   {
+--     "type": "string",
+--     "nullable": true
+--   }
+--
+-- into JSON Schema-style nullable schemas:
+--
+--   {
+--     "type": ["string", "null"]
+--   }
+--
+-- This is useful for OpenAI tool / structured-output schemas.
+openApiNullableToJsonSchemaNullable :: J.Value -> J.Value
+openApiNullableToJsonSchemaNullable = \case
+  J.Object object ->
+    let processedObject =
+          fmap openApiNullableToJsonSchemaNullable object
+
+        nullable =
+          JKM.lookup "nullable" processedObject == Just (J.Bool True)
+
+        withoutNullable =
+          JKM.delete "nullable" processedObject
+     in if nullable
+          then J.Object $ addNullToType withoutNullable
+          else J.Object withoutNullable
+  J.Array values ->
+    J.Array $ fmap openApiNullableToJsonSchemaNullable values
+  value ->
+    value
+
+addNullToType :: J.Object -> J.Object
+addNullToType object =
+  case JKM.lookup "type" object of
+    Just (J.String typeName) ->
+      JKM.insert
+        (JK.fromString "type")
+        (J.Array $ V.fromList [J.String typeName, J.String "null"])
+        object
+    Just (J.Array types) ->
+      let hasNull =
+            J.String "null" `elem` V.toList types
+
+          newTypes =
+            if hasNull
+              then types
+              else V.snoc types (J.String "null")
+       in JKM.insert
+            (JK.fromString "type")
+            (J.Array newTypes)
+            object
+    -- If there is no "type", we cannot safely rewrite it as a type union.
+    -- For example, schemas using oneOf/anyOf/allOf may not have a direct type.
+    -- In that case, just remove nullable and leave the schema otherwise intact.
+    _ ->
+      object
 
 moveFieldsAnnotationsIntoDescription :: OpenApi.Schema -> OpenApi.Schema
 moveFieldsAnnotationsIntoDescription schema =

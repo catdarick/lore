@@ -24,12 +24,7 @@ source-repository head
 library
   exposed-modules:
       Lore.JsonRpc.Server
-      Lore.Mcp.Config
       Lore.Mcp.Internal.Annotated
-      Lore.Mcp.Internal.Directory
-      Lore.Mcp.Internal.DirectoryTree
-      Lore.Mcp.Internal.LoreDoc
-      Lore.Mcp.Internal.LoreDoc.Markdown
       Lore.Mcp.Internal.Tool
       Lore.Mcp.Monad
       Lore.Mcp.Protocol.Request
@@ -54,17 +49,6 @@ library
       Lore.Mcp.Tools.ResolveInstance
       Lore.Mcp.Tools.RunTestSuite
       Lore.Mcp.Tools.SearchSymbols
-      Lore.Mcp.Tools.Shared
-      Lore.Mcp.Tools.Shared.CompactClassInstance
-      Lore.Mcp.Tools.Shared.DefinitionLocation
-      Lore.Mcp.Tools.Shared.DefinitionSourceRendering
-      Lore.Mcp.Tools.Shared.DetailedSymbolInfo
-      Lore.Mcp.Tools.Shared.Diagnostics
-      Lore.Mcp.Tools.Shared.Outputable
-      Lore.Mcp.Tools.Shared.Rendering
-      Lore.Mcp.Tools.Shared.Source
-      Lore.Mcp.Tools.Shared.SymbolResolution
-      Lore.Mcp.Tools.Shared.SymbolSuggestions
   other-modules:
       Paths_lore_mcp
   autogen-modules:
@@ -124,6 +108,7 @@ library
     , insert-ordered-containers
     , lens
     , lore
+    , lore-tools
     , mtl
     , openapi3
     , process
@@ -196,6 +181,7 @@ executable lore-mcp
     , lens
     , lore
     , lore-mcp
+    , lore-tools
     , mtl
     , openapi3
     , process
@@ -285,6 +271,7 @@ test-suite lore-mcp-test
     , lens
     , lore
     , lore-mcp
+    , lore-tools
     , mtl
     , openapi3
     , process

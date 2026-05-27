@@ -1,3 +1,5 @@
 packages:
   ./lore
+  ./lore-tools
   ./lore-mcp
+  ./lore-tools-cli

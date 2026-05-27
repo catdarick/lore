@@ -14,25 +14,29 @@ import GHC.Fingerprint (Fingerprint (..), fingerprintString)
 import qualified GHC.Plugins as GHC
 import Lore (DeclarationSpans (..), DefinitionId, DefinitionSource (..), MonadLore, NamedDefinitionSource (..))
 import Lore.Mcp.Internal.Annotated (FieldType (..))
-import Lore.Mcp.Internal.LoreDoc (SourceFile)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Monad (MonadLoreMcp (..), sentDefinitionHashes)
 import Lore.Mcp.Tools.GetDefinition.Shared
   ( BuildDefinitionsStrategy,
-    FilteredDefinitions (..),
     GetDefinitionArgs,
     GetDefinitionResult,
-    getDefinitionHandlerWithStrategy,
     maxRenderedDefinitionResults,
     mkOmittedDefinitions,
+    toGetDefinitionRequest,
+    toGetDefinitionResult,
   )
-import Lore.Mcp.Tools.Shared (Paginated (..))
-import Lore.Mcp.Tools.Shared.DefinitionSourceRendering
+import Lore.Tools.GetDefinition
+  ( FilteredDefinitions (..),
+    getDefinitionHandlerWithStrategy,
+  )
+import Lore.Tools.Internal.DefinitionSourceRendering
   ( PaginatedDefinitionSources (..),
     buildPaginatedDefinitionSourceFiles,
     paginateDefinitionSources,
   )
-import Lore.Mcp.Tools.Shared.Source (declarationBodyText)
+import Lore.Tools.Render.Doc (SourceFile)
+import Lore.Tools.Render.Source (declarationBodyText)
+import Lore.Tools.Result (PageRequest (..), Paginated (..), ResultLimit (..))
 import Text.Printf (printf)
 
 cachedGetDefinitionTool :: (MonadLoreMcp m) => Bool -> SomeTool m
@@ -46,7 +50,12 @@ cachedGetDefinitionTool shouldRenderNotifyKnowledgeResetHint =
 
 cachedGetDefinitionHandler :: (MonadLoreMcp m) => Bool -> GetDefinitionArgs 'ValueType -> m GetDefinitionResult
 cachedGetDefinitionHandler shouldRenderNotifyKnowledgeResetHint args =
-  getDefinitionHandlerWithStrategy shouldRenderNotifyKnowledgeResetHint args buildWithKnowledgeCache
+  do
+    coreResult <-
+      getDefinitionHandlerWithStrategy
+        (toGetDefinitionRequest args)
+        buildWithKnowledgeCache
+    pure (toGetDefinitionResult shouldRenderNotifyKnowledgeResetHint coreResult)
 
 data HashedDefinitionEntry = HashedDefinitionEntry
   { definitionFingerprint :: Text,
@@ -56,14 +65,18 @@ data HashedDefinitionEntry = HashedDefinitionEntry
 buildWithKnowledgeCache ::
   (MonadLoreMcp m) =>
   BuildDefinitionsStrategy m
-buildWithKnowledgeCache skip directlyRequestedSymbolNames definitionEntries = do
+buildWithKnowledgeCache pageRequest directlyRequestedSymbolNames definitionEntries = do
+  let maxItems =
+        case pageRequest.pageLimit of
+          Unlimited -> maxRenderedDefinitionResults
+          Limit requestedLimit -> min maxRenderedDefinitionResults (max 0 requestedLimit)
   hashedDefinitions <- hashDefinitionEntries definitionEntries
   let uniqueDefinitions =
         dedupeHashedDefinitionEntries hashedDefinitions
       visibleDefinitionPage =
         paginateDefinitionSources
-          skip
-          maxRenderedDefinitionResults
+          pageRequest.pageOffset
+          maxItems
           (map (.definitionEntry) uniqueDefinitions)
       visibleDefinitionFingerprints =
         visibleDefinitionFingerprintsForPage visibleDefinitionPage uniqueDefinitions
@@ -92,7 +105,7 @@ buildWithKnowledgeCache skip directlyRequestedSymbolNames definitionEntries = do
     buildFilteredVisibleDefinitionSourceFiles
       visibleDefinitionPage
       0
-      maxRenderedDefinitionResults
+      maxItems
       (map (.definitionEntry) visibleFreshDefinitions)
   pure
     FilteredDefinitions

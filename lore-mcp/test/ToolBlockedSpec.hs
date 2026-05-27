@@ -3,9 +3,9 @@ module ToolBlockedSpec
   )
 where
 
-import Lore.Mcp.Internal.LoreDoc (ToLoreDoc (toLoreDoc))
-import Lore.Mcp.Internal.LoreDoc.Markdown (renderLoreDocMarkdown)
-import Lore.Mcp.Tools.Shared (ToolBlocked (..))
+import Lore.Tools.Render.Doc (ToLoreDoc (toLoreDoc))
+import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
+import Lore.Tools.Result (ToolBlocked (..))
 import Test.Hspec
 
 spec :: Spec
