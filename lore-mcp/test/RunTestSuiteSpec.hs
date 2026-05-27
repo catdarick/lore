@@ -8,6 +8,7 @@ import qualified Data.Text as T
 import Lore.Mcp.Tools.RunTestSuite (runTestSuiteTool)
 import McpTestSupport (callToolWithArgs, fixtureLoreMcpAtWithCache, withFixtureCopy)
 import System.Directory (createDirectoryIfMissing)
+import System.Exit (ExitCode (ExitFailure))
 import System.FilePath ((</>))
 import Test.Hspec
 
@@ -76,6 +77,18 @@ spec =
 
         result `shouldContainText` "Executed 1 test components"
 
+    it "includes captured test output in execution failures" do
+      withFixtureCopy \fixtureRoot -> do
+        addFailingFixtureTestComponent fixtureRoot
+        result <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            callToolWithArgs runTestSuiteTool (J.object [])
+
+        result `shouldContainText` "[FAIL] demo-fixture/test:fixture-test"
+        result `shouldContainText` T.pack (show (ExitFailure 1))
+        result `shouldContainText` "Captured output:"
+        result `shouldContainText` "fixture-test-failure-signal"
+
 shouldContainText :: T.Text -> T.Text -> Expectation
 shouldContainText actual expected =
   if T.isInfixOf expected actual
@@ -103,6 +116,24 @@ addFixtureTestComponent fixtureRoot = do
           "main = do",
           "  args <- getArgs",
           "  putStrLn (\"fixture-test-args=\" ++ show args)"
+        ]
+    )
+
+addFailingFixtureTestComponent :: FilePath -> IO ()
+addFailingFixtureTestComponent fixtureRoot = do
+  writeFixturePackageYaml fixtureRoot
+  createDirectoryIfMissing True (fixtureRoot </> "test")
+  writeFile
+    (fixtureRoot </> "test" </> "Spec.hs")
+    ( unlines
+        [ "module Main (main) where",
+          "",
+          "import System.Exit (exitFailure)",
+          "",
+          "main :: IO ()",
+          "main = do",
+          "  putStrLn \"fixture-test-failure-signal\"",
+          "  exitFailure"
         ]
     )
 

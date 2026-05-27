@@ -1,7 +1,9 @@
 module Lore.Tools.Render.Diagnostics
   ( diagnosticMessageBody,
     diagnosticSeverityTitle,
+    diagnosticHintsDoc,
     diagnosticSummaryDoc,
+    diagnosticSummaryWithHintsDoc,
     compactDiagnosticMessage,
   )
 where
@@ -21,6 +23,18 @@ diagnosticSummaryDoc diagnostics =
       bulletList [paragraph "No diagnostics were produced."]
     _ ->
       bulletList (map (paragraph . diagnosticSummaryText) diagnostics)
+
+diagnosticSummaryWithHintsDoc :: [Diagnostic] -> LoreDoc
+diagnosticSummaryWithHintsDoc diagnostics =
+  diagnosticSummaryDoc diagnostics
+    <> diagnosticHintsDoc (concatMap (.diagnosticHints) diagnostics)
+
+diagnosticHintsDoc :: [Text] -> LoreDoc
+diagnosticHintsDoc [] =
+  mempty
+diagnosticHintsDoc hints =
+  paragraph "Hints:"
+    <> bulletList (map paragraph hints)
 
 diagnosticSeverityTitle :: Diagnostic -> Text
 diagnosticSeverityTitle diagnostic =

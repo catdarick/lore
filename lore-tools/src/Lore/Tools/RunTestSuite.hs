@@ -16,7 +16,7 @@ import Lore
   )
 import qualified Lore as Core
 import Lore.Tools.ReloadHomeModules (renderReloadHomeModulesResult)
-import Lore.Tools.Render.Diagnostics (diagnosticSummaryDoc)
+import Lore.Tools.Render.Diagnostics (diagnosticSummaryWithHintsDoc)
 import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc), heading2, paragraph)
 import Lore.Tools.Result
   ( ToolRun (..),
@@ -98,7 +98,7 @@ componentResultDoc TestSuiteComponentResult {packageName, componentName, moduleN
         <> paragraph ("reason: " <> T.pack failureReason)
     TestSuiteComponentExecutionFailure diagnostics ->
       heading2 ("[FAIL] " <> componentLabel)
-        <> diagnosticSummaryDoc diagnostics
+        <> diagnosticSummaryWithHintsDoc diagnostics
     TestSuiteComponentExecutionSuccess output ->
       heading2 ("[PASS] " <> componentLabel)
         <> paragraph

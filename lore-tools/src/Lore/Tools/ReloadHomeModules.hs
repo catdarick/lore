@@ -22,7 +22,7 @@ import Lore
     Span (..),
   )
 import qualified Lore as Core
-import Lore.Tools.Render.Diagnostics (diagnosticMessageBody, diagnosticSeverityTitle)
+import Lore.Tools.Render.Diagnostics (diagnosticHintsDoc, diagnosticMessageBody, diagnosticSeverityTitle)
 import Lore.Tools.Render.Doc (LoreDoc, bulletList, heading2, heading3, paragraph)
 import Lore.Tools.Result
   ( Paginated (..),
@@ -190,13 +190,6 @@ truncateDiagnosticMessage message
       message
   where
     maxDiagnosticMessageLength = 700
-
-diagnosticHintsDoc :: [Text] -> LoreDoc
-diagnosticHintsDoc [] =
-  mempty
-diagnosticHintsDoc hints =
-  paragraph "Hints:"
-    <> bulletList (map paragraph hints)
 
 diagnosticSnippetDoc :: SnippetContext -> Diagnostic -> LoreDoc
 diagnosticSnippetDoc Nothing _ =
