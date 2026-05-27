@@ -5,7 +5,9 @@ where
 
 import Control.Monad (forM)
 import Data.List (foldl', isInfixOf)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
+import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -16,15 +18,20 @@ import Lore
   ( ExportedSymbolNode (..),
     Instances (..),
     MonadLore,
+    PathToRoot (..),
     Symbol (..),
     SymbolCategory (..),
     SymbolInfo (..),
     SymbolVisibility (..),
     classifySymbolCategory,
     defaultLoadHomeModulesOptions,
+    findMatchingSymbols,
     listAssociatedInstances,
     listDirectInstances,
     loadHomeModules,
+    lookupSymbolInfo,
+    parseAndNormalizeName,
+    resolvePathToRoot,
   )
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
@@ -58,27 +65,27 @@ spec =
         indexedInfo <-
           fixtureLore do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
-            lookupRootSymbolInfo "Indexed"
+            resolvePreferredRootSymbolInfos "Demo.Indexed"
 
         nameSetInfo <-
           fixtureLore do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
-            lookupRootSymbolInfo "NameSet"
+            resolvePreferredRootSymbolInfos "Demo.NameSet"
 
         hasIndexInfo <-
           fixtureLore do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
-            lookupRootSymbolInfo "HasIndex"
+            resolvePreferredRootSymbolInfos "Demo.HasIndex"
 
         elemInfo <-
           fixtureLore do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
-            lookupRootSymbolInfo "Elem"
+            resolvePreferredRootSymbolInfos "Demo.Elem"
 
         bucketInfo <-
           fixtureLore do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
-            lookupRootSymbolInfo "Bucket"
+            resolvePreferredRootSymbolInfos "Demo.Bucket"
 
         demoCategories indexedInfo `shouldBe` [SymbolData]
         demoCategories nameSetInfo `shouldBe` [SymbolTypeAlias]
@@ -390,7 +397,7 @@ spec =
           (queryMatchCounts, renderedInstances) <-
             fixtureLoreAt fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
-              lookupIntersectingInstancesForQueries True ["indexedValues", "HasIndex"]
+              lookupIntersectingInstancesForRootQueries ["indexedValues", "HasIndex"]
 
           queryMatchCounts `shouldSatisfy` all (> 0)
           renderedInstances `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
@@ -523,6 +530,51 @@ lookupIntersectingInstancesForQueries resolveRoots queries = do
       if resolveRoots
         then findRootSymbols query
         else findSymbols query
+
+lookupIntersectingInstancesForRootQueries :: (MonadLore m) => [T.Text] -> m ([Int], [String])
+lookupIntersectingInstancesForRootQueries queries = do
+  rootNamesPerQuery <- mapM resolvePreferredRootNames queries
+  queryInstances <- mapM listUnionInstancesForNames rootNamesPerQuery
+  let queryMatchCounts = map length rootNamesPerQuery
+      intersectedInstances = intersectAllInstances queryInstances
+  pure (queryMatchCounts, renderInstances intersectedInstances)
+
+resolvePreferredRootSymbolInfos :: (MonadLore m) => T.Text -> m [SymbolInfo]
+resolvePreferredRootSymbolInfos query = do
+  rootNames <- resolvePreferredRootNames query
+  catMaybes <$> mapM lookupSymbolInfo rootNames
+
+resolvePreferredRootNames :: (MonadLore m) => T.Text -> m [GHC.Name]
+resolvePreferredRootNames query = do
+  symbols <- Set.toList <$> findMatchingSymbols (parseAndNormalizeName query)
+  pathsToRoot <- mapM (resolvePathToRoot . (.name)) symbols
+  let groupedByOccName =
+        Map.fromListWith
+          (<>)
+          [ (T.pack (Plugins.getOccString rootName), [rootName])
+          | pathToRoot <- pathsToRoot,
+            let rootName = NE.last pathToRoot.unPathToRoot
+          ]
+  concat <$> mapM pickPreferredByOccName (Map.elems groupedByOccName)
+  where
+    pickPreferredByOccName [] =
+      pure []
+    pickPreferredByOccName namesForOcc = do
+      symbolInfos <- catMaybes <$> mapM lookupSymbolInfo namesForOcc
+      let nonValueNames =
+            [ info.symbolName
+            | info <- symbolInfos,
+              classifySymbolCategory info.symbolThing /= SymbolValue
+            ]
+      pure $
+        case nonValueNames of
+          preferredName : _ -> [preferredName]
+          [] -> take 1 namesForOcc
+
+listUnionInstancesForNames :: (MonadLore m) => [GHC.Name] -> m Instances
+listUnionInstancesForNames names = do
+  instancesPerName <- mapM listAssociatedInstances names
+  pure (foldl' unionInstances (Instances [] []) instancesPerName)
 
 listUnionInstancesForSymbols :: (MonadLore m) => [Symbol] -> m Instances
 listUnionInstancesForSymbols symbols = do
