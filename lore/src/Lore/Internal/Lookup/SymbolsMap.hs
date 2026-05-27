@@ -229,7 +229,8 @@ prepareHomeSymbolsIndex = do
   Log.debug "Preparing symbols map for home modules..."
   homeModules <- enumerateHomeModules
   Log.debug $ "Enumerated " <> show (length homeModules) <> " home modules."
-  homeModulesSymbols <- forM homeModules getHomeModuleSymbols
+  let homeModulesSet = Set.fromList homeModules
+  homeModulesSymbols <- forM homeModules (getHomeModuleSymbols homeModulesSet)
   Log.debug $ "Fetched symbols for " <> show (length homeModulesSymbols) <> " home modules."
   let symbolsMap = buildSymbolsIndex homeModulesSymbols
   logPreparedSymbolsIndex "home modules" symbolsMap
@@ -292,8 +293,8 @@ getExternalModuleSymbols hsc_env mdl = do
               (availInfosNameSet (GHC.mi_exports iface))
       pure (ModuleSymbolsLoaded mdl exportedSymbols)
 
-getHomeModuleSymbols :: (MonadLore m) => GHC.Module -> m ModuleSymbolsResult
-getHomeModuleSymbols mdl = do
+getHomeModuleSymbols :: (MonadLore m) => Set.Set GHC.Module -> GHC.Module -> m ModuleSymbolsResult
+getHomeModuleSymbols homeModules mdl = do
   handle
     do \(_ :: SomeException) -> pure (ModuleSymbolsFailed mdl)
     do
@@ -301,7 +302,7 @@ getHomeModuleSymbols mdl = do
       case maybeModuleInfo of
         Nothing ->
           pure (ModuleSymbolsMissing mdl)
-        Just _moduleInfo -> do
+        Just moduleInfo -> do
           maybeTypedModuleFacts <- lookupTypedModuleFactsCache mdl
           case maybeTypedModuleFacts of
             Nothing -> do
@@ -309,9 +310,9 @@ getHomeModuleSymbols mdl = do
               pure (ModuleSymbolsFailed mdl)
             Just typedModuleFacts -> do
               let exportedNameSet =
-                    getExportedHomeModuleNames mdl typedModuleFacts
+                    getExportedHomeModuleNames mdl homeModules moduleInfo typedModuleFacts
                   exportedOccAliases =
-                    getExportedHomeModuleOccAliases mdl typedModuleFacts
+                    getExportedHomeModuleOccAliases mdl homeModules moduleInfo typedModuleFacts
                   definedNameSet =
                     getDefinedHomeModuleNames mdl typedModuleFacts
                       `Set.difference` Set.fromList (typedInstanceNames typedModuleFacts)
@@ -381,27 +382,42 @@ isHomeRawOccurrenceName name =
     && not (GHC.isDerivedOccName (GHC.nameOccName name))
     && not (GHC.SrcLoc.isGeneratedSrcSpan (GHC.Name.nameSrcSpan name))
 
-getExportedHomeModuleNames :: GHC.Module -> MinimalTypedModuleFacts -> Set.Set GHC.Name
-getExportedHomeModuleNames homeModule typedModuleFacts =
-  Set.fromList
-    (filter isExportedFromCurrentModule (typedExportedNames typedModuleFacts))
+getExportedHomeModuleNames :: GHC.Module -> Set.Set GHC.Module -> GHC.ModuleInfo -> MinimalTypedModuleFacts -> Set.Set GHC.Name
+getExportedHomeModuleNames homeModule homeModules moduleInfo typedModuleFacts =
+  moduleDefinedExports <> reexportedHomeModuleExports
   where
-    isExportedFromCurrentModule name =
-      case GHC.nameModule_maybe name of
-        Just module_ -> module_ == homeModule
-        Nothing -> False
+    moduleDefinedExports =
+      Set.fromList (typedExportedNames typedModuleFacts)
 
-getExportedHomeModuleOccAliases :: GHC.Module -> MinimalTypedModuleFacts -> Map.Map GHC.Name (Set.Set NormalizedOccName)
-getExportedHomeModuleOccAliases homeModule typedModuleFacts =
+    reexportedHomeModuleExports =
+      Set.fromList (reexportedHomeModuleNames homeModule homeModules moduleInfo)
+
+getExportedHomeModuleOccAliases :: GHC.Module -> Set.Set GHC.Module -> GHC.ModuleInfo -> MinimalTypedModuleFacts -> Map.Map GHC.Name (Set.Set NormalizedOccName)
+getExportedHomeModuleOccAliases homeModule homeModules moduleInfo typedModuleFacts =
   Map.fromListWith
     Set.union
-    [ (name, normalizeOccAliases aliases)
-    | (name, aliases) <- Map.toList (typedExportedOccAliases typedModuleFacts),
-      GHC.nameModule_maybe name == Just homeModule
-    ]
+    (moduleDefinedAliases <> reexportedHomeModuleAliases)
   where
+    moduleDefinedAliases =
+      [ (name, normalizeOccAliases aliases)
+      | (name, aliases) <- Map.toList (typedExportedOccAliases typedModuleFacts)
+      ]
+
+    reexportedHomeModuleAliases =
+      [ (name, Set.singleton (extractAndNormalizeOccName name))
+      | name <- reexportedHomeModuleNames homeModule homeModules moduleInfo
+      ]
+
     normalizeOccAliases aliases =
       Set.map (\aliasText -> (parseAndNormalizeName aliasText).occName) aliases
+
+reexportedHomeModuleNames :: GHC.Module -> Set.Set GHC.Module -> GHC.ModuleInfo -> [GHC.Name]
+reexportedHomeModuleNames homeModule homeModules moduleInfo =
+  filter isReexportedHomeModuleName (GHC.modInfoExports moduleInfo)
+  where
+    isReexportedHomeModuleName name =
+      GHC.nameModule_maybe name /= Just homeModule
+        && maybe False (`Set.member` homeModules) (GHC.nameModule_maybe name)
 
 getDefinedHomeModuleNames :: GHC.Module -> MinimalTypedModuleFacts -> Set.Set GHC.Name
 getDefinedHomeModuleNames homeModule typedModuleFacts =

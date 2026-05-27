@@ -105,6 +105,23 @@ spec =
         null result `shouldBe` False
         all (symbolExportedFromModule "Prelude") result `shouldBe` True
 
+      it "accepts both defining and re-exporting module qualifiers" do
+        withFixtureCopy \fixtureRoot -> do
+          addReexportQualifierFixture fixtureRoot
+          (internalQualified, exportingQualified) <-
+            fixtureLoreAt fixtureRoot do
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
+              internalQualified <- lookupRootSymbolInfo "Some.Internal.Module.foo"
+              exportingQualified <- lookupRootSymbolInfo "Some.Exporting.Module.foo"
+              pure (internalQualified, exportingQualified)
+
+          length internalQualified `shouldBe` 1
+          length exportingQualified `shouldBe` 1
+          fmap (GHC.moduleNameString . GHC.moduleName . definedIn) internalQualified
+            `shouldBe` ["Some.Internal.Module"]
+          fmap (GHC.moduleNameString . GHC.moduleName . definedIn) exportingQualified
+            `shouldBe` ["Some.Internal.Module"]
+
       it "supports module-qualified dotted operators" do
         result <-
           fixtureLore do
@@ -214,6 +231,23 @@ spec =
         length result `shouldBe` 1
         fmap (\exportedSymbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe exportedSymbol.name)) result
           `shouldBe` ["Demo.Support"]
+
+      it "accepts re-exporting module-qualified hints" do
+        withFixtureCopy \fixtureRoot -> do
+          addReexportQualifierFixture fixtureRoot
+          (internalQualified, exportingQualified) <-
+            fixtureLoreAt fixtureRoot do
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
+              internalQualified <- findSymbols "Some.Internal.Module.foo"
+              exportingQualified <- findSymbols "Some.Exporting.Module.foo"
+              pure (internalQualified, exportingQualified)
+
+          length internalQualified `shouldBe` 1
+          length exportingQualified `shouldBe` 1
+          fmap (fmap (GHC.moduleNameString . GHC.moduleName) . Plugins.nameModule_maybe . (.name)) internalQualified
+            `shouldBe` [Just "Some.Internal.Module"]
+          fmap (fmap (GHC.moduleNameString . GHC.moduleName) . Plugins.nameModule_maybe . (.name)) exportingQualified
+            `shouldBe` [Just "Some.Internal.Module"]
 
       it "includes non-exported top-level symbols from home modules" do
         result <-
@@ -543,6 +577,60 @@ symbolExportedFromModule moduleName symbolInfo =
       False
     Symbol'ExportedFrom modules_ ->
       moduleName `elem` map (GHC.moduleNameString . GHC.moduleName) (Set.toList modules_)
+
+addReexportQualifierFixture :: FilePath -> IO ()
+addReexportQualifierFixture fixtureRoot = do
+  let internalDir = fixtureRoot </> "src" </> "Some" </> "Internal"
+      exportingDir = fixtureRoot </> "src" </> "Some" </> "Exporting"
+      internalFile = internalDir </> "Module.hs"
+      exportingFile = exportingDir </> "Module.hs"
+      demoFile = fixtureRoot </> "src" </> "Demo.hs"
+  createDirectoryIfMissing True internalDir
+  createDirectoryIfMissing True exportingDir
+  TIO.writeFile internalFile reexportInternalModuleSource
+  TIO.writeFile exportingFile reexportingModuleSource
+  demoSource <- TIO.readFile demoFile
+  let sourceWithImport =
+        if T.isInfixOf reexportDemoImportLine demoSource
+          then demoSource
+          else T.replace reexportDemoImportAnchor (reexportDemoImportAnchor <> reexportDemoImportLine <> "\n") demoSource
+      sourceWithFixtureValue =
+        if T.isInfixOf reexportDemoValueAnchor sourceWithImport
+          then sourceWithImport
+          else sourceWithImport <> "\n\n" <> reexportDemoValueAnchor
+  TIO.writeFile demoFile sourceWithFixtureValue
+
+reexportInternalModuleSource :: T.Text
+reexportInternalModuleSource =
+  T.unlines
+    [ "module Some.Internal.Module (foo) where",
+      "",
+      "foo :: Int",
+      "foo = 42"
+    ]
+
+reexportingModuleSource :: T.Text
+reexportingModuleSource =
+  T.unlines
+    [ "module Some.Exporting.Module (module Some.Internal.Module) where",
+      "",
+      "import Some.Internal.Module"
+    ]
+
+reexportDemoImportAnchor :: T.Text
+reexportDemoImportAnchor =
+  "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep)\n"
+
+reexportDemoImportLine :: T.Text
+reexportDemoImportLine =
+  "import qualified Some.Exporting.Module as SomeExport (foo)"
+
+reexportDemoValueAnchor :: T.Text
+reexportDemoValueAnchor =
+  T.unlines
+    [ "_fixtureReexportedFoo :: Int",
+      "_fixtureReexportedFoo = SomeExport.foo"
+    ]
 
 addRecordFieldLookupFixture :: FilePath -> IO ()
 addRecordFieldLookupFixture fixtureRoot = do
