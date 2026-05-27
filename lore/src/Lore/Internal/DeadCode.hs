@@ -257,12 +257,12 @@ buildDeadCodeDependenciesFromDirectRefs bindings maybeCoreFacts directReferences
     | (definitionId, source) <- Map.toList bindings.bindingDefinitionsById
     ]
   where
-    coreUsedInstancesByBinder =
+    coreSemanticDependenciesByBinder =
       IntMap.fromListWith
         (<>)
-        [ (nameUniqueKey binderName, instanceNames)
-        | (binderName, instanceNames) <-
-            Map.toList (maybe Map.empty (.coreUsedInstancesByBinder) maybeCoreFacts)
+        [ (nameUniqueKey binderName, semanticNames)
+        | (binderName, semanticNames) <-
+            Map.toList (maybe Map.empty (.coreSemanticDependenciesByBinder) maybeCoreFacts)
         ]
 
     dependenciesForDefinition definitionId source =
@@ -270,9 +270,9 @@ buildDeadCodeDependenciesFromDirectRefs bindings maybeCoreFacts directReferences
         { projectDependencyDirectReferenceNames =
             Map.findWithDefault Set.empty definitionId directReferencesById,
           projectDependencyCoreSemanticNames =
-            [ instanceName
+            [ semanticName
             | definitionName <- Set.toList source.definitionSourceNames,
-              instanceName <- IntMap.findWithDefault [] (nameUniqueKey definitionName) coreUsedInstancesByBinder
+              semanticName <- IntMap.findWithDefault [] (nameUniqueKey definitionName) coreSemanticDependenciesByBinder
             ]
         }
 

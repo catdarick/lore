@@ -170,7 +170,12 @@ data MinimalTypedModuleFacts = MinimalTypedModuleFacts
   deriving anyclass (NFData)
 
 data MinimalCoreModuleFacts = MinimalCoreModuleFacts
-  { coreUsedInstancesByBinder :: !(Map.Map GHC.Name [GHC.Name])
+  { -- Used by definition-closure/query dependency expansion.
+    -- Keep this scoped to direct evidence (dfun) usage to preserve depth semantics.
+    coreEvidenceDependenciesByBinder :: !(Map.Map GHC.Name [GHC.Name]),
+    -- Used by dead-code reachability graph construction.
+    -- May include transitive semantic dependencies across top-level binders.
+    coreSemanticDependenciesByBinder :: !(Map.Map GHC.Name [GHC.Name])
   }
   deriving stock (Generic)
   deriving anyclass (NFData)

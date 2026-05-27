@@ -14,7 +14,12 @@ import qualified GHC.Driver.Plugins as GHC.Plugins
 import qualified GHC.Hs as GHC.Hs
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
-import Lore.Internal.Definition.Analysis (buildMinimalTypedModuleFacts, buildParsedModuleFacts, buildUsedInstancesByBinder)
+import Lore.Internal.Definition.Analysis
+  ( buildEvidenceDependenciesByBinder,
+    buildMinimalTypedModuleFacts,
+    buildParsedModuleFacts,
+    buildSemanticDependenciesByBinder,
+  )
 import Lore.Internal.Definition.Cache.CoreModuleFacts (storeCoreModuleFactsCacheInContext)
 import Lore.Internal.Definition.Cache.DefinitionModuleIndex (invalidateDefinitionModuleIndexCacheForModuleInContext)
 import Lore.Internal.Definition.Cache.ParsedModuleFacts (storeParsedModuleFactsCacheInContext)
@@ -110,8 +115,10 @@ rawArtifactsTcCoreProcessedCorePass sessionContext modGuts = do
               Set.empty
         coreFacts =
           MinimalCoreModuleFacts
-            { coreUsedInstancesByBinder =
-                buildUsedInstancesByBinder interestingBinders interestingDependencyNames (GHC.mg_binds modGuts)
+            { coreEvidenceDependenciesByBinder =
+                buildEvidenceDependenciesByBinder interestingBinders (GHC.mg_binds modGuts),
+              coreSemanticDependenciesByBinder =
+                buildSemanticDependenciesByBinder interestingBinders interestingDependencyNames (GHC.mg_binds modGuts)
             }
     storeCoreModuleFactsCacheInContext sessionContext homeModule coreFacts
     -- Core facts arriving after a previously built definition index would leave
