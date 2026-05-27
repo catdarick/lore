@@ -20,7 +20,7 @@ import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries, getCachedModSum
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Package
   ( ComponentData (..),
-    ComponentKind,
+    ComponentKind (..),
     PackageData (..),
     componentMainModulePathCandidates,
     firstExistingPath,
@@ -62,10 +62,15 @@ collectLoadedComponentModuleInfoWithDiagnostics = do
         | pkg <- packages,
           component <- pkg.components
         ]
+      rootedEntryComponents =
+        [ rootedComponent
+        | rootedComponent@(_, _, component) <- rootedComponents,
+          isEntryComponentKind component.componentKind
+        ]
   rootedComponentsWithSourceDirs <- forM rootedComponents \(packageName, packageRoot, component) -> do
     resolvedSourceDirs <- resolveComponentSourceDirs packageRoot component
     pure (packageName, packageRoot, component, resolvedSourceDirs)
-  componentEntriesWithErrors <- forM rootedComponents \(packageName, packageRoot, component) ->
+  componentEntriesWithErrors <- forM rootedEntryComponents \(packageName, packageRoot, component) ->
     resolveLoadedComponentEntryModule packageName packageRoot component generatedMainModulesByKey modSummariesByFile modSummariesByModule
   let entryResolutionErrors =
         [ "Failed to resolve entry module for "
@@ -74,7 +79,7 @@ collectLoadedComponentModuleInfoWithDiagnostics = do
             <> component.componentName
             <> ": "
             <> errorMessage
-        | ((packageName, _, component), Left errorMessage) <- zip rootedComponents componentEntriesWithErrors
+        | ((packageName, _, component), Left errorMessage) <- zip rootedEntryComponents componentEntriesWithErrors
         ]
       loadedEntryModules =
         [ entryModule
@@ -99,6 +104,19 @@ collectLoadedComponentModuleInfoWithDiagnostics = do
           | (module_, componentKind) <- concat namedModulePairsByComponent <> entryPairsByComponent
           ]
   pure (moduleKindsByModule, loadedEntryModules, entryResolutionErrors)
+
+isEntryComponentKind :: ComponentKind -> Bool
+isEntryComponentKind = \case
+  ComponentKindExecutable ->
+    True
+  ComponentKindTest ->
+    True
+  ComponentKindBenchmark ->
+    True
+  ComponentKindLibrary ->
+    False
+  ComponentKindInternalLibrary ->
+    False
 
 resolveLoadedComponentEntryModule ::
   (MonadLore m) =>
