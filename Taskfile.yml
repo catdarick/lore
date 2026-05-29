@@ -5,6 +5,11 @@ tasks:
     desc: Build the workspace with stack
     cmds:
       - stack build
+  
+  install: 
+    desc: Install lore-mcp and lore-cli with stack
+    cmds:
+      - stack clean lore lore-mcp lore-tools-cli && stack install lore-mcp lore-tools-cli --ghc-options="-O2"
 
   mcp-inspector:
     desc: Run MCP Inspector for lore-mcp; set MCP_HOST_IP for remote browser access

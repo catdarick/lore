@@ -10,6 +10,7 @@ import Lore
   ( DeadCodeOptions (..),
     DeadCodeResult (..),
     DeadDefinition (..),
+    DefinitionSource (..),
     Diagnostic (..),
     LoadHomeModulesResult (..),
     MonadLore,
@@ -33,10 +34,6 @@ spec = do
         let deadNames = deadDefinitionOccNames result
         deadNames `shouldContain` ["deadRoot", "deadDependency"]
         deadNames `shouldNotContain` ["liveRoot", "liveDependency"]
-        deadNames `shouldNotContain` ["ToSchema", "schema", "IsFieldMetadata", "modifySchema", "IsExample", "exampleToJSON"]
-        deadNames `shouldNotContainPrefix` "$fToSchema"
-        deadNames `shouldNotContainPrefix` "$fIsFieldMetadata"
-        deadNames `shouldNotContainPrefix` "$fIsExample"
         deadNames `shouldNotContain` ["testMainHelper"]
 
     it "filters reported dead definitions by target module without changing global reachability" do
@@ -79,6 +76,109 @@ spec = do
         result <-
           runFindDeadCode fixtureRoot defaultDeadCodeOptions
         deadDefinitionOccNames result `shouldContain` ["testOnly"]
+
+    it "keeps used type-family instances alive" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+        let moduleDeadNames =
+              deadDefinitionOccNamesInModule "DeadCode.TypeFamily" result
+        moduleDeadNames `shouldBe` []
+
+    it "reports unused type/data family instances as dead" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+        let deadNames = deadDefinitionOccNames result
+        deadNames `shouldContainPrefix` "D:R:UnusedDisplay"
+
+    it "keeps unused external-only type/data family instances alive by default" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+        let deadNames = deadDefinitionOccNames result
+        deadNames `shouldNotContainPrefix` "D:R:ExternalDisplay"
+
+    it "reports unused class instances as dead" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+        let deadNames = deadDefinitionOccNames result
+        deadNames `shouldContain` ["UnusedClassData"]
+        deadNames `shouldContainPrefix` "$fShowUnusedClassData"
+
+    it "keeps instances with only external head types alive by default" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+        let moduleDeadNames =
+              deadDefinitionOccNamesInModule "DeadCode.ExternalOnlyInstance" result
+        moduleDeadNames `shouldNotContainPrefix` "$fExternalOnlyInt"
+
+    it "reports unused derived instances as dead" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+        let moduleDeadNames =
+              deadDefinitionOccNamesInModule "DeadCode.UnusedDerived" result
+        moduleDeadNames `shouldContain` ["DerivedData"]
+        moduleDeadNames `shouldContainPrefix` "$fGenericDerivedData"
+
+    it "keeps associated type family instances declared in class instances alive" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          fixtureLoreAt fixtureRoot do
+            requireLoadedHomeModules
+            wrapperType <- requireSymbol "DeadCode.AssociatedTypeInstance" "Wrapper"
+            findDeadCode defaultDeadCodeOptions {deadCodeAliveNames = Set.singleton wrapperType}
+        let moduleDeadNames =
+              deadDefinitionOccNamesInModule "DeadCode.AssociatedTypeInstance" result
+        moduleDeadNames `shouldNotContainPrefix` "$fHasAssocInt"
+        moduleDeadNames `shouldNotContainPrefix` "$fHasAssocWrapper"
+        moduleDeadNames `shouldNotContainPrefix` "D:R:AssocWrapper"
+
+    it "keeps associated type family instances alive for multi-parameter class instances" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          fixtureLoreAt fixtureRoot do
+            requireLoadedHomeModules
+            wrapperType <- requireSymbol "DeadCode.AssociatedTypeInstanceMulti" "Wrapper2"
+            findDeadCode defaultDeadCodeOptions {deadCodeAliveNames = Set.singleton wrapperType}
+        let moduleDeadNames =
+              deadDefinitionOccNamesInModule "DeadCode.AssociatedTypeInstanceMulti" result
+        moduleDeadNames `shouldNotContainPrefix` "$fHasAssoc2IntBool"
+        moduleDeadNames `shouldNotContainPrefix` "$fHasAssoc2Wrapper2"
+        moduleDeadNames `shouldNotContainPrefix` "D:R:Assoc2Wrapper2"
+
+    it "keeps associated type family instances alive when class is imported" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+        let moduleDeadNames =
+              deadDefinitionOccNamesInModule "DeadCode.AssociatedTypeImportedInstance" result
+        moduleDeadNames `shouldNotContainPrefix` "D:R:AssocImported"
+
+    it "keeps class instances alive when any instance-head type is alive" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          fixtureLoreAt fixtureRoot do
+            requireLoadedHomeModules
+            headAliveType <- requireSymbol "DeadCode.InstanceHeadAlive" "HeadAlive"
+            findDeadCode defaultDeadCodeOptions {deadCodeAliveNames = Set.singleton headAliveType}
+        let moduleDeadNames =
+              deadDefinitionOccNamesInModule "DeadCode.InstanceHeadAlive" result
+        moduleDeadNames `shouldNotContainPrefix` "$fHeadClassHeadAlive"
+
+    it "keeps plain class instances alive when any instance-head type is alive" do
+      withFixtureDeadCodeProject \fixtureRoot -> do
+        result <-
+          fixtureLoreAt fixtureRoot do
+            requireLoadedHomeModules
+            headAliveType <- requireSymbol "DeadCode.PlainInstanceHeadAlive" "HeadAlive2"
+            findDeadCode defaultDeadCodeOptions {deadCodeAliveNames = Set.singleton headAliveType}
+        let moduleDeadNames =
+              deadDefinitionOccNamesInModule "DeadCode.PlainInstanceHeadAlive" result
+        moduleDeadNames `shouldNotContainPrefix` "$fMarkerHeadAlive2"
 
     it "reports entry-module resolution warnings instead of silently dropping them" do
       withFixtureDeadCodeProject \fixtureRoot -> do
@@ -153,9 +253,21 @@ deadDefinitionOccNames result =
     name <- Set.toList deadDefinition.deadDefinitionNames
   ]
 
+deadDefinitionOccNamesInModule :: String -> DeadCodeResult -> [String]
+deadDefinitionOccNamesInModule moduleName result =
+  [ GHC.getOccString name
+  | deadDefinition <- result.deadCodeDeadDefinitions,
+    isDefinitionInModule moduleName deadDefinition,
+    name <- Set.toList deadDefinition.deadDefinitionNames
+  ]
+
 shouldNotContainPrefix :: [String] -> String -> Expectation
 shouldNotContainPrefix names prefix =
   any (List.isPrefixOf prefix) names `shouldBe` False
+
+shouldContainPrefix :: [String] -> String -> Expectation
+shouldContainPrefix names prefix =
+  any (List.isPrefixOf prefix) names `shouldBe` True
 
 withFixtureDeadCodeProject :: (FilePath -> IO a) -> IO a
 withFixtureDeadCodeProject action =
@@ -178,6 +290,18 @@ writeFixtureDeadCodeModules fixtureRoot = do
   createDirectoryIfMissing True testSupportDir
   TIO.writeFile (srcDir </> "Lib.hs") deadCodeLibSource
   TIO.writeFile (srcDir </> "TypeclassMetadata.hs") deadCodeTypeclassMetadataSource
+  TIO.writeFile (srcDir </> "TypeFamily.hs") deadCodeTypeFamilySource
+  TIO.writeFile (srcDir </> "UnusedTypeFamily.hs") deadCodeUnusedTypeFamilySource
+  TIO.writeFile (srcDir </> "ExternalOnlyTypeFamily.hs") deadCodeExternalOnlyTypeFamilySource
+  TIO.writeFile (srcDir </> "UnusedClassInstance.hs") deadCodeUnusedClassInstanceSource
+  TIO.writeFile (srcDir </> "ExternalOnlyInstance.hs") deadCodeExternalOnlyInstanceSource
+  TIO.writeFile (srcDir </> "UnusedDerived.hs") deadCodeUnusedDerivedSource
+  TIO.writeFile (srcDir </> "AssociatedTypeInstance.hs") deadCodeAssociatedTypeInstanceSource
+  TIO.writeFile (srcDir </> "AssociatedTypeInstanceMulti.hs") deadCodeAssociatedTypeInstanceMultiSource
+  TIO.writeFile (srcDir </> "AssociatedTypeClass.hs") deadCodeAssociatedTypeClassSource
+  TIO.writeFile (srcDir </> "AssociatedTypeImportedInstance.hs") deadCodeAssociatedTypeImportedInstanceSource
+  TIO.writeFile (srcDir </> "InstanceHeadAlive.hs") deadCodeInstanceHeadAliveSource
+  TIO.writeFile (srcDir </> "PlainInstanceHeadAlive.hs") deadCodePlainInstanceHeadAliveSource
   TIO.writeFile (devDir </> "Dev.hs") deadCodeDevSource
   TIO.writeFile (appDir </> "Main.hs") deadCodeMainSource
   TIO.writeFile (testDir </> "SpecMain.hs") deadCodeTestMainSource
@@ -283,9 +407,228 @@ deadCodeMainSource =
     [ "module Main where",
       "",
       "import DeadCode.Lib (liveRoot)",
+      "import DeadCode.AssociatedTypeInstance (useWrapperAssoc)",
+      "import DeadCode.AssociatedTypeInstanceMulti (useWrapperAssoc2)",
+      "import DeadCode.AssociatedTypeImportedInstance (useImportedAssoc)",
+      "import DeadCode.InstanceHeadAlive (useHeadAlive)",
+      "import DeadCode.PlainInstanceHeadAlive (useHeadAlive2)",
+      "import DeadCode.TypeFamily (someAliveFunction)",
       "",
       "main :: IO ()",
-      "main = print liveRoot"
+      "main = print (liveRoot + length someAliveFunction + useWrapperAssoc + useWrapperAssoc2 + useImportedAssoc + useHeadAlive + useHeadAlive2)"
+    ]
+
+deadCodeTypeFamilySource :: Text
+deadCodeTypeFamilySource =
+  T.unlines
+    [ "module DeadCode.TypeFamily where",
+      "",
+      "data LocalArg = LocalArg",
+      "",
+      "type family DisplayType a",
+      "type instance DisplayType LocalArg = String",
+      "",
+      "someAliveFunction :: DisplayType LocalArg",
+      "someAliveFunction = \"This is a string, but DisplayType LocalArg resolves to String\""
+    ]
+
+deadCodeUnusedTypeFamilySource :: Text
+deadCodeUnusedTypeFamilySource =
+  T.unlines
+    [ "module DeadCode.UnusedTypeFamily where",
+      "",
+      "data UnusedLocal = UnusedLocal",
+      "",
+      "type family UnusedDisplay a",
+      "type instance UnusedDisplay UnusedLocal = Int"
+    ]
+
+deadCodeExternalOnlyTypeFamilySource :: Text
+deadCodeExternalOnlyTypeFamilySource =
+  T.unlines
+    [ "module DeadCode.ExternalOnlyTypeFamily where",
+      "",
+      "type family ExternalDisplay a",
+      "type instance ExternalDisplay Bool = Int"
+    ]
+
+deadCodeUnusedClassInstanceSource :: Text
+deadCodeUnusedClassInstanceSource =
+  T.unlines
+    [ "module DeadCode.UnusedClassInstance where",
+      "",
+      "data UnusedClassData = UnusedClassData",
+      "",
+      "instance Show UnusedClassData where",
+      "  show _ = \"unused\""
+    ]
+
+deadCodeExternalOnlyInstanceSource :: Text
+deadCodeExternalOnlyInstanceSource =
+  T.unlines
+    [ "module DeadCode.ExternalOnlyInstance where",
+      "",
+      "class ExternalOnly a where",
+      "  externalOnlyTag :: proxy a -> Int",
+      "",
+      "instance ExternalOnly Int where",
+      "  externalOnlyTag _ = 42"
+    ]
+
+deadCodeUnusedDerivedSource :: Text
+deadCodeUnusedDerivedSource =
+  T.unlines
+    [ "{-# LANGUAGE DeriveGeneric #-}",
+      "",
+      "module DeadCode.UnusedDerived where",
+      "",
+      "import GHC.Generics (Generic)",
+      "",
+      "data DerivedData = DerivedData deriving (Generic)"
+    ]
+
+deadCodeAssociatedTypeInstanceSource :: Text
+deadCodeAssociatedTypeInstanceSource =
+  T.unlines
+    [ "{-# LANGUAGE ScopedTypeVariables #-}",
+      "{-# LANGUAGE TypeApplications #-}",
+      "{-# LANGUAGE TypeFamilies #-}",
+      "",
+      "module DeadCode.AssociatedTypeInstance where",
+      "",
+      "import Data.Proxy (Proxy (..))",
+      "",
+      "data Wrapper api = Wrapper",
+      "",
+      "class HasAssoc api where",
+      "  type Assoc api :: *",
+      "  marker :: proxy api -> Int",
+      "",
+      "instance HasAssoc Int where",
+      "  type Assoc Int = String",
+      "  marker _ = 1",
+      "",
+      "instance HasAssoc api => HasAssoc (Wrapper api) where",
+      "  type Assoc (Wrapper api) = Assoc api",
+      "  marker _ = marker @api Proxy",
+      "",
+      "useWrapperAssoc :: Int",
+      "useWrapperAssoc = marker @(Wrapper Int) Proxy"
+    ]
+
+deadCodeAssociatedTypeInstanceMultiSource :: Text
+deadCodeAssociatedTypeInstanceMultiSource =
+  T.unlines
+    [ "{-# LANGUAGE FlexibleInstances #-}",
+      "{-# LANGUAGE MultiParamTypeClasses #-}",
+      "{-# LANGUAGE ScopedTypeVariables #-}",
+      "{-# LANGUAGE TypeApplications #-}",
+      "{-# LANGUAGE TypeFamilies #-}",
+      "",
+      "module DeadCode.AssociatedTypeInstanceMulti where",
+      "",
+      "import Data.Kind (Type)",
+      "import Data.Proxy (Proxy (..))",
+      "",
+      "data Wrapper2 api = Wrapper2",
+      "",
+      "class HasAssoc2 a b where",
+      "  type Assoc2 a b x :: Type",
+      "  marker2 :: proxy a -> proxy b -> Int",
+      "",
+      "instance HasAssoc2 Int Bool where",
+      "  type Assoc2 Int Bool x = [x]",
+      "  marker2 _ _ = 2",
+      "",
+      "instance HasAssoc2 a b => HasAssoc2 (Wrapper2 a) b where",
+      "  type Assoc2 (Wrapper2 a) b x = Assoc2 a b x",
+      "  marker2 _ _ = marker2 @a @b Proxy Proxy",
+      "",
+      "useWrapperAssoc2 :: Int",
+      "useWrapperAssoc2 = marker2 @(Wrapper2 Int) @Bool Proxy Proxy"
+    ]
+
+deadCodeAssociatedTypeClassSource :: Text
+deadCodeAssociatedTypeClassSource =
+  T.unlines
+    [ "{-# LANGUAGE ScopedTypeVariables #-}",
+      "{-# LANGUAGE TypeApplications #-}",
+      "{-# LANGUAGE TypeFamilies #-}",
+      "",
+      "module DeadCode.AssociatedTypeClass where",
+      "",
+      "import Data.Kind (Type)",
+      "import Data.Proxy (Proxy (..))",
+      "",
+      "class HasAssocImported api where",
+      "  type AssocImported api :: Type",
+      "  markerImported :: proxy api -> Int",
+      "",
+      "instance HasAssocImported Int where",
+      "  type AssocImported Int = String",
+      "  markerImported _ = 3",
+      "",
+      "instance HasAssocImported api => HasAssocImported [api] where",
+      "  type AssocImported [api] = AssocImported api",
+      "  markerImported _ = markerImported @api Proxy"
+    ]
+
+deadCodeAssociatedTypeImportedInstanceSource :: Text
+deadCodeAssociatedTypeImportedInstanceSource =
+  T.unlines
+    [ "{-# LANGUAGE ScopedTypeVariables #-}",
+      "{-# LANGUAGE TypeApplications #-}",
+      "{-# LANGUAGE TypeFamilies #-}",
+      "",
+      "module DeadCode.AssociatedTypeImportedInstance where",
+      "",
+      "import Data.Proxy (Proxy (..))",
+      "import DeadCode.AssociatedTypeClass (HasAssocImported (..))",
+      "",
+      "data ImportedWrapper api = ImportedWrapper",
+      "",
+      "instance HasAssocImported api => HasAssocImported (ImportedWrapper api) where",
+      "  type AssocImported (ImportedWrapper api) = AssocImported api",
+      "  markerImported _ = markerImported @api Proxy",
+      "",
+      "useImportedAssoc :: Int",
+      "useImportedAssoc = markerImported @(ImportedWrapper Int) Proxy"
+    ]
+
+deadCodeInstanceHeadAliveSource :: Text
+deadCodeInstanceHeadAliveSource =
+  T.unlines
+    [ "{-# LANGUAGE TypeFamilies #-}",
+      "",
+      "module DeadCode.InstanceHeadAlive where",
+      "",
+      "import Data.Kind (Type)",
+      "",
+      "data HeadAlive = HeadAlive",
+      "",
+      "class HeadClass a where",
+      "  type HeadAssoc a :: Type",
+      "",
+      "instance HeadClass HeadAlive where",
+      "  type HeadAssoc HeadAlive = Int",
+      "",
+      "useHeadAlive :: Int",
+      "useHeadAlive = case HeadAlive of HeadAlive -> 1"
+    ]
+
+deadCodePlainInstanceHeadAliveSource :: Text
+deadCodePlainInstanceHeadAliveSource =
+  T.unlines
+    [ "module DeadCode.PlainInstanceHeadAlive where",
+      "",
+      "data HeadAlive2 = HeadAlive2",
+      "",
+      "class Marker a",
+      "",
+      "instance Marker HeadAlive2",
+      "",
+      "useHeadAlive2 :: Int",
+      "useHeadAlive2 = case HeadAlive2 of HeadAlive2 -> 1"
     ]
 
 deadCodeTestMainSource :: Text
@@ -344,3 +687,7 @@ brokenEntryPackageSuffix =
       "    - base",
       "    - demo-fixture"
     ]
+
+isDefinitionInModule :: String -> DeadDefinition -> Bool
+isDefinitionInModule moduleName deadDefinition =
+  GHC.moduleNameString (GHC.moduleName deadDefinition.deadDefinitionSource.definitionSourceModule) == moduleName

@@ -26,12 +26,18 @@ import Data.Maybe (mapMaybe, maybeToList)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC
+import qualified GHC.Core.Coercion.Axiom as GHCAxiom
+import qualified GHC.Core.FamInstEnv as GHC.FamInst
+import qualified GHC.Core.InstEnv as GHC.InstEnv
+import qualified GHC.Core.TyCo.FVs as GHC.TyCoFVs
+import qualified GHC.Core.TyCo.Rep as GHCTyCo
 import qualified GHC.Data.Strict as Strict
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
 import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.FieldLabel as GHC.FieldLabel
 import qualified GHC.Types.Unique as GHCUnique
+import qualified GHC.Types.Unique.Set as GHC.UniqueSet
 import Lore.Internal.Definition.SourceTree (collectModuleSourceRegionCandidates)
 import Lore.Internal.Definition.Types
 import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfoNamesWithFields, fieldLabelAliasText, greNameFieldAliasText)
@@ -89,14 +95,19 @@ buildMinimalTypedModuleFacts ::
   GHC.Tc.TcGblEnv ->
   MinimalTypedModuleFacts
 buildMinimalTypedModuleFacts definingModule tcg =
-  MinimalTypedModuleFacts
-    { typedDefinitionNames = collectDefinitionCandidateNames definingModule tcg,
-      typedInstanceNames = collectInstanceNames definingModule tcg,
-      typedDefinitionOccAliases = collectDefinitionOccAliases definingModule tcg,
-      typedExportedNames = collectExportedNames definingModule tcg,
-      typedExportedOccAliases = collectExportedOccAliases definingModule tcg,
-      typedOccurrences = collectMinimalTypedOccurrences tcg
-    }
+  let familyInstanceNames =
+        collectFamilyInstanceNames definingModule tcg
+      instanceNames =
+        collectClassInstanceNames definingModule tcg <> familyInstanceNames
+   in MinimalTypedModuleFacts
+        { typedDefinitionNames = collectDefinitionCandidateNames definingModule tcg,
+          typedInstanceNames = instanceNames,
+          typedInstanceHeadTypeNamesByInstance = collectInstanceHeadTypeNamesByInstance definingModule tcg,
+          typedDefinitionOccAliases = collectDefinitionOccAliases definingModule tcg,
+          typedExportedNames = collectExportedNames definingModule tcg,
+          typedExportedOccAliases = collectExportedOccAliases definingModule tcg,
+          typedOccurrences = collectMinimalTypedOccurrences tcg
+        }
 
 buildDefinitionBindings ::
   GHC.Module ->
@@ -506,16 +517,52 @@ collectDefinitionCandidateNames homeModule tcg =
         ]
 
     instanceNames =
-      collectInstanceNames homeModule tcg
+      collectClassInstanceNames homeModule tcg <> collectFamilyInstanceNames homeModule tcg
 
-collectInstanceNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
-collectInstanceNames homeModule tcg =
-  filter belongsToModule $
-    map GHC.getName (GHC.Tc.tcg_insts tcg)
-      <> map GHC.getName (GHC.Tc.tcg_fam_insts tcg)
+collectClassInstanceNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
+collectClassInstanceNames homeModule tcg =
+  filter belongsToModule (map GHC.getName (GHC.Tc.tcg_insts tcg))
   where
     belongsToModule name =
       GHC.nameModule_maybe name == Just homeModule
+
+collectFamilyInstanceNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
+collectFamilyInstanceNames homeModule tcg =
+  filter belongsToModule (map GHC.getName (GHC.Tc.tcg_fam_insts tcg))
+  where
+    belongsToModule name =
+      GHC.nameModule_maybe name == Just homeModule
+
+collectInstanceHeadTypeNamesByInstance ::
+  GHC.Module ->
+  GHC.Tc.TcGblEnv ->
+  Map.Map GHC.Name (Set.Set GHC.Name)
+collectInstanceHeadTypeNamesByInstance homeModule tcg =
+  Map.fromListWith (<>) (classInstanceHeadEntries <> familyInstanceHeadEntries)
+  where
+    classInstanceHeadEntries =
+      [ (instanceName, collectHeadTypeNames (GHC.InstEnv.is_tys classInstance))
+      | classInstance <- GHC.Tc.tcg_insts tcg,
+        let instanceName = GHC.getName (GHC.InstEnv.instanceDFunId classInstance),
+        belongsToModule instanceName
+      ]
+
+    familyInstanceHeadEntries =
+      [ (instanceName, collectHeadTypeNames (GHC.FamInst.fi_tys familyInstance))
+      | familyInstance <- GHC.Tc.tcg_fam_insts tcg,
+        let instanceName = GHC.getName familyInstance,
+        belongsToModule instanceName
+      ]
+
+    belongsToModule name =
+      GHC.nameModule_maybe name == Just homeModule
+
+    collectHeadTypeNames instanceHeadTypes =
+      Set.fromList
+        [ GHC.getName tyCon
+        | instanceHeadType <- instanceHeadTypes,
+          tyCon <- GHC.UniqueSet.nonDetEltsUniqSet (GHC.TyCoFVs.tyConsOfType instanceHeadType)
+        ]
 
 collectDefinitionOccAliases :: GHC.Module -> GHC.Tc.TcGblEnv -> Map.Map GHC.Name (Set.Set Text)
 collectDefinitionOccAliases homeModule tcg =
@@ -667,19 +714,15 @@ collectDirectCoreDependenciesInExpr ::
 collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys = \case
   GHC.Var variable ->
     let variableName = GHC.getName variable
-        variableKey = nameUniqueKey variableName
-        semanticDependencies =
-          [ variableName
-          | GHC.isDFunId variable || IntSet.member variableKey interestingDependencyKeys
-          ]
-        topLevelDependencies =
-          [ variableKey
-          | IntSet.member variableKey topLevelBindingKeys
-          ]
-     in CoreDirectDependencies
-          { coreDirectSemanticNames = semanticDependencies,
-            coreDirectTopLevelBinderKeys = topLevelDependencies
-          }
+        variableDependencies =
+          coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys variableName
+     in if GHC.isDFunId variable
+          then
+            variableDependencies
+              { coreDirectSemanticNames =
+                  variableName : variableDependencies.coreDirectSemanticNames
+              }
+          else variableDependencies
   GHC.Lit _ ->
     emptyCoreDirectDependencies
   GHC.App function argument ->
@@ -694,14 +737,111 @@ collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKey
     collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys scrutinee
       `appendCoreDirectDependencies` concatCoreDirectDependencies
         (map (collectDirectCoreDependenciesInAlt interestingDependencyKeys topLevelBindingKeys) alternatives)
-  GHC.Cast expression _ ->
+  GHC.Cast expression coercion ->
     collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys expression
+      `appendCoreDirectDependencies` collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
   GHC.Tick _ expression ->
     collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys expression
-  GHC.Type _ ->
+  GHC.Type type_ ->
+    collectDirectCoreDependenciesInType interestingDependencyKeys topLevelBindingKeys type_
+  GHC.Coercion coercion ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+
+collectDirectCoreDependenciesInType ::
+  IntSet.IntSet ->
+  IntSet.IntSet ->
+  GHC.Type ->
+  CoreDirectDependencies
+collectDirectCoreDependenciesInType interestingDependencyKeys topLevelBindingKeys type_ =
+  concatCoreDirectDependencies
+    [ coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys (GHC.getName tyCon)
+    | tyCon <- GHC.UniqueSet.nonDetEltsUniqSet (GHC.TyCoFVs.tyConsOfType type_)
+    ]
+
+collectDirectCoreDependenciesInCoercion ::
+  IntSet.IntSet ->
+  IntSet.IntSet ->
+  GHCTyCo.Coercion ->
+  CoreDirectDependencies
+collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys = \case
+  GHCTyCo.Refl type_ ->
+    collectDirectCoreDependenciesInType interestingDependencyKeys topLevelBindingKeys type_
+  GHCTyCo.GRefl _ type_ maybeCoercion ->
+    collectDirectCoreDependenciesInType interestingDependencyKeys topLevelBindingKeys type_
+      `appendCoreDirectDependencies` collectDirectCoreDependenciesInMCoercion interestingDependencyKeys topLevelBindingKeys maybeCoercion
+  GHCTyCo.TyConAppCo _ _ coercions ->
+    concatCoreDirectDependencies
+      (map (collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys) coercions)
+  GHCTyCo.AppCo coercionOne coercionTwo ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercionOne
+      `appendCoreDirectDependencies` collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercionTwo
+  GHCTyCo.ForAllCo _ kindCoercion coercion ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys kindCoercion
+      `appendCoreDirectDependencies` collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+  GHCTyCo.FunCo {GHCTyCo.fco_mult = multiplicityCoercion, GHCTyCo.fco_arg = argumentCoercion, GHCTyCo.fco_res = resultCoercion} ->
+    concatCoreDirectDependencies
+      [ collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys multiplicityCoercion,
+        collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys argumentCoercion,
+        collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys resultCoercion
+      ]
+  GHCTyCo.CoVarCo coercionVariable ->
+    coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys (GHC.getName coercionVariable)
+  GHCTyCo.AxiomInstCo axiom _ coercions ->
+    coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys (GHCAxiom.coAxiomName axiom)
+      `appendCoreDirectDependencies` concatCoreDirectDependencies
+        (map (collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys) coercions)
+  GHCTyCo.UnivCo _ _ _ _ ->
     emptyCoreDirectDependencies
-  GHC.Coercion _ ->
+  GHCTyCo.SymCo coercion ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+  GHCTyCo.TransCo coercionOne coercionTwo ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercionOne
+      `appendCoreDirectDependencies` collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercionTwo
+  GHCTyCo.SelCo _ coercion ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+  GHCTyCo.LRCo _ coercion ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+  GHCTyCo.InstCo coercion instantiationCoercion ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+      `appendCoreDirectDependencies` collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys instantiationCoercion
+  GHCTyCo.KindCo coercion ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+  GHCTyCo.SubCo coercion ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+  GHCTyCo.AxiomRuleCo _ coercions ->
+    concatCoreDirectDependencies
+      (map (collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys) coercions)
+  GHCTyCo.HoleCo _ ->
     emptyCoreDirectDependencies
+
+collectDirectCoreDependenciesInMCoercion ::
+  IntSet.IntSet ->
+  IntSet.IntSet ->
+  GHCTyCo.MCoercion ->
+  CoreDirectDependencies
+collectDirectCoreDependenciesInMCoercion interestingDependencyKeys topLevelBindingKeys = \case
+  GHCTyCo.MRefl ->
+    emptyCoreDirectDependencies
+  GHCTyCo.MCo coercion ->
+    collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+
+coreDirectDependenciesForName ::
+  IntSet.IntSet ->
+  IntSet.IntSet ->
+  GHC.Name ->
+  CoreDirectDependencies
+coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys name =
+  let nameKey = nameUniqueKey name
+   in CoreDirectDependencies
+        { coreDirectSemanticNames =
+            [ name
+            | IntSet.member nameKey interestingDependencyKeys
+            ],
+          coreDirectTopLevelBinderKeys =
+            [ nameKey
+            | IntSet.member nameKey topLevelBindingKeys
+            ]
+        }
 
 collectDirectCoreDependenciesInBind ::
   IntSet.IntSet ->
@@ -722,8 +862,22 @@ collectDirectCoreDependenciesInAlt ::
   IntSet.IntSet ->
   GHC.CoreAlt ->
   CoreDirectDependencies
-collectDirectCoreDependenciesInAlt interestingDependencyKeys topLevelBindingKeys (GHC.Alt _ _ expression) =
-  collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys expression
+collectDirectCoreDependenciesInAlt interestingDependencyKeys topLevelBindingKeys (GHC.Alt alternativeConstructor _ expression) =
+  coreDirectDependenciesForAltCon interestingDependencyKeys topLevelBindingKeys alternativeConstructor
+    `appendCoreDirectDependencies` collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys expression
+
+coreDirectDependenciesForAltCon ::
+  IntSet.IntSet ->
+  IntSet.IntSet ->
+  GHC.AltCon ->
+  CoreDirectDependencies
+coreDirectDependenciesForAltCon interestingDependencyKeys topLevelBindingKeys = \case
+  GHC.DataAlt dataCon ->
+    coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys (GHC.dataConName dataCon)
+  GHC.LitAlt _ ->
+    emptyCoreDirectDependencies
+  GHC.DEFAULT ->
+    emptyCoreDirectDependencies
 
 dotFieldLabelRdrNamePs :: GHC.DotFieldOcc GHC.GhcPs -> GHC.RdrName
 dotFieldLabelRdrNamePs dotFieldOccurrence =

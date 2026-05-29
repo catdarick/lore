@@ -71,7 +71,9 @@ data DeadCodeResult = DeadCodeResult
 data ProjectDefinitionIndex = ProjectDefinitionIndex
   { projectDefinitionsById :: Map.Map DefinitionId DefinitionSource,
     projectDefinitionIdByName :: Map.Map GHC.Name DefinitionId,
-    projectDependenciesById :: Map.Map DefinitionId ProjectDependencyNames
+    projectDependenciesById :: Map.Map DefinitionId ProjectDependencyNames,
+    projectInstanceHeadTypeDefinitionIdsByInstance :: Map.Map DefinitionId (Set.Set DefinitionId),
+    projectInstanceDefinitionIds :: Set.Set DefinitionId
   }
   deriving stock (Eq, Generic)
 
@@ -94,11 +96,13 @@ instance NFData DeadCodeResult where
           rnf deadCodeWarnings
 
 instance NFData ProjectDefinitionIndex where
-  rnf ProjectDefinitionIndex {projectDefinitionsById, projectDefinitionIdByName, projectDependenciesById} =
+  rnf ProjectDefinitionIndex {projectDefinitionsById, projectDefinitionIdByName, projectDependenciesById, projectInstanceHeadTypeDefinitionIdsByInstance, projectInstanceDefinitionIds} =
     Map.size projectDefinitionsById `seq`
       Map.size projectDefinitionIdByName `seq`
         Map.size projectDependenciesById `seq`
-          ()
+          Map.size projectInstanceHeadTypeDefinitionIdsByInstance `seq`
+            Set.size projectInstanceDefinitionIds `seq`
+              ()
 
 instance NFData ProjectDependencyNames where
   rnf dependencies =
@@ -124,12 +128,19 @@ findDeadCode options = do
           | (module_, componentKinds) <- Map.toList moduleKindsByModule,
             isTestOnlyComponentModule componentKinds
           ]
-      aliveDefinitionIds =
+      aliveByReachability =
         Set.fromList
           [ definitionId
           | (definitionId, source) <- Map.toList projectIndex.projectDefinitionsById,
             definitionIsAlive testOnlyModules source definitionId reachableFromNonTestRoots reachableFromTestRoots
           ]
+      aliveInstanceDefinitionIds =
+        aliveInstanceDefinitionsByHeadTypes
+          projectIndex.projectInstanceHeadTypeDefinitionIdsByInstance
+          aliveByReachability
+      aliveDefinitionIds =
+        (aliveByReachability `Set.difference` projectIndex.projectInstanceDefinitionIds)
+          <> aliveInstanceDefinitionIds
       allDefinitionIds =
         Map.keysSet projectIndex.projectDefinitionsById
       deadDefinitions =
@@ -148,6 +159,8 @@ forceProjectDefinitionIndex projectIndex = do
   forceDefinitionSourceMap projectIndex.projectDefinitionsById
   forceDefinitionIdMap projectIndex.projectDefinitionIdByName
   _ <- forceDependenciesById projectIndex.projectDependenciesById
+  _ <- liftIO (evaluate (Map.size projectIndex.projectInstanceHeadTypeDefinitionIdsByInstance))
+  _ <- liftIO (evaluate (Set.size projectIndex.projectInstanceDefinitionIds))
   pure projectIndex
 
 forceDefinitionBindings :: (MonadIO m) => DefinitionBindings -> m DefinitionBindings
@@ -215,7 +228,11 @@ loadProjectDefinitionIndex = do
             projectDefinitionIdByName =
               Map.unions (map projectDefinitionIdByName moduleIndexes),
             projectDependenciesById =
-              Map.unions (map projectDependenciesById moduleIndexes)
+              Map.unions (map projectDependenciesById moduleIndexes),
+            projectInstanceHeadTypeDefinitionIdsByInstance =
+              Map.unions (map projectInstanceHeadTypeDefinitionIdsByInstance moduleIndexes),
+            projectInstanceDefinitionIds =
+              Set.unions (map projectInstanceDefinitionIds moduleIndexes)
           }
   forceProjectDefinitionIndex mergedIndex
 
@@ -238,13 +255,63 @@ buildProjectIndexForModule homeModule DefinitionModuleArtifacts {definitionArtif
           forcedBindings
           definitionArtifactCoreFacts
           directReferencesById
+      instanceDefinitionIds =
+        collectInstanceDefinitionIds
+          forcedBindings.bindingDefinitionIdByName
+          definitionArtifactTypedFacts
+      instanceHeadTypeDefinitionIdsByInstance =
+        collectInstanceHeadTypeDefinitionIdsByInstance
+          forcedBindings.bindingDefinitionIdByName
+          definitionArtifactTypedFacts
   let projectIndex =
         ProjectDefinitionIndex
           { projectDefinitionsById = forcedBindings.bindingDefinitionsById,
             projectDefinitionIdByName = forcedBindings.bindingDefinitionIdByName,
-            projectDependenciesById = dependenciesById
+            projectDependenciesById = dependenciesById,
+            projectInstanceHeadTypeDefinitionIdsByInstance = instanceHeadTypeDefinitionIdsByInstance,
+            projectInstanceDefinitionIds = instanceDefinitionIds
           }
   forceProjectDefinitionIndex projectIndex
+
+collectInstanceDefinitionIds ::
+  Map.Map GHC.Name DefinitionId ->
+  MinimalTypedModuleFacts ->
+  Set.Set DefinitionId
+collectInstanceDefinitionIds definitionIdByName typedFacts =
+  Set.fromList
+    [ definitionId
+    | instanceName <- typedFacts.typedInstanceNames,
+      Just definitionId <- [Map.lookup instanceName definitionIdByName]
+    ]
+
+collectInstanceHeadTypeDefinitionIdsByInstance ::
+  Map.Map GHC.Name DefinitionId ->
+  MinimalTypedModuleFacts ->
+  Map.Map DefinitionId (Set.Set DefinitionId)
+collectInstanceHeadTypeDefinitionIdsByInstance definitionIdByName typedFacts =
+  Map.fromList
+    [ (instanceDefinitionId, headTypeDefinitionIds)
+    | (instanceName, headTypeNames) <- Map.toList typedFacts.typedInstanceHeadTypeNamesByInstance,
+      Just instanceDefinitionId <- [Map.lookup instanceName definitionIdByName],
+      let headTypeDefinitionIds =
+            Set.fromList
+              [ definitionId
+              | headTypeName <- Set.toList headTypeNames,
+                Just definitionId <- [Map.lookup headTypeName definitionIdByName]
+              ]
+    ]
+
+aliveInstanceDefinitionsByHeadTypes ::
+  Map.Map DefinitionId (Set.Set DefinitionId) ->
+  Set.Set DefinitionId ->
+  Set.Set DefinitionId
+aliveInstanceDefinitionsByHeadTypes instanceHeadTypeDefinitionIdsByInstance aliveDefinitionIds =
+  Set.fromList
+    [ instanceDefinitionId
+    | (instanceDefinitionId, headTypeDefinitionIds) <- Map.toList instanceHeadTypeDefinitionIdsByInstance,
+      Set.null headTypeDefinitionIds
+        || not (Set.null (Set.intersection aliveDefinitionIds headTypeDefinitionIds))
+    ]
 
 buildDeadCodeDependenciesFromDirectRefs ::
   DefinitionBindings ->

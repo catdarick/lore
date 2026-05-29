@@ -161,6 +161,11 @@ data MinimalTypedOccurrence = MinimalTypedOccurrence
 data MinimalTypedModuleFacts = MinimalTypedModuleFacts
   { typedDefinitionNames :: ![GHC.Name],
     typedInstanceNames :: ![GHC.Name],
+    -- | For each local instance binder, names of type constructors that appear
+    -- in instance-head argument types.
+    -- Dead-code policy: instance definitions are alive iff any of these head
+    -- type definitions is alive.
+    typedInstanceHeadTypeNamesByInstance :: !(Map.Map GHC.Name (Set.Set GHC.Name)),
     typedDefinitionOccAliases :: !(Map.Map GHC.Name (Set.Set Text)),
     typedExportedNames :: ![GHC.Name],
     typedExportedOccAliases :: !(Map.Map GHC.Name (Set.Set Text)),
