@@ -12,8 +12,8 @@ module Lore.Tools.FindDeadCode
   )
 where
 
-import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
+import Data.List (foldl')
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -38,8 +38,7 @@ import Lore.Tools.Internal.SymbolResolution
     resolveUniqueSymbolQueries,
     unresolvedSymbolQueriesMessage,
   )
-import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc), numberedListFrom, paragraph)
-import Lore.Tools.Render.Source (declarationSpansLineRange, definitionSourcePathFromCurrentDirectory)
+import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc), paragraph)
 import Lore.Tools.Render.Text (quoteText, renderModuleName, renderSymbolName)
 import Lore.Tools.Result
   ( Paginated (..),
@@ -53,7 +52,6 @@ import Lore.Tools.Result
     paginationSummaryDoc,
     withLoadedSession,
   )
-import System.Directory (getCurrentDirectory)
 
 data FindDeadCodeOptions = FindDeadCodeOptions
   { findDeadCodeModules :: Maybe [Text],
@@ -88,7 +86,8 @@ data FindDeadCodeReady = FindDeadCodeReady
   }
 
 data RenderedDeadDefinition = RenderedDeadDefinition
-  { renderedDeadDefinitionLabel :: Text
+  { renderedDeadDefinitionModuleName :: Text,
+    renderedDeadDefinitionSymbolNames :: Set.Set Text
   }
 
 findDeadCode :: (MonadLore m) => FindDeadCodeOptions -> m FindDeadCodeResult
@@ -155,28 +154,15 @@ findDeadCode FindDeadCodeOptions {findDeadCodeModules, findDeadCodePageRequest} 
                         hasDeadDefinitions = not (null deadDefinitions)
                         summaryLine = renderSummary deadCodeResult deadDefinitions
                         maybePage = paginateItemsWithPageRequest pageRequest deadDefinitions
-                    case maybePage of
-                      Nothing ->
-                        pure $
-                          FindDeadCodeReadyResult
-                            FindDeadCodeReady
-                              { findDeadCodeSummary = summaryLine,
-                                findDeadCodeHasDeadDefinitions = hasDeadDefinitions,
-                                findDeadCodePage = Nothing,
-                                findDeadCodeWarnings = deadCodeResult.deadCodeWarnings,
-                                findDeadCodePartialLoadWarning = partialLoadWarning
-                              }
-                      Just page -> do
-                        renderedPage <- renderDeadDefinitionPage page
-                        pure $
-                          FindDeadCodeReadyResult
-                            FindDeadCodeReady
-                              { findDeadCodeSummary = summaryLine,
-                                findDeadCodeHasDeadDefinitions = hasDeadDefinitions,
-                                findDeadCodePage = Just renderedPage,
-                                findDeadCodeWarnings = deadCodeResult.deadCodeWarnings,
-                                findDeadCodePartialLoadWarning = partialLoadWarning
-                              }
+                    pure $
+                      FindDeadCodeReadyResult
+                        FindDeadCodeReady
+                          { findDeadCodeSummary = summaryLine,
+                            findDeadCodeHasDeadDefinitions = hasDeadDefinitions,
+                            findDeadCodePage = renderDeadDefinitionPage <$> maybePage,
+                            findDeadCodeWarnings = deadCodeResult.deadCodeWarnings,
+                            findDeadCodePartialLoadWarning = partialLoadWarning
+                          }
   where
     pageRequest =
       maybe defaultPageRequest id findDeadCodePageRequest
@@ -309,38 +295,21 @@ renderSummary deadCodeResult deadDefinitions =
     <> " dead."
 
 renderDeadDefinitionPage ::
-  (MonadLore m) =>
   Paginated DeadDefinition ->
-  m (Paginated RenderedDeadDefinition)
-renderDeadDefinitionPage page = do
-  currentDirectory <- liftIO getCurrentDirectory
-  renderedItems <- mapM (renderDeadDefinition currentDirectory) page.paginatedItems
-  pure
-    page
-      { paginatedItems = renderedItems
-      }
+  Paginated RenderedDeadDefinition
+renderDeadDefinitionPage page =
+  page
+    { paginatedItems = map renderDeadDefinition page.paginatedItems
+    }
 
-renderDeadDefinition :: (MonadLore m) => FilePath -> DeadDefinition -> m RenderedDeadDefinition
-renderDeadDefinition currentDirectory deadDefinition = do
-  let renderedPath =
-        definitionSourcePathFromCurrentDirectory currentDirectory deadDefinition.deadDefinitionSource
-  let renderedModuleName =
-        renderModuleName deadDefinition.deadDefinitionSource.definitionSourceModule
-      renderedNames =
-        T.intercalate ", " (map renderSymbolName (Set.toAscList deadDefinition.deadDefinitionNames))
-      renderedLocation =
-        case declarationSpansLineRange deadDefinition.deadDefinitionSource.definitionSourceSpans of
-          Just (startLine, endLine) ->
-            if startLine == endLine
-              then renderedPath <> ":" <> T.pack (show startLine)
-              else renderedPath <> ":" <> T.pack (show startLine) <> "-" <> T.pack (show endLine)
-          Nothing ->
-            renderedPath
-  pure
-    RenderedDeadDefinition
-      { renderedDeadDefinitionLabel =
-          renderedModuleName <> "." <> renderedNames <> " - " <> renderedLocation
-      }
+renderDeadDefinition :: DeadDefinition -> RenderedDeadDefinition
+renderDeadDefinition deadDefinition =
+  RenderedDeadDefinition
+    { renderedDeadDefinitionModuleName =
+        renderModuleName deadDefinition.deadDefinitionSource.definitionSourceModule,
+      renderedDeadDefinitionSymbolNames =
+        Set.map renderSymbolName deadDefinition.deadDefinitionNames
+    }
 
 instance ToLoreDoc FindDeadCodeOutput where
   toLoreDoc = renderFindDeadCodeOutput
@@ -394,12 +363,43 @@ renderFindDeadCodeReady ready =
                 paginationSkipArgName = Just "skip"
               }
             page,
-          numberedListFrom
-            (fromIntegral (page.paginatedSkippedItems + 1))
-            (map (paragraph . (.renderedDeadDefinitionLabel)) page.paginatedItems),
+          renderDeadDefinitionListing page.paginatedItems,
           renderDeadCodeWarnings ready.findDeadCodeWarnings,
           maybe mempty toLoreDoc ready.findDeadCodePartialLoadWarning
         ]
+
+renderDeadDefinitionListing :: [RenderedDeadDefinition] -> LoreDoc
+renderDeadDefinitionListing renderedDeadDefinitions =
+  mconcat
+    ( map renderDeadDefinitionGroup
+        (Map.toAscList (groupDeadDefinitionsByModule renderedDeadDefinitions))
+    )
+
+groupDeadDefinitionsByModule :: [RenderedDeadDefinition] -> Map.Map Text [Text]
+groupDeadDefinitionsByModule =
+  foldl'
+    ( \grouped rendered ->
+        Map.insertWith
+          (flip (++))
+          rendered.renderedDeadDefinitionModuleName
+          (Set.toAscList rendered.renderedDeadDefinitionSymbolNames)
+          grouped
+    )
+    Map.empty
+
+renderDeadDefinitionGroup :: (Text, [Text]) -> LoreDoc
+renderDeadDefinitionGroup (moduleName, symbolNames) =
+  case symbolNames of
+    [] ->
+      mempty
+    [symbolName] ->
+      paragraph (moduleName <> "." <> symbolName)
+    multipleSymbolNames ->
+      paragraph
+        ( moduleName
+            <> ":\n"
+            <> T.intercalate "\n" (map ("- " <>) multipleSymbolNames)
+        )
 
 renderDeadCodeWarnings :: [Text] -> LoreDoc
 renderDeadCodeWarnings warnings =
