@@ -20,7 +20,7 @@ spec =
 
       discoveryResult `shouldContainText` "Package: demo-fixture"
       discoveryResult `shouldContainText` "package root: ./"
-      discoveryResult `shouldContainText` "package.yaml: package.yaml"
+      discoveryResult `shouldContainText` "package manifest: package.yaml"
       discoveryResult `shouldContainText` "source dirs: src/"
 
     it "separates shared and component-specific dependencies/extensions" do

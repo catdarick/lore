@@ -168,7 +168,8 @@ library
       OverloadedRecordDot
   ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
-      aeson
+      Cabal
+    , aeson
     , base >=4.7 && <5
     , bytestring
     , co-log-core
@@ -257,7 +258,8 @@ test-suite lore-test
       OverloadedRecordDot
   ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -Wno-incomplete-patterns
   build-depends:
-      aeson
+      Cabal
+    , aeson
     , base >=4.7 && <5
     , bytestring
     , co-log-core

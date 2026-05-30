@@ -39,6 +39,12 @@ import Lore.Internal.Package
     firstExistingPath,
     prepareComponentsData,
   )
+import Lore.Internal.PackageDB
+  ( ProjectProvider,
+    ResolvedPackageEnvironment,
+    packageEnvironmentCacheKey,
+    withDependencyPackageExposures,
+  )
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.TemporalModules (TemporalModule (..), listExistingTemporalModules)
 import qualified Lore.Logger as Log
@@ -66,14 +72,18 @@ data ComponentSpecificOptions = ComponentSpecificOptions
 
 data HomeModulesLoadInputs = HomeModulesLoadInputs
   { homeModulesHomeUnitId :: GHC.UnitId,
+    homeModulesProjectProvider :: ProjectProvider,
     homeModulesPackages :: [PackageData],
+    homeModulesBasePackageEnvironment :: ResolvedPackageEnvironment,
     homeModulesTemporalModules :: [TemporalModule],
     homeModulesTestSuiteRequired :: Bool
   }
 
 data HomeModulesLoadConfig = HomeModulesLoadConfig
   { homeModulesSourceDirs :: Set.Set FilePath,
-    homeModulesDependenciesToAdd :: Set.Set String,
+    homeModulesDependencyNames :: Set.Set String,
+    homeModulesPackageEnvironmentCacheKey :: Set.Set String,
+    homeModulesPackageEnvironment :: ResolvedPackageEnvironment,
     homeModulesCommonLanguage :: Maybe Language,
     homeModulesCommonExtensions :: Set.Set Extension,
     homeModulesCommonGhcOptions :: Set.Set GhcOption
@@ -94,13 +104,17 @@ data HomeModulesLoadPlan = HomeModulesLoadPlan
 prepareHomeModulesLoadInputs :: (MonadLore m) => m HomeModulesLoadInputs
 prepareHomeModulesLoadInputs = do
   dflags <- GHC.getSessionDynFlags
+  provider <- asks projectProvider
+  packageEnvironment <- asks resolvedPackageEnvironment
   testSuiteRequired <- asks isTestSuiteFunctionalityRequired
   packages <- prepareComponentsData
   temporalModules <- listExistingTemporalModules
   pure
     HomeModulesLoadInputs
       { homeModulesHomeUnitId = GHC.homeUnitId_ dflags,
+        homeModulesProjectProvider = provider,
         homeModulesPackages = packages,
+        homeModulesBasePackageEnvironment = packageEnvironment,
         homeModulesTemporalModules = temporalModules,
         homeModulesTestSuiteRequired = testSuiteRequired
       }
@@ -108,10 +122,16 @@ prepareHomeModulesLoadInputs = do
 prepareHomeModulesLoadPlan :: (MonadLore m) => HomeModulesLoadInputs -> m HomeModulesLoadPlan
 prepareHomeModulesLoadPlan inputs = do
   componentPlan <- prepareHomeModulesComponentPlan inputs.homeModulesPackages
-  let dependenciesToAdd =
+  let dependencyNames =
         computeExternalHomeModuleDependencies
           inputs.homeModulesTestSuiteRequired
           inputs.homeModulesPackages
+      packageEnvironment =
+        withDependencyPackageExposures
+          inputs.homeModulesProjectProvider
+          dependencyNames
+          inputs.homeModulesBasePackageEnvironment
+      environmentCacheKey = packageEnvironmentCacheKey packageEnvironment
       sourceDirs =
         computeHomeModuleSourceDirs
           inputs.homeModulesPackages
@@ -126,7 +146,9 @@ prepareHomeModulesLoadPlan inputs = do
       { homeModulesLoadConfig =
           HomeModulesLoadConfig
             { homeModulesSourceDirs = sourceDirs,
-              homeModulesDependenciesToAdd = dependenciesToAdd,
+              homeModulesDependencyNames = dependencyNames,
+              homeModulesPackageEnvironmentCacheKey = environmentCacheKey,
+              homeModulesPackageEnvironment = packageEnvironment,
               homeModulesCommonLanguage = componentPlan.commonLanguage,
               homeModulesCommonExtensions = componentPlan.commonExtensions,
               homeModulesCommonGhcOptions = componentPlan.commonGhcOptions

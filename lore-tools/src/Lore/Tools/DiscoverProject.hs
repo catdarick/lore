@@ -38,7 +38,7 @@ discoverProject = do
   pure
     DiscoverProjectOutput
       { discoverProjectRootPath = rootPath,
-        discoverProjectPackages = sortOn packageYamlPath packages
+        discoverProjectPackages = sortOn packageManifestPath packages
       }
 
 renderDiscoverProject :: DiscoverProjectOutput -> LoreDoc
@@ -47,7 +47,7 @@ renderDiscoverProject output =
 
 renderDiscoverProjectFromPackages :: FilePath -> [PackageData] -> LoreDoc
 renderDiscoverProjectFromPackages _ [] =
-  paragraph "No package.yaml files were found under the project root."
+  paragraph "No package manifests were found under the project root."
 renderDiscoverProjectFromPackages projectRoot packages =
   mconcat (map (renderPackage projectRoot) packages)
 
@@ -56,7 +56,7 @@ renderPackage projectRoot packageData =
   heading2 ("Package: " <> T.pack packageData.packageName)
     <> bulletList
       [ paragraph ("package root: " <> T.pack (renderDirectoryPath (toProjectRelativePath projectRoot packageData.packageRoot))),
-        paragraph ("package.yaml: " <> T.pack (toProjectRelativePath projectRoot packageData.packageYamlPath)),
+        paragraph ("package manifest: " <> T.pack (toProjectRelativePath projectRoot packageData.packageManifestPath)),
         paragraph ("shared dependencies: " <> renderStringSet sharedDependencies),
         paragraph ("shared GHC options: " <> renderStringSet sharedGhcOptions),
         paragraph ("shared extensions: " <> renderStringSet sharedExtensions)

@@ -17,10 +17,10 @@ import qualified GHC.Utils.Exception as GHCException
 import Lore.Internal.Definition.Callbacks (installDefinitionCallbacks)
 import Lore.Internal.Ghc.DynFlags
   ( ParallelWorkersCount (..),
-    modifySessionDynFlags,
+    modifySessionDynFlagsM,
     setGhcWorkDirs,
     setGhciLikeDynFlags,
-    setPackageDbs,
+    setPackageEnvironmentM,
   )
 import Lore.Internal.Monad (LoreMonadT (..))
 import Lore.Internal.Session
@@ -71,9 +71,10 @@ runLore sessionConfig lore = do
             workDir </> "stub",
             workDir </> "tmp"
           ]
-      modifySessionDynFlags $
-        setGhcWorkDirs (ghcWorkDir sessionConfig)
-          . setGhciLikeDynFlags (parallelWorkersLimit sessionConfig)
-          . setPackageDbs (packageDbPaths sessionContext)
+      modifySessionDynFlagsM
+        ( setPackageEnvironmentM (resolvedPackageEnvironment sessionContext)
+            . setGhciLikeDynFlags (parallelWorkersLimit sessionConfig)
+            . setGhcWorkDirs (ghcWorkDir sessionConfig)
+        )
       session <- GHC.getSession
       GHC.setSession (installDefinitionCallbacks sessionContext session)

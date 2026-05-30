@@ -1,6 +1,4 @@
 alive-modules: 
-  - Demo
-  - Demo.Support
   - Lore.Mcp.Internal.Annotated
   - Lore.Tools.Render.Doc
 

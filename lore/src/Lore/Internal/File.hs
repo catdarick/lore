@@ -1,6 +1,5 @@
 module Lore.Internal.File
-  ( defaultIgnoreList,
-    findFilesByNameRecursively,
+  ( findFilesByExtensionRecursively,
     shouldIgnoreDirectory,
   )
 where
@@ -8,15 +7,12 @@ where
 import Control.Monad (forM)
 import qualified Data.Set as Set
 import System.Directory (doesDirectoryExist, listDirectory)
-import System.FilePath (splitDirectories, takeFileName, (</>))
+import System.FilePath (splitDirectories, takeExtension, (</>))
 
 newtype DirectoryIgnoreList = DirectoryIgnoreList (Set.Set String)
 
-defaultIgnoreList :: DirectoryIgnoreList
-defaultIgnoreList = DirectoryIgnoreList $ Set.fromList [".git", ".stack-work", "dist-newstyle", "dist", ".ghci-work"]
-
-findFilesByNameRecursively :: Maybe DirectoryIgnoreList -> FilePath -> String -> IO [FilePath]
-findFilesByNameRecursively ignoreList root targetName = do
+findFilesByExtensionRecursively :: Maybe DirectoryIgnoreList -> FilePath -> String -> IO [FilePath]
+findFilesByExtensionRecursively ignoreList root extension = do
   entries <- listDirectory root
   concat <$> forM entries \entry -> do
     let path = root </> entry
@@ -25,8 +21,8 @@ findFilesByNameRecursively ignoreList root targetName = do
       then
         if shouldIgnoreDirectory ignoreList entry
           then pure []
-          else findFilesByNameRecursively ignoreList path targetName
-      else pure [path | takeFileName path == targetName]
+          else findFilesByExtensionRecursively ignoreList path extension
+      else pure [path | takeExtension path == extension]
 
 shouldIgnoreDirectory :: Maybe DirectoryIgnoreList -> FilePath -> Bool
 shouldIgnoreDirectory ignoreList dir =

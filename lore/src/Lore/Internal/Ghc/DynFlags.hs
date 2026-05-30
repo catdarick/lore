@@ -5,15 +5,13 @@ module Lore.Internal.Ghc.DynFlags
     Language (..),
     GhcOption (..),
     Extension (..),
-    modifySessionDynFlags,
     modifySessionDynFlagsM,
     setGhciLikeDynFlags,
     setGhcWorkDirs,
     setGhcOptionsAndExtensions,
     addGhcOptionsAndExtensions,
     setGhcSourceDirs,
-    setDependencies,
-    setPackageDbs,
+    setPackageEnvironmentM,
   )
 where
 
@@ -23,15 +21,16 @@ import qualified GHC.Data.EnumSet as EnumSet
 import qualified GHC.Driver.Session as GHC
 import qualified GHC.Utils.Logger as GHC
 import qualified GHC.Utils.TmpFs as GHC
+import Lore.Internal.PackageDB
+  ( PackageDbDirective (..),
+    PackageExposure (..),
+    ResolvedPackageEnvironment (..),
+  )
 import System.FilePath (normalise, (</>))
 
 data ParallelWorkersCount
   = ThisWorkersCount Int
   | WorkersAsNumProcessors
-
-modifySessionDynFlags :: (GHC.GhcMonad m) => (GHC.DynFlags -> GHC.DynFlags) -> m ()
-modifySessionDynFlags f = do
-  modifySessionDynFlagsM (pure . f)
 
 modifySessionDynFlagsM :: (GHC.GhcMonad m) => (GHC.DynFlags -> m GHC.DynFlags) -> m ()
 modifySessionDynFlagsM f = do
@@ -105,26 +104,17 @@ setGhcSourceDirs sourceDirs dflags =
     { GHC.importPaths = map normalise sourceDirs
     }
 
-setDependencies :: [String] -> GHC.DynFlags -> GHC.DynFlags
-setDependencies dependencies dflags =
-  dflags
-    { GHC.packageFlags = map mkPackageFlag dependencies
-    }
-    `GHC.gopt_set` GHC.Opt_HideAllPackages
-  where
-    mkPackageFlag dep = GHC.ExposePackage ("-package " <> dep) (GHC.PackageArg dep) (GHC.ModRenaming True [])
-
-setPackageDbs :: [FilePath] -> GHC.DynFlags -> GHC.DynFlags
-setPackageDbs dbPaths dflags =
-  dflags
-    { GHC.packageDBFlags =
-        reverse $
-          concat
-            [ [GHC.ClearPackageDBs], -- 1. First, usually we want to clear whatever default databases GHC assumed
-              map (GHC.PackageDB . GHC.PkgDbPath) dbPaths, -- 2. Then, add the explicit database paths that Stack/Cabal provided
-              GHC.packageDBFlags dflags -- 3. GHC applies these in reverse order
-            ]
-    }
+setPackageEnvironmentM :: (MonadIO m, GHC.HasLogger m) => ResolvedPackageEnvironment -> GHC.DynFlags -> m GHC.DynFlags
+setPackageEnvironmentM environment dflags = do
+  let renderedFlags = renderPackageEnvironmentFlags environment
+      resetPackageFlags = resetPackageEnvironmentFlags dflags
+  if null renderedFlags
+    then pure resetPackageFlags
+    else do
+      logger <- GHC.getLogger
+      (dflags', _, _) <-
+        GHC.parseDynamicFlags logger resetPackageFlags (map GHC.noLoc renderedFlags)
+      pure dflags'
 
 resetExtensions :: GHC.DynFlags -> GHC.DynFlags
 resetExtensions dflags =
@@ -132,3 +122,38 @@ resetExtensions dflags =
     { GHC.extensions = [],
       GHC.extensionFlags = EnumSet.fromList (GHC.languageExtensions (GHC.language dflags))
     }
+
+resetPackageEnvironmentFlags :: GHC.DynFlags -> GHC.DynFlags
+resetPackageEnvironmentFlags dflags =
+  GHC.gopt_unset
+    ( dflags
+        { GHC.packageFlags = [],
+          GHC.packageDBFlags = []
+        }
+    )
+    GHC.Opt_HideAllPackages
+
+renderPackageEnvironmentFlags :: ResolvedPackageEnvironment -> [String]
+renderPackageEnvironmentFlags environment =
+  hideAllPackagesFlag
+    <> concatMap renderPackageDbDirective environment.envPackageDbDirectives
+    <> concatMap renderPackageExposure environment.envPackageExposures
+  where
+    hideAllPackagesFlag =
+      if null environment.envPackageExposures
+        then []
+        else ["-hide-all-packages"]
+
+renderPackageDbDirective :: PackageDbDirective -> [String]
+renderPackageDbDirective directive =
+  case directive of
+    ClearPackageDb -> ["-clear-package-db"]
+    GlobalPackageDb -> ["-global-package-db"]
+    UserPackageDb -> ["-user-package-db"]
+    SpecificPackageDb dbPath -> ["-package-db", dbPath]
+
+renderPackageExposure :: PackageExposure -> [String]
+renderPackageExposure exposure =
+  case exposure of
+    ExposePackageName packageName -> ["-package", packageName]
+    ExposePackageId packageId -> ["-package-id", packageId]

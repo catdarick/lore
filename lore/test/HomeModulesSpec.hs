@@ -1,6 +1,6 @@
 module HomeModulesSpec (spec) where
 
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, isPrefixOf)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -12,7 +12,9 @@ import qualified Lore.HomeModules as HomeModules
 import Lore.HomeModules.Plan
   ( HomeModuleKey (..),
     HomeModulesComponentPlan (..),
+    HomeModulesLoadConfig (..),
     HomeModulesLoadInputs (..),
+    HomeModulesLoadPlan (..),
     HomeModulesSelection (..),
     buildHomeModulesSelection,
     computeExternalHomeModuleDependencies,
@@ -20,6 +22,7 @@ import Lore.HomeModules.Plan
     homeModulesSelectionTotal,
     prepareHomeModulesComponentPlan,
     prepareHomeModulesLoadInputs,
+    prepareHomeModulesLoadPlan,
   )
 import Lore.TemporalModules (TemporalModule (..))
 import System.Directory (createDirectoryIfMissing, doesFileExist, makeAbsolute, removeFile)
@@ -45,6 +48,17 @@ spec =
           Set.member "demo-fixture" depsWithoutTestSuite `shouldBe` False
           Set.member "directory" depsWithoutTestSuite `shouldBe` False
           Set.member "directory" depsWithTestSuite `shouldBe` True
+
+      it "prepareHomeModulesLoadPlan derives cache identity from package environment" do
+        withFixtureCopy \fixtureRoot -> do
+          cacheKey <-
+            fixtureLoreAt fixtureRoot do
+              inputs <- prepareHomeModulesLoadInputs
+              plan <- prepareHomeModulesLoadPlan inputs
+              pure plan.homeModulesLoadConfig.homeModulesPackageEnvironmentCacheKey
+
+          Set.null cacheKey `shouldBe` False
+          any (isPrefixOf "package-db:") (Set.toList cacheKey) `shouldBe` True
 
       it "computeHomeModuleSourceDirs includes package source dirs and temporal module dirs" do
         withFixtureCopy \fixtureRoot -> do

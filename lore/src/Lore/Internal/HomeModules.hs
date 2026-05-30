@@ -9,11 +9,12 @@ module Lore.Internal.HomeModules
 where
 
 import qualified Control.Concurrent.MVar as MVar
+import Control.Monad ((<=<))
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.RWS (asks)
 import qualified Data.Set as Set
 import qualified GHC
-import Lore.Internal.Ghc.DynFlags (modifySessionDynFlagsM, setDependencies, setGhcOptionsAndExtensions, setGhcSourceDirs)
+import Lore.Internal.Ghc.DynFlags (modifySessionDynFlagsM, setGhcOptionsAndExtensions, setGhcSourceDirs, setPackageEnvironmentM)
 import Lore.Internal.HomeModules.AutoRefactorLoop (loadHomeModulesWithAutoRefactorRetries)
 import Lore.Internal.HomeModules.LoadAttempt (HomeModulesLoadAttempt (..), countLoadedHomeModules)
 import Lore.Internal.HomeModules.Plan
@@ -71,14 +72,14 @@ configureHomeModulesSession :: (MonadLore m) => HomeModulesLoadPlan -> m ()
 configureHomeModulesSession plan = do
   logHomeModulesLoadPlanDetails plan
   invalidateCachesForHomeModuleConfigurationChange
-  setSymbolsDependencySetCache plan.homeModulesLoadConfig.homeModulesDependenciesToAdd
+  setSymbolsDependencySetCache plan.homeModulesLoadConfig.homeModulesPackageEnvironmentCacheKey
   modifySessionDynFlagsM
     ( setGhcOptionsAndExtensions
         plan.homeModulesLoadConfig.homeModulesCommonLanguage
         (Set.toList plan.homeModulesLoadConfig.homeModulesCommonGhcOptions)
         (Set.toList plan.homeModulesLoadConfig.homeModulesCommonExtensions)
         . setGhcSourceDirs (Set.toList plan.homeModulesLoadConfig.homeModulesSourceDirs)
-        . setDependencies (Set.toList plan.homeModulesLoadConfig.homeModulesDependenciesToAdd)
+        <=< setPackageEnvironmentM plan.homeModulesLoadConfig.homeModulesPackageEnvironment
     )
   GHC.setTargets plan.homeModulesSelection.ghcTargets
 
@@ -117,7 +118,7 @@ finalizeHomeModulesLoad plan attempt = do
 
   case attempt.homeModulesLoadAttemptResult of
     GHC.Succeeded ->
-      Log.debug "Successfully updated GHC targets based on package.yaml configurations"
+      Log.debug "Successfully updated GHC targets based on discovered package configurations"
     GHC.Failed ->
       Log.err "Failed to load GHC targets after updating. Please check the provided GHC options, source directories, and dependencies for correctness."
 
@@ -142,4 +143,5 @@ logHomeModulesLoadPlanDetails plan = do
   Log.debug $ "Common language: " <> show plan.homeModulesLoadConfig.homeModulesCommonLanguage
   Log.debug $ "Common GHC options: " <> show (Set.toList plan.homeModulesLoadConfig.homeModulesCommonGhcOptions)
   Log.debug $ "Common extensions: " <> show (Set.toList plan.homeModulesLoadConfig.homeModulesCommonExtensions)
-  Log.debug $ "Dependencies to add: " <> show (Set.toList plan.homeModulesLoadConfig.homeModulesDependenciesToAdd)
+  Log.debug $ "Dependency names: " <> show (Set.toList plan.homeModulesLoadConfig.homeModulesDependencyNames)
+  Log.debug $ "Package environment cache key: " <> show (Set.toList plan.homeModulesLoadConfig.homeModulesPackageEnvironmentCacheKey)

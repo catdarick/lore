@@ -13,7 +13,6 @@ import Data.Text (Text)
 import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
 import Lore.Internal.Definition.Cache.Types (CoreModuleFactsCache (..), DefinitionModuleIndexCache (..), ParsedModuleFactsCache (..), ParsedOccurrenceModuleIndexCache (..), TypedModuleFactsCache (..))
-import Lore.Internal.File (defaultIgnoreList, findFilesByNameRecursively)
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
 import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsIndexCache (..),
@@ -23,7 +22,12 @@ import Lore.Internal.Lookup.Cache.Types
     SimilarSymbolsSearchIndexCache (..),
     SymbolsDependencySetCache (..),
   )
-import Lore.Internal.PackageDB (resolvePackageDbPaths)
+import Lore.Internal.PackageDB
+  ( ProjectProvider,
+    ResolvedPackageEnvironment,
+    detectProjectProvider,
+    resolvePackageEnvironment,
+  )
 import Lore.Internal.Session.Cache.Types (GeneratedMainModulesRegistry (..), InterpreterContextCache (..), LastLoadHomeModulesResultCache (..), TemporalModulesRegistry (..))
 import Lore.Logger (LoggerHandle)
 
@@ -31,10 +35,10 @@ data SessionContext = SessionContext
   { projectRoot :: FilePath,
     sessionGhcWorkDir :: FilePath,
     isTestSuiteFunctionalityRequired :: Bool,
-    packageFiles :: [FilePath],
+    projectProvider :: ProjectProvider,
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
-    packageDbPaths :: [FilePath],
+    resolvedPackageEnvironment :: ResolvedPackageEnvironment,
     ifaceCache :: GHC.ModIfaceCache,
     homeSymbolsIndexCacheVar :: MVar HomeSymbolsIndexCache,
     externalSymbolsIndexCacheVar :: MVar ExternalSymbolsIndexCache,
@@ -64,51 +68,54 @@ data SessionConfig = SessionConfig
 
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
 prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, loggerHandle, customPrelude, isTestSuiteFunctionalityRequired} = do
-  packageFiles <- findFilesByNameRecursively (Just defaultIgnoreList) projectRoot "package.yaml"
-  eiPackageDbPaths <- resolvePackageDbPaths projectRoot
-  ifaceCache <- GHC.newIfaceCache
-  homeSymbolsIndexCacheVar <- GHC.newMVar (HomeSymbolsIndexCache Nothing)
-  externalSymbolsIndexCacheVar <- GHC.newMVar (ExternalSymbolsIndexCache Nothing)
-  similarSymbolsSearchIndexCacheVar <- GHC.newMVar (SimilarSymbolsSearchIndexCache Nothing)
-  symbolsDependencySetCacheVar <- GHC.newMVar (SymbolsDependencySetCache Set.empty)
-  modSummariesCacheVar <- GHC.newMVar (ModSummariesCache Nothing)
-  nameToInstancesIndexCacheVar <- GHC.newMVar (NameToInstancesIndexCache Nothing)
-  parsedOccurrenceModuleIndexCacheVar <- GHC.newMVar (ParsedOccurrenceModuleIndexCache Nothing)
-  definitionModuleIndexCacheVar <- GHC.newMVar (DefinitionModuleIndexCache Map.empty)
-  typedModuleFactsCacheVar <- GHC.newMVar (TypedModuleFactsCache Map.empty)
-  coreModuleFactsCacheVar <- GHC.newMVar (CoreModuleFactsCache Map.empty)
-  parsedModuleFactsCacheVar <- GHC.newMVar (ParsedModuleFactsCache Map.empty)
-  interpreterContextCacheVar <- GHC.newMVar (InterpreterContextCache Nothing)
-  lastLoadHomeModulesResultCacheVar <- GHC.newMVar (LastLoadHomeModulesResultCache Nothing)
-  generatedMainModulesRegistryVar <- GHC.newMVar (GeneratedMainModulesRegistry Map.empty)
-  temporalModulesRegistryVar <- GHC.newMVar (TemporalModulesRegistry Nothing [])
-  case eiPackageDbPaths of
-    Left err -> pure $ Left $ "Failed to resolve package database paths: " <> err
-    Right packageDbPaths -> do
-      pure $
-        Right
-          SessionContext
-            { projectRoot,
-              sessionGhcWorkDir = _ghcWorkDir,
-              isTestSuiteFunctionalityRequired,
-              packageFiles,
-              loggerHandle,
-              customPrelude,
-              packageDbPaths = packageDbPaths,
-              ifaceCache,
-              homeSymbolsIndexCacheVar,
-              externalSymbolsIndexCacheVar,
-              similarSymbolsSearchIndexCacheVar,
-              symbolsDependencySetCacheVar,
-              modSummariesCacheVar,
-              nameToInstancesIndexCacheVar,
-              parsedOccurrenceModuleIndexCacheVar,
-              definitionModuleIndexCacheVar,
-              typedModuleFactsCacheVar,
-              coreModuleFactsCacheVar,
-              parsedModuleFactsCacheVar,
-              interpreterContextCacheVar,
-              lastLoadHomeModulesResultCacheVar,
-              generatedMainModulesRegistryVar,
-              temporalModulesRegistryVar
-            }
+  eiProvider <- detectProjectProvider projectRoot
+  case eiProvider of
+    Left err -> pure (Left err)
+    Right projectProvider -> do
+      eiResolvedPackageEnvironment <- resolvePackageEnvironment projectProvider projectRoot
+      case eiResolvedPackageEnvironment of
+        Left err -> pure (Left err)
+        Right resolvedPackageEnvironment -> do
+          ifaceCache <- GHC.newIfaceCache
+          homeSymbolsIndexCacheVar <- GHC.newMVar (HomeSymbolsIndexCache Nothing)
+          externalSymbolsIndexCacheVar <- GHC.newMVar (ExternalSymbolsIndexCache Nothing)
+          similarSymbolsSearchIndexCacheVar <- GHC.newMVar (SimilarSymbolsSearchIndexCache Nothing)
+          symbolsDependencySetCacheVar <- GHC.newMVar (SymbolsDependencySetCache Set.empty)
+          modSummariesCacheVar <- GHC.newMVar (ModSummariesCache Nothing)
+          nameToInstancesIndexCacheVar <- GHC.newMVar (NameToInstancesIndexCache Nothing)
+          parsedOccurrenceModuleIndexCacheVar <- GHC.newMVar (ParsedOccurrenceModuleIndexCache Nothing)
+          definitionModuleIndexCacheVar <- GHC.newMVar (DefinitionModuleIndexCache Map.empty)
+          typedModuleFactsCacheVar <- GHC.newMVar (TypedModuleFactsCache Map.empty)
+          coreModuleFactsCacheVar <- GHC.newMVar (CoreModuleFactsCache Map.empty)
+          parsedModuleFactsCacheVar <- GHC.newMVar (ParsedModuleFactsCache Map.empty)
+          interpreterContextCacheVar <- GHC.newMVar (InterpreterContextCache Nothing)
+          lastLoadHomeModulesResultCacheVar <- GHC.newMVar (LastLoadHomeModulesResultCache Nothing)
+          generatedMainModulesRegistryVar <- GHC.newMVar (GeneratedMainModulesRegistry Map.empty)
+          temporalModulesRegistryVar <- GHC.newMVar (TemporalModulesRegistry Nothing [])
+          pure $
+            Right
+              SessionContext
+                { projectRoot,
+                  sessionGhcWorkDir = _ghcWorkDir,
+                  isTestSuiteFunctionalityRequired,
+                  projectProvider,
+                  loggerHandle,
+                  customPrelude,
+                  resolvedPackageEnvironment,
+                  ifaceCache,
+                  homeSymbolsIndexCacheVar,
+                  externalSymbolsIndexCacheVar,
+                  similarSymbolsSearchIndexCacheVar,
+                  symbolsDependencySetCacheVar,
+                  modSummariesCacheVar,
+                  nameToInstancesIndexCacheVar,
+                  parsedOccurrenceModuleIndexCacheVar,
+                  definitionModuleIndexCacheVar,
+                  typedModuleFactsCacheVar,
+                  coreModuleFactsCacheVar,
+                  parsedModuleFactsCacheVar,
+                  interpreterContextCacheVar,
+                  lastLoadHomeModulesResultCacheVar,
+                  generatedMainModulesRegistryVar,
+                  temporalModulesRegistryVar
+                }
