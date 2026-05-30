@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-identities #-}
+
 module Lore.Internal.Definition.Analysis
   ( collectParsedOccurrenceNames,
     buildParsedModuleFacts,
@@ -1346,7 +1348,7 @@ dedupeSemanticNamesByUnique =
 
 nameUniqueKey :: GHC.Name -> Int
 nameUniqueKey =
-  GHCUnique.getKey . GHC.getUnique
+  fromIntegral . GHCUnique.getKey . GHC.getUnique
 
 spanWithin :: [GHC.SrcSpan] -> GHC.SrcSpan -> Bool
 spanWithin targetSpans span' =

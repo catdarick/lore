@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-identities #-}
+
 module Lore.Internal.DeadCode
   ( DeadCodeOptions (..),
     DeadDefinition (..),
@@ -479,7 +481,7 @@ resolveDependencies definitionIdByUnique dependencies =
 
 nameUniqueKey :: GHC.Name -> Int
 nameUniqueKey =
-  GHCUnique.getKey . GHC.getUnique
+  fromIntegral . GHCUnique.getKey . GHC.getUnique
 
 chunkList :: Int -> [a] -> [[a]]
 chunkList chunkSize xs
