@@ -55,6 +55,14 @@ library
       Lore.Internal.Cache.Types
       Lore.Internal.DeadCode
       Lore.Internal.Definition.Analysis
+      Lore.Internal.Definition.Analysis.Bindings
+      Lore.Internal.Definition.Analysis.Common
+      Lore.Internal.Definition.Analysis.Core
+      Lore.Internal.Definition.Analysis.Dependencies
+      Lore.Internal.Definition.Analysis.Members
+      Lore.Internal.Definition.Analysis.Occurrences
+      Lore.Internal.Definition.Analysis.Parsed
+      Lore.Internal.Definition.Analysis.Typed
       Lore.Internal.Definition.Cache.CoreModuleFacts
       Lore.Internal.Definition.Cache.DefinitionModuleIndex
       Lore.Internal.Definition.Cache.ModuleArtifacts
