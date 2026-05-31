@@ -15,7 +15,8 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Vector as V
 import Lore.Mcp.Internal.Annotated (FieldType (..))
-import Lore.Tools.Render.Doc (ToLoreDoc)
+import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
+import Lore.Tools.Result (ToolRun (..))
 
 data ToolWithArgs m r output = ToolWithArgs
   { name :: Text,
@@ -43,6 +44,13 @@ getToolName :: SomeTool m -> Text
 getToolName = \case
   SomeToolWithArgs tool -> tool.name
   SomeToolWithoutArgs tool -> tool.name
+
+renderToolRun :: (output -> LoreDoc) -> ToolRun output -> LoreDoc
+renderToolRun renderReady = \case
+  ToolRunBlocked blocked ->
+    toLoreDoc blocked
+  ToolRunReady output ->
+    renderReady output
 
 getToolDescription :: SomeTool m -> Maybe Text
 getToolDescription = \case

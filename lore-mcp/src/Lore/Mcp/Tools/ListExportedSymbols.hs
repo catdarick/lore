@@ -10,18 +10,17 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.ListExportedSymbols
   ( ListExportedSymbolsOptions (..),
   )
 import qualified Lore.Tools.ListExportedSymbols as ToolsListExportedSymbols
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
-import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
+import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
   ( PageRequest (..),
     ResultLimit (..),
-    ToolRun (..),
-  )
+      )
 
 data ListExportedSymbolsArgs (fieldType :: FieldType) = ListExportedSymbolsArgs
   { moduleName ::
@@ -77,9 +76,4 @@ listExportedSymbolsHandler ListExportedSymbolsArgs {moduleName, packageName, typ
                 pageLimit = Limit (limitToIntWithDefault 150 (exportedSymbolsLimit mcpDefaultToolPolicy))
               }
         }
-  pure $
-    case result of
-      ToolRunBlocked blocked ->
-        toLoreDoc blocked
-      ToolRunReady ready ->
-        ToolsListExportedSymbols.renderListExportedSymbolsReady ready
+  pure $ renderToolRun ToolsListExportedSymbols.renderListExportedSymbolsReady result

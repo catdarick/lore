@@ -10,15 +10,14 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import qualified Lore.Tools.FindReferences as ToolsFindReferences
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
-import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
+import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
   ( PageRequest (..),
     ResultLimit (..),
-    ToolRun (..),
-  )
+      )
 
 data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
   { symbol ::
@@ -81,12 +80,7 @@ findReferencesHandler FindReferencesArgs {symbol, skip, maxResults, verbosity} =
               },
           ToolsFindReferences.findReferencesVerbosity = toCoreVerbosity verbosity
         }
-  pure $
-    case result of
-      ToolRunBlocked blocked ->
-        toLoreDoc blocked
-      ToolRunReady output ->
-        ToolsFindReferences.renderFindReferencesOutput output
+  pure $ renderToolRun ToolsFindReferences.renderFindReferencesOutput result
 
 clampFindReferencesMaxResults :: Maybe Int -> Int
 clampFindReferencesMaxResults =

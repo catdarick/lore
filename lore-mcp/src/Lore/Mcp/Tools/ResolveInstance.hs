@@ -15,13 +15,12 @@ import Lore.Mcp.Internal.Annotated
     FieldType (..),
     WithMeta,
   )
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
 import Lore.Tools.ResolveInstance
   ( ResolveInstanceOptions (..),
     resolveInstance,
   )
-import Lore.Tools.Result (ToolRun (..))
 
 data ResolveInstanceArgs (fieldType :: FieldType) = ResolveInstanceArgs
   { query ::
@@ -54,9 +53,4 @@ resolveInstanceHandler ResolveInstanceArgs {query} = do
       ResolveInstanceOptions
         { resolveInstanceQuery = query
         }
-  pure $
-    case result of
-      ToolRunBlocked blocked ->
-        toLoreDoc blocked
-      ToolRunReady ready ->
-        toLoreDoc ready
+  pure $ renderToolRun toLoreDoc result

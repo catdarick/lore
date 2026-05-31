@@ -9,16 +9,15 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.ExecuteCode
   ( ExecuteCodeOptions (..),
     executeCode,
     renderExecuteCode,
   )
-import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
+import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
-  ( ToolRun (..),
-  )
+  (   )
 
 newtype ExecuteCodeArgs (fieldType :: FieldType) = ExecuteCodeArgs
   { code ::
@@ -47,9 +46,4 @@ executeCodeTool =
 executeCodeHandler :: (MonadLore m) => ExecuteCodeArgs 'ValueType -> m LoreDoc
 executeCodeHandler ExecuteCodeArgs {code} = do
   result <- executeCode ExecuteCodeOptions {executeCodeInput = code}
-  pure $
-    case result of
-      ToolRunBlocked blocked ->
-        toLoreDoc blocked
-      ToolRunReady output ->
-        renderExecuteCode output
+  pure $ renderToolRun renderExecuteCode result

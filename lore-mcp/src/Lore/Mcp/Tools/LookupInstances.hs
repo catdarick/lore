@@ -18,7 +18,7 @@ import Lore.Mcp.Internal.Annotated
     MinItems,
     WithMeta,
   )
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.LookupInstances
   ( LookupInstancesOptions (..),
     lookupInstances,
@@ -27,8 +27,7 @@ import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefault
 import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
 import Lore.Tools.Result
   ( PageRequest (..),
-    ResultLimit (..),
-    ToolRun (..),
+    ResultLimit (..)
   )
 
 data LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs
@@ -71,9 +70,4 @@ lookupInstancesHandler LookupInstancesArgs {names, skip} = do
                 pageLimit = Limit (limitToIntWithDefault 25 (instanceLimit mcpDefaultToolPolicy))
               }
         }
-  pure $
-    case result of
-      ToolRunBlocked blocked ->
-        toLoreDoc blocked
-      ToolRunReady ready ->
-        toLoreDoc ready
+  pure $ renderToolRun toLoreDoc result

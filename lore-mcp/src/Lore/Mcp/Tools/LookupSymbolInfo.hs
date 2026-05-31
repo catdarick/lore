@@ -10,18 +10,17 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.LookupSymbolInfo
   ( LookupSymbolInfoOptions (..),
   )
 import qualified Lore.Tools.LookupSymbolInfo as ToolsLookupSymbolInfo
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
-import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
+import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
   ( PageRequest (..),
     ResultLimit (..),
-    ToolRun (..),
-  )
+      )
 
 data LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
   { symbol ::
@@ -70,9 +69,4 @@ lookupSymbolInfoHandler LookupSymbolInfoArgs {symbol, skip} = do
           lookupSymbolInfoSuggestionLimit =
             Limit (limitToIntWithDefault 10 (symbolSuggestionsLimit mcpDefaultToolPolicy))
         }
-  pure $
-    case result of
-      ToolRunBlocked blocked ->
-        toLoreDoc blocked
-      ToolRunReady ready ->
-        ToolsLookupSymbolInfo.renderLookupSymbolInfoReady ready
+  pure $ renderToolRun ToolsLookupSymbolInfo.renderLookupSymbolInfoReady result

@@ -16,15 +16,15 @@ import Lore.Mcp.Internal.Annotated
     FieldType (..),
     WithMeta,
   )
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.FindDeadCode
   ( FindDeadCodeOptions (..),
     findDeadCode,
     renderFindDeadCodeOutput,
   )
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
-import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
-import Lore.Tools.Result (PageRequest (..), ResultLimit (..), ToolRun (..))
+import Lore.Tools.Render.Doc (LoreDoc)
+import Lore.Tools.Result (PageRequest (..), ResultLimit (..))
 
 data FindDeadCodeArgs (fieldType :: FieldType) = FindDeadCodeArgs
   { modules ::
@@ -66,9 +66,4 @@ findDeadCodeHandler FindDeadCodeArgs {modules, skip} = do
                   pageLimit = Limit (limitToIntWithDefault 100 (deadCodeLimit mcpDefaultToolPolicy))
                 }
         }
-  pure $
-    case result of
-      ToolRunBlocked blocked ->
-        toLoreDoc blocked
-      ToolRunReady output ->
-        renderFindDeadCodeOutput output
+  pure $ renderToolRun renderFindDeadCodeOutput result

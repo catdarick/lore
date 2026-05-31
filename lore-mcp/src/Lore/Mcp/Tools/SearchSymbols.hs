@@ -9,10 +9,10 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
-import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
-import Lore.Tools.Result (ResultLimit (..), ToolRun (..))
+import Lore.Tools.Render.Doc (LoreDoc)
+import Lore.Tools.Result (ResultLimit (..))
 import Lore.Tools.SearchSymbols
   ( SearchSymbolsOptions (..),
   )
@@ -54,9 +54,4 @@ searchSymbolsHandler SearchSymbolsArgs {query} = do
           searchSymbolsSuggestionLimit =
             Limit (limitToIntWithDefault 10 (symbolSuggestionsLimit mcpDefaultToolPolicy))
         }
-  pure $
-    case result of
-      ToolRunBlocked blocked ->
-        toLoreDoc blocked
-      ToolRunReady ready ->
-        ToolsSearchSymbols.renderSearchSymbolsReady ready
+  pure $ renderToolRun ToolsSearchSymbols.renderSearchSymbolsReady result
