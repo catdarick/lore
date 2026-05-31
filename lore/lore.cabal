@@ -51,6 +51,7 @@ library
       Lore.Internal.Lookup.SymbolResolutionCore
       Lore.Internal.Lookup.TypeQuery
   other-modules:
+      Lore.Internal.BuildTool.Environment
       Lore.Internal.Cache.Types
       Lore.Internal.DeadCode
       Lore.Internal.Definition.Analysis
@@ -70,6 +71,11 @@ library
       Lore.Internal.File
       Lore.Internal.Ghc.AvailInfo
       Lore.Internal.Ghc.DynFlags
+      Lore.Internal.Ghc.PackageEnvironment.Index
+      Lore.Internal.Ghc.PackageEnvironment.Parse
+      Lore.Internal.Ghc.PackageEnvironment.Probe
+      Lore.Internal.Ghc.PackageEnvironment.Resolve
+      Lore.Internal.Ghc.PackageEnvironment.Types
       Lore.Internal.Ghc.TyThing
       Lore.Internal.HomeModules
       Lore.Internal.HomeModules.AutoRefactorLoop
@@ -107,7 +113,7 @@ library
       Lore.Internal.Lookup.Types
       Lore.Internal.Monad
       Lore.Internal.Package
-      Lore.Internal.PackageDB
+      Lore.Internal.ProjectProvider
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
@@ -211,11 +217,13 @@ test-suite lore-test
       RedundantImportsSpec
       SourceEditSpec
       HomeModulesSpec
+      PackageEnvironmentSpec
       TemporalModulesSpec
       TestSupport
       SomeModule
   hs-source-dirs:
       test
+      src
   default-extensions:
       RecordWildCards
       NamedFieldPuns
@@ -256,7 +264,7 @@ test-suite lore-test
       ViewPatterns
       PartialTypeSignatures
       OverloadedRecordDot
-  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -Wno-incomplete-patterns
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -Wno-incomplete-patterns -Wno-missing-home-modules
   build-depends:
       Cabal
     , aeson
@@ -274,7 +282,6 @@ test-suite lore-test
     , ghc-paths
     , hpack
     , hspec
-    , lore
     , megaparsec
     , mtl
     , process

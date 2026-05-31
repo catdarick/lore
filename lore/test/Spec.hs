@@ -15,6 +15,7 @@ import qualified InterpreterSpec
 import qualified LoggerSpec
 import qualified LookupSearchSpec
 import qualified LookupSpec
+import qualified PackageEnvironmentSpec
 import qualified RedundantImportsSpec
 import qualified SourceEditSpec
 import qualified TemporalModulesSpec
@@ -34,6 +35,7 @@ main =
     LoggerSpec.spec
     LookupSearchSpec.spec
     LookupSpec.spec
+    PackageEnvironmentSpec.spec
     SourceEditSpec.spec
     HomeModulesSpec.spec
     TemporalModulesSpec.spec

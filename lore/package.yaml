@@ -88,7 +88,9 @@ library:
 tests:
   lore-test:
     main:                Spec.hs
-    source-dirs:         test
+    source-dirs:
+    - test
+    - src
     other-modules:
     - DefinitionSpec
     - DeadCodeSpec
@@ -104,6 +106,7 @@ tests:
     - RedundantImportsSpec
     - SourceEditSpec
     - HomeModulesSpec
+    - PackageEnvironmentSpec
     - TemporalModulesSpec
     - TestSupport
     - SomeModule
@@ -112,8 +115,8 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     - -Wno-incomplete-patterns
+    - -Wno-missing-home-modules
     dependencies:
-    - lore
     - hspec
 
 default-extensions:

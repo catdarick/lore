@@ -48,7 +48,7 @@ import qualified Hpack.Config as Hpack
 import qualified Language.Haskell.Extension as CabalExtension
 import Lore.Internal.File (findFilesByExtensionRecursively)
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..))
-import Lore.Internal.PackageDB (ProjectProvider (..))
+import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)

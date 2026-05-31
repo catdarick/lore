@@ -22,11 +22,13 @@ import Lore.Internal.Lookup.Cache.Types
     SimilarSymbolsSearchIndexCache (..),
     SymbolsDependencySetCache (..),
   )
-import Lore.Internal.PackageDB
+import Lore.Internal.Ghc.PackageEnvironment.Probe (captureGhcEnvironmentSnapshot)
+import Lore.Internal.Ghc.PackageEnvironment.Types
+  ( GhcEnvironmentSnapshot,
+  )
+import Lore.Internal.ProjectProvider
   ( ProjectProvider,
-    ResolvedPackageEnvironment,
     detectProjectProvider,
-    resolvePackageEnvironment,
   )
 import Lore.Internal.Session.Cache.Types (GeneratedMainModulesRegistry (..), InterpreterContextCache (..), LastLoadHomeModulesResultCache (..), TemporalModulesRegistry (..))
 import Lore.Logger (LoggerHandle)
@@ -38,7 +40,7 @@ data SessionContext = SessionContext
     projectProvider :: ProjectProvider,
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
-    resolvedPackageEnvironment :: ResolvedPackageEnvironment,
+    ghcEnvironmentSnapshot :: GhcEnvironmentSnapshot,
     ifaceCache :: GHC.ModIfaceCache,
     homeSymbolsIndexCacheVar :: MVar HomeSymbolsIndexCache,
     externalSymbolsIndexCacheVar :: MVar ExternalSymbolsIndexCache,
@@ -60,6 +62,7 @@ data SessionContext = SessionContext
 data SessionConfig = SessionConfig
   { projectRoot :: FilePath,
     ghcWorkDir :: FilePath,
+    projectProviderOverride :: Maybe ProjectProvider,
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
     parallelWorkersLimit :: ParallelWorkersCount,
@@ -67,15 +70,18 @@ data SessionConfig = SessionConfig
   }
 
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
-prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, loggerHandle, customPrelude, isTestSuiteFunctionalityRequired} = do
-  eiProvider <- detectProjectProvider projectRoot
+prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, projectProviderOverride, loggerHandle, customPrelude, isTestSuiteFunctionalityRequired} = do
+  eiProvider <-
+    case projectProviderOverride of
+      Just provider -> pure (Right provider)
+      Nothing -> detectProjectProvider projectRoot
   case eiProvider of
     Left err -> pure (Left err)
     Right projectProvider -> do
-      eiResolvedPackageEnvironment <- resolvePackageEnvironment projectProvider projectRoot
-      case eiResolvedPackageEnvironment of
+      eiGhcEnvironmentSnapshot <- captureGhcEnvironmentSnapshot projectProvider projectRoot
+      case eiGhcEnvironmentSnapshot of
         Left err -> pure (Left err)
-        Right resolvedPackageEnvironment -> do
+        Right ghcEnvironmentSnapshot -> do
           ifaceCache <- GHC.newIfaceCache
           homeSymbolsIndexCacheVar <- GHC.newMVar (HomeSymbolsIndexCache Nothing)
           externalSymbolsIndexCacheVar <- GHC.newMVar (ExternalSymbolsIndexCache Nothing)
@@ -101,7 +107,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, logg
                   projectProvider,
                   loggerHandle,
                   customPrelude,
-                  resolvedPackageEnvironment,
+                  ghcEnvironmentSnapshot,
                   ifaceCache,
                   homeSymbolsIndexCacheVar,
                   externalSymbolsIndexCacheVar,

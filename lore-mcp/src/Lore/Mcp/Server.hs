@@ -142,6 +142,7 @@ runLoreMcpServer = do
       SessionConfig
         { projectRoot = ".",
           ghcWorkDir = ".lore-work",
+          projectProviderOverride = Nothing,
           loggerHandle = noLogHandle,
           customPrelude = Nothing,
           parallelWorkersLimit = WorkersAsNumProcessors,

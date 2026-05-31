@@ -109,6 +109,7 @@ sessionConfigWithCustomPrelude customPrelude =
   Session.SessionConfig
     { Session.projectRoot = ".",
       Session.ghcWorkDir = ".lore-work",
+      Session.projectProviderOverride = Nothing,
       Session.loggerHandle = noLogHandle,
       Session.customPrelude = customPrelude,
       Session.parallelWorkersLimit = Session.WorkersAsNumProcessors,

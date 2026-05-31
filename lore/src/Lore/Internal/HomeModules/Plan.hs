@@ -39,17 +39,21 @@ import Lore.Internal.Package
     firstExistingPath,
     prepareComponentsData,
   )
-import Lore.Internal.PackageDB
-  ( ProjectProvider,
+import Lore.Internal.Ghc.PackageEnvironment.Resolve
+  ( packageEnvironmentCacheKey,
+    renderPackageResolutionError,
+    resolveDependencyPackageEnvironment,
+  )
+import Lore.Internal.Ghc.PackageEnvironment.Types
+  ( GhcEnvironmentSnapshot,
     ResolvedPackageEnvironment,
-    packageEnvironmentCacheKey,
-    withDependencyPackageExposures,
   )
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.TemporalModules (TemporalModule (..), listExistingTemporalModules)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import System.FilePath (takeDirectory)
+import UnliftIO.Exception (throwString)
 
 data HomeModuleKey
   = HomeModuleName GHC.ModuleName
@@ -72,9 +76,8 @@ data ComponentSpecificOptions = ComponentSpecificOptions
 
 data HomeModulesLoadInputs = HomeModulesLoadInputs
   { homeModulesHomeUnitId :: GHC.UnitId,
-    homeModulesProjectProvider :: ProjectProvider,
+    homeModulesGhcEnvironmentSnapshot :: GhcEnvironmentSnapshot,
     homeModulesPackages :: [PackageData],
-    homeModulesBasePackageEnvironment :: ResolvedPackageEnvironment,
     homeModulesTemporalModules :: [TemporalModule],
     homeModulesTestSuiteRequired :: Bool
   }
@@ -104,17 +107,15 @@ data HomeModulesLoadPlan = HomeModulesLoadPlan
 prepareHomeModulesLoadInputs :: (MonadLore m) => m HomeModulesLoadInputs
 prepareHomeModulesLoadInputs = do
   dflags <- GHC.getSessionDynFlags
-  provider <- asks projectProvider
-  packageEnvironment <- asks resolvedPackageEnvironment
+  ghcEnvironmentSnapshot <- asks ghcEnvironmentSnapshot
   testSuiteRequired <- asks isTestSuiteFunctionalityRequired
   packages <- prepareComponentsData
   temporalModules <- listExistingTemporalModules
   pure
     HomeModulesLoadInputs
       { homeModulesHomeUnitId = GHC.homeUnitId_ dflags,
-        homeModulesProjectProvider = provider,
+        homeModulesGhcEnvironmentSnapshot = ghcEnvironmentSnapshot,
         homeModulesPackages = packages,
-        homeModulesBasePackageEnvironment = packageEnvironment,
         homeModulesTemporalModules = temporalModules,
         homeModulesTestSuiteRequired = testSuiteRequired
       }
@@ -126,12 +127,19 @@ prepareHomeModulesLoadPlan inputs = do
         computeExternalHomeModuleDependencies
           inputs.homeModulesTestSuiteRequired
           inputs.homeModulesPackages
-      packageEnvironment =
-        withDependencyPackageExposures
-          inputs.homeModulesProjectProvider
-          dependencyNames
-          inputs.homeModulesBasePackageEnvironment
-      environmentCacheKey = packageEnvironmentCacheKey packageEnvironment
+  packageEnvironment <-
+    case
+      resolveDependencyPackageEnvironment
+        inputs.homeModulesGhcEnvironmentSnapshot
+        dependencyNames of
+      Left packageResolutionError ->
+        throwString
+          ( "Failed to resolve dependency package environment. "
+              <> renderPackageResolutionError packageResolutionError
+          )
+      Right resolvedEnvironment ->
+        pure resolvedEnvironment
+  let environmentCacheKey = packageEnvironmentCacheKey packageEnvironment
       sourceDirs =
         computeHomeModuleSourceDirs
           inputs.homeModulesPackages

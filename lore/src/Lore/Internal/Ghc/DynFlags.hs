@@ -16,15 +16,17 @@ module Lore.Internal.Ghc.DynFlags
 where
 
 import Control.Monad.IO.Class (MonadIO)
+import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Data.EnumSet as EnumSet
 import qualified GHC.Driver.Session as GHC
 import qualified GHC.Utils.Logger as GHC
 import qualified GHC.Utils.TmpFs as GHC
-import Lore.Internal.PackageDB
-  ( PackageDbDirective (..),
-    PackageExposure (..),
+import Lore.Internal.Ghc.PackageEnvironment.Types
+  ( PackageDbFlagTarget (PackageDbFlagsForGhc),
     ResolvedPackageEnvironment (..),
+    UnitIdText (..),
+    renderPackageDbStackFlags,
   )
 import System.FilePath (normalise, (</>))
 
@@ -135,25 +137,15 @@ resetPackageEnvironmentFlags dflags =
 
 renderPackageEnvironmentFlags :: ResolvedPackageEnvironment -> [String]
 renderPackageEnvironmentFlags environment =
-  hideAllPackagesFlag
-    <> concatMap renderPackageDbDirective environment.envPackageDbDirectives
-    <> concatMap renderPackageExposure environment.envPackageExposures
+  ["-clear-package-db"]
+    <> renderPackageDbStackFlags PackageDbFlagsForGhc environment.resolvedPackageDbStack
+    <> hideAllPackagesFlag
+    <> concatMap renderUnitId (Set.toAscList environment.resolvedExposedUnitIds)
   where
     hideAllPackagesFlag =
-      if null environment.envPackageExposures
+      if Set.null environment.resolvedExposedUnitIds
         then []
         else ["-hide-all-packages"]
 
-renderPackageDbDirective :: PackageDbDirective -> [String]
-renderPackageDbDirective directive =
-  case directive of
-    ClearPackageDb -> ["-clear-package-db"]
-    GlobalPackageDb -> ["-global-package-db"]
-    UserPackageDb -> ["-user-package-db"]
-    SpecificPackageDb dbPath -> ["-package-db", dbPath]
-
-renderPackageExposure :: PackageExposure -> [String]
-renderPackageExposure exposure =
-  case exposure of
-    ExposePackageName packageName -> ["-package", packageName]
-    ExposePackageId packageId -> ["-package-id", packageId]
+    renderUnitId unitId =
+      ["-package-id", unitId.unUnitIdText]

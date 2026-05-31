@@ -1,5 +1,6 @@
 module Lore
   ( SessionConfig (..),
+    ProjectProvider (..),
     defaultSessionConfig,
     ParallelWorkersCount (..),
     LoreMonadT,

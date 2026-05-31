@@ -1,6 +1,7 @@
 module Lore.Session
   ( SessionContext (..),
     SessionConfig (..),
+    ProjectProvider (..),
     defaultSessionConfig,
     prepareSessionContext,
     runLore,
@@ -11,8 +12,9 @@ where
 import Control.Monad.Catch (bracket)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ReaderT (runReaderT))
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified GHC
-import qualified GHC.Paths as GHCPaths
 import qualified GHC.Utils.Exception as GHCException
 import Lore.Internal.Definition.Callbacks (installDefinitionCallbacks)
 import Lore.Internal.Ghc.DynFlags
@@ -23,6 +25,11 @@ import Lore.Internal.Ghc.DynFlags
     setPackageEnvironmentM,
   )
 import Lore.Internal.Monad (LoreMonadT (..))
+import Lore.Internal.Ghc.PackageEnvironment.Types
+  ( GhcEnvironmentSnapshot (..),
+    ResolvedPackageEnvironment (..)
+  )
+import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import Lore.Internal.Session
   ( SessionConfig (..),
     SessionContext (..),
@@ -37,6 +44,7 @@ defaultSessionConfig =
   SessionConfig
     { projectRoot = ".",
       ghcWorkDir = ".lore-work",
+      projectProviderOverride = Nothing,
       loggerHandle = noLogHandle,
       customPrelude = Nothing,
       parallelWorkersLimit = WorkersAsNumProcessors,
@@ -57,9 +65,16 @@ runLore sessionConfig lore = do
             pure cwd
         )
         (liftIO . setCurrentDirectory)
-        (\_ -> GHC.runGhcT (Just GHCPaths.libdir) $ setupGhcSession sessionContext >> runReaderT (unLoreMonadT lore) sessionContext)
+        (\_ -> GHC.runGhcT (Just sessionContext.ghcEnvironmentSnapshot.ghcEnvironmentLibDir) $ setupGhcSession sessionContext >> runReaderT (unLoreMonadT lore) sessionContext)
   where
     setupGhcSession sessionContext = do
+      let initialPackageEnvironment =
+            ResolvedPackageEnvironment
+              { resolvedPackageDbStack = sessionContext.ghcEnvironmentSnapshot.ghcEnvironmentPackageDbStack,
+                resolvedExposedUnitIds =
+                  Set.unions
+                    (Map.elems sessionContext.ghcEnvironmentSnapshot.ghcEnvironmentSelectedUnitIdsByPackageName)
+              }
       liftIO $ do
         let workDir = ghcWorkDir sessionConfig
         mapM_
@@ -72,7 +87,7 @@ runLore sessionConfig lore = do
             workDir </> "tmp"
           ]
       modifySessionDynFlagsM
-        ( setPackageEnvironmentM (resolvedPackageEnvironment sessionContext)
+        ( setPackageEnvironmentM initialPackageEnvironment
             . setGhciLikeDynFlags (parallelWorkersLimit sessionConfig)
             . setGhcWorkDirs (ghcWorkDir sessionConfig)
         )
