@@ -34,6 +34,7 @@ library
       Lore.Tools.FindReferences
       Lore.Tools.FindReferences.Snippet
       Lore.Tools.FindReferences.Types
+      Lore.Tools.FindDeadCode.Request
       Lore.Tools.GetDefinition
       Lore.Tools.GetTypeOfExpression
       Lore.Tools.Internal.CompactClassInstance
