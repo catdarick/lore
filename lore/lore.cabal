@@ -122,6 +122,9 @@ library
       Lore.Internal.Lookup.Types
       Lore.Internal.Monad
       Lore.Internal.Package
+      Lore.Internal.Package.Discovery
+      Lore.Internal.Package.Path
+      Lore.Internal.Package.Types
       Lore.Internal.ProjectProvider
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
