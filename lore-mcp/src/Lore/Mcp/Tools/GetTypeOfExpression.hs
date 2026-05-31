@@ -17,7 +17,8 @@ import Lore.Tools.GetTypeOfExpression
   )
 import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
-  (   )
+  (
+  )
 
 newtype GetTypeOfExpressionArgs (fieldType :: FieldType) = GetTypeOfExpressionArgs
   { expression ::

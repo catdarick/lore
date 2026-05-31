@@ -13,8 +13,8 @@ module Lore.Internal.Definition.Analysis
   )
 where
 
-import qualified GHC
 import qualified Data.Map.Strict as Map
+import qualified GHC
 import Lore.Internal.Definition.Analysis.Bindings (buildDefinitionBindings)
 import Lore.Internal.Definition.Analysis.Core (buildEvidenceDependenciesByBinder, buildSemanticDependenciesByBinder)
 import Lore.Internal.Definition.Analysis.Dependencies (buildDependencies)

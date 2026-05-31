@@ -309,7 +309,8 @@ mkPackageIndex packageEntries =
           | entry <- packageEntries
           ],
       packageIndexByPackageName =
-        Map.fromListWith (<>)
+        Map.fromListWith
+          (<>)
           [ (entry.packageIndexPackageName, [entry])
           | entry <- packageEntries
           ]

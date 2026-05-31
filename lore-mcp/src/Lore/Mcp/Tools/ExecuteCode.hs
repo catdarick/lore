@@ -17,7 +17,8 @@ import Lore.Tools.ExecuteCode
   )
 import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
-  (   )
+  (
+  )
 
 newtype ExecuteCodeArgs (fieldType :: FieldType) = ExecuteCodeArgs
   { code ::

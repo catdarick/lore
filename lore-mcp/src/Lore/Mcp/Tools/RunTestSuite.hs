@@ -15,7 +15,8 @@ import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..),
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
-  (   )
+  (
+  )
 import Lore.Tools.RunTestSuite
   ( RunTestSuiteToolOptions (..),
   )

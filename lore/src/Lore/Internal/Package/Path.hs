@@ -9,9 +9,9 @@ module Lore.Internal.Package.Path
   )
 where
 
+import Control.Monad.IO.Class (liftIO)
 import Data.List (isPrefixOf, nub)
 import qualified Data.Set as Set
-import Control.Monad.IO.Class (liftIO)
 import Lore.Internal.Package.Types (ComponentData (..), PackageData (..))
 import Lore.Monad (MonadLore)
 import System.Directory (doesFileExist)

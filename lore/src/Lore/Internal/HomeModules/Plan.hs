@@ -27,6 +27,15 @@ import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Plugins as GHC
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), setGhcOptionsAndExtensions)
+import Lore.Internal.Ghc.PackageEnvironment.Resolve
+  ( packageEnvironmentCacheKey,
+    renderPackageResolutionError,
+    resolveDependencyPackageEnvironment,
+  )
+import Lore.Internal.Ghc.PackageEnvironment.Types
+  ( GhcEnvironmentSnapshot,
+    ResolvedPackageEnvironment,
+  )
 import Lore.Internal.HomeModules.SyntheticMain (entryHomeModuleSource)
 import Lore.Internal.Package
   ( ComponentData (..),
@@ -38,15 +47,6 @@ import Lore.Internal.Package
     extractSourceDirs,
     firstExistingPath,
     prepareComponentsData,
-  )
-import Lore.Internal.Ghc.PackageEnvironment.Resolve
-  ( packageEnvironmentCacheKey,
-    renderPackageResolutionError,
-    resolveDependencyPackageEnvironment,
-  )
-import Lore.Internal.Ghc.PackageEnvironment.Types
-  ( GhcEnvironmentSnapshot,
-    ResolvedPackageEnvironment,
   )
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.TemporalModules (TemporalModule (..), listExistingTemporalModules)
@@ -128,10 +128,9 @@ prepareHomeModulesLoadPlan inputs = do
           inputs.homeModulesTestSuiteRequired
           inputs.homeModulesPackages
   packageEnvironment <-
-    case
-      resolveDependencyPackageEnvironment
-        inputs.homeModulesGhcEnvironmentSnapshot
-        dependencyNames of
+    case resolveDependencyPackageEnvironment
+      inputs.homeModulesGhcEnvironmentSnapshot
+      dependencyNames of
       Left packageResolutionError ->
         throwString
           ( "Failed to resolve dependency package environment. "

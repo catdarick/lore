@@ -20,7 +20,7 @@ import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
   ( PageRequest (..),
     ResultLimit (..),
-      )
+  )
 
 data ListExportedSymbolsArgs (fieldType :: FieldType) = ListExportedSymbolsArgs
   { moduleName ::

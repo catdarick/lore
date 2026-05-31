@@ -20,7 +20,7 @@ import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
   ( PageRequest (..),
     ResultLimit (..),
-      )
+  )
 
 data LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
   { symbol ::

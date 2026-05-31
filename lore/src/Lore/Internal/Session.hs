@@ -14,6 +14,10 @@ import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
 import Lore.Internal.Definition.Cache.Types (CoreModuleFactsCache (..), DefinitionModuleIndexCache (..), ParsedModuleFactsCache (..), ParsedOccurrenceModuleIndexCache (..), TypedModuleFactsCache (..))
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
+import Lore.Internal.Ghc.PackageEnvironment.Probe (captureGhcEnvironmentSnapshot)
+import Lore.Internal.Ghc.PackageEnvironment.Types
+  ( GhcEnvironmentSnapshot,
+  )
 import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsIndexCache (..),
     HomeSymbolsIndexCache (..),
@@ -21,10 +25,6 @@ import Lore.Internal.Lookup.Cache.Types
     NameToInstancesIndexCache (..),
     SimilarSymbolsSearchIndexCache (..),
     SymbolsDependencySetCache (..),
-  )
-import Lore.Internal.Ghc.PackageEnvironment.Probe (captureGhcEnvironmentSnapshot)
-import Lore.Internal.Ghc.PackageEnvironment.Types
-  ( GhcEnvironmentSnapshot,
   )
 import Lore.Internal.ProjectProvider
   ( ProjectProvider,

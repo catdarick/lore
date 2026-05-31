@@ -24,11 +24,11 @@ import Lore.Internal.Ghc.DynFlags
     setGhciLikeDynFlags,
     setPackageEnvironmentM,
   )
-import Lore.Internal.Monad (LoreMonadT (..))
 import Lore.Internal.Ghc.PackageEnvironment.Types
   ( GhcEnvironmentSnapshot (..),
-    ResolvedPackageEnvironment (..)
+    ResolvedPackageEnvironment (..),
   )
+import Lore.Internal.Monad (LoreMonadT (..))
 import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import Lore.Internal.Session
   ( SessionConfig (..),

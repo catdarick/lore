@@ -11,10 +11,10 @@ import Data.Maybe (maybeToList)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC
-import qualified GHC.Plugins as GHC
 import qualified GHC.Core.FamInstEnv as GHC.FamInst
 import qualified GHC.Core.InstEnv as GHC.InstEnv
 import qualified GHC.Core.TyCo.FVs as GHC.TyCoFVs
+import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
 import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.FieldLabel as GHC.FieldLabel

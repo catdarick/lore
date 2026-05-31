@@ -17,7 +17,7 @@ import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result
   ( PageRequest (..),
     ResultLimit (..),
-      )
+  )
 
 data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
   { symbol ::

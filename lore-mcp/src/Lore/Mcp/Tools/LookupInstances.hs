@@ -27,7 +27,7 @@ import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefault
 import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
 import Lore.Tools.Result
   ( PageRequest (..),
-    ResultLimit (..)
+    ResultLimit (..),
   )
 
 data LookupInstancesArgs (fieldType :: FieldType) = LookupInstancesArgs

@@ -306,7 +306,8 @@ validateSelectedUnitIds ::
 validateSelectedUnitIds selectedUnitIds packageIndex = do
   selectedEntries <- mapM lookupSelectedEntry (Set.toAscList selectedUnitIds)
   pure
-    ( Map.fromListWith (<>)
+    ( Map.fromListWith
+        (<>)
         [ (entry.packageIndexPackageName, Set.singleton entry.packageIndexUnitId)
         | entry <- selectedEntries
         ]
