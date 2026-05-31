@@ -125,8 +125,99 @@ scoreOccurrence query loweredQuery queryTokens index queryTokenMatches occurrenc
     { searchResultKey = occurrence.indexedOccurrenceKey,
       searchResultText = occurrence.indexedOccurrenceText,
       searchResultValue = occurrence.indexedOccurrenceValue,
-      searchResultScore = score,
+      searchResultScore = scoreBreakdownTotal breakdown,
       searchResultWholeDistance = wholeDistance
+    }
+  where
+    breakdown =
+      scoreOccurrenceBreakdown defaultSearchWeights query loweredQuery queryTokens index queryTokenMatches occurrence wholeDistance
+    loweredOccurrenceText =
+      T.toLower occurrence.indexedOccurrenceText
+    wholeDistance =
+      EditDistance.restrictedDamerauLevenshteinDistance
+        EditDistance.defaultEditCosts
+        (T.unpack loweredQuery)
+        (T.unpack loweredOccurrenceText)
+
+data SearchWeights = SearchWeights
+  { exactTokenBonusWeight :: !Double,
+    coverageBonusWeight :: !Double,
+    fullCoverageNoExtraBonusWeight :: !Double,
+    orderedTokenBonusWeight :: !Double,
+    tokenDistancePenaltyWeight :: !Double,
+    missingTokenPenaltyWeight :: !Double,
+    extraTokenPenaltyWeight :: !Double,
+    wholeDistancePenaltyWeight :: !Double,
+    exactTextMatchBonusWeight :: !Double,
+    capitalizationMismatchPenaltyWeight :: !Double
+  }
+
+defaultSearchWeights :: SearchWeights
+defaultSearchWeights =
+  SearchWeights
+    { exactTokenBonusWeight = 0.25,
+      coverageBonusWeight = 2.0,
+      fullCoverageNoExtraBonusWeight = 0.6,
+      orderedTokenBonusWeight = 0.5,
+      tokenDistancePenaltyWeight = 0.35,
+      missingTokenPenaltyWeight = 0.75,
+      extraTokenPenaltyWeight = 0.15,
+      wholeDistancePenaltyWeight = 0.02,
+      exactTextMatchBonusWeight = 100.0,
+      capitalizationMismatchPenaltyWeight = 0.6
+    }
+
+data ScoreBreakdown = ScoreBreakdown
+  { scoreBreakdownMatchedTokenScore :: !Double,
+    scoreBreakdownExactTokenBonus :: !Double,
+    scoreBreakdownCoverageBonus :: !Double,
+    scoreBreakdownFullCoverageNoExtraBonus :: !Double,
+    scoreBreakdownOrderedBonus :: !Double,
+    scoreBreakdownExactTextMatchBonus :: !Double,
+    scoreBreakdownTokenDistancePenalty :: !Double,
+    scoreBreakdownMissingImportantTokenPenalty :: !Double,
+    scoreBreakdownExtraTokenPenalty :: !Double,
+    scoreBreakdownWholeDistancePenalty :: !Double,
+    scoreBreakdownCapitalizedCandidatePenalty :: !Double
+  }
+
+scoreBreakdownTotal :: ScoreBreakdown -> Double
+scoreBreakdownTotal breakdown =
+  breakdown.scoreBreakdownMatchedTokenScore
+    + breakdown.scoreBreakdownExactTokenBonus
+    + breakdown.scoreBreakdownCoverageBonus
+    + breakdown.scoreBreakdownFullCoverageNoExtraBonus
+    + breakdown.scoreBreakdownOrderedBonus
+    + breakdown.scoreBreakdownExactTextMatchBonus
+    - breakdown.scoreBreakdownTokenDistancePenalty
+    - breakdown.scoreBreakdownMissingImportantTokenPenalty
+    - breakdown.scoreBreakdownExtraTokenPenalty
+    - breakdown.scoreBreakdownWholeDistancePenalty
+    - breakdown.scoreBreakdownCapitalizedCandidatePenalty
+
+scoreOccurrenceBreakdown ::
+  SearchWeights ->
+  Text ->
+  Text ->
+  [SearchToken] ->
+  TokenSearchIndex key value ->
+  [QueryTokenMatch] ->
+  IndexedOccurrence key value ->
+  Int ->
+  ScoreBreakdown
+scoreOccurrenceBreakdown weights query loweredQuery queryTokens index queryTokenMatches occurrence wholeDistance =
+  ScoreBreakdown
+    { scoreBreakdownMatchedTokenScore = matchedTokenScore,
+      scoreBreakdownExactTokenBonus = exactTokenBonus,
+      scoreBreakdownCoverageBonus = coverageBonus,
+      scoreBreakdownFullCoverageNoExtraBonus = fullCoverageNoExtraBonus,
+      scoreBreakdownOrderedBonus = orderedBonus,
+      scoreBreakdownExactTextMatchBonus = exactTextMatchBonus,
+      scoreBreakdownTokenDistancePenalty = tokenDistancePenalty,
+      scoreBreakdownMissingImportantTokenPenalty = missingImportantTokenPenalty,
+      scoreBreakdownExtraTokenPenalty = extraTokenPenalty,
+      scoreBreakdownWholeDistancePenalty = wholeDistancePenalty,
+      scoreBreakdownCapitalizedCandidatePenalty = capitalizedCandidatePenalty
     }
   where
     candidateTokenSet = Set.fromList occurrence.indexedOccurrenceTokens
@@ -146,67 +237,46 @@ scoreOccurrence query loweredQuery queryTokens index queryTokenMatches occurrenc
     matchedTokenScore =
       sum (map (.tokenWeight) bestMatches)
     exactTokenBonus =
-      0.25 * fromIntegral (length (filter ((== TokenMatchExact) . (.tokenMatchKind)) bestMatches))
+      weights.exactTokenBonusWeight * fromIntegral (length (filter ((== TokenMatchExact) . (.tokenMatchKind)) bestMatches))
     coverageBonus =
       if null queryTokens
         then 0
-        else 2.0 * fromIntegral (Set.size matchedQueryTokens) / fromIntegral (length queryTokens)
+        else weights.coverageBonusWeight * fromIntegral (Set.size matchedQueryTokens) / fromIntegral (length queryTokens)
     fullCoverageNoExtraBonus =
       if Set.size matchedQueryTokens == length queryTokens && extraTokenCount == 0
-        then fullCoverageNoExtraBonusWeight
+        then weights.fullCoverageNoExtraBonusWeight
         else 0
     orderedBonus =
       if tokensMatchInOrder occurrence.indexedOccurrenceTokens (map (.matchedToken) bestMatches)
-        then 0.5 * fromIntegral (length bestMatches)
+        then weights.orderedTokenBonusWeight * fromIntegral (length bestMatches)
         else 0
     tokenDistancePenalty =
-      0.35 * fromIntegral (sum (map (.tokenDistance) bestMatches))
+      weights.tokenDistancePenaltyWeight * fromIntegral (sum (map (.tokenDistance) bestMatches))
     missingImportantTokenPenalty =
-      sum (map (missingTokenPenalty index) missingQueryTokens)
+      sum (map (missingTokenPenalty weights index) missingQueryTokens)
     extraTokenPenalty =
-      0.15 * fromIntegral extraTokenCount
+      weights.extraTokenPenaltyWeight * fromIntegral extraTokenCount
     loweredOccurrenceText =
       T.toLower occurrence.indexedOccurrenceText
-    wholeDistance =
-      EditDistance.restrictedDamerauLevenshteinDistance
-        EditDistance.defaultEditCosts
-        (T.unpack loweredQuery)
-        (T.unpack loweredOccurrenceText)
     wholeDistancePenalty =
-      0.02 * fromIntegral wholeDistance
+      weights.wholeDistancePenaltyWeight * fromIntegral wholeDistance
     exactTextMatchBonus =
       if loweredQuery == loweredOccurrenceText
-        then exactTextMatchBonusWeight
+        then weights.exactTextMatchBonusWeight
         else 0
     capitalizedCandidatePenalty =
-      capitalizationMismatchPenalty query occurrence.indexedOccurrenceText
-    score =
-      matchedTokenScore
-        + exactTokenBonus
-        + coverageBonus
-        + fullCoverageNoExtraBonus
-        + orderedBonus
-        + exactTextMatchBonus
-        - tokenDistancePenalty
-        - missingImportantTokenPenalty
-        - extraTokenPenalty
-        - wholeDistancePenalty
-        - capitalizedCandidatePenalty
+      capitalizationMismatchPenalty weights query occurrence.indexedOccurrenceText
 
-capitalizationMismatchPenalty :: Text -> Text -> Double
-capitalizationMismatchPenalty query candidate =
+capitalizationMismatchPenalty :: SearchWeights -> Text -> Text -> Double
+capitalizationMismatchPenalty weights query candidate =
   case (firstAlphabeticChar query, firstAlphabeticChar candidate) of
     (Just queryChar, Just candidateChar)
       | isUpper queryChar == isUpper candidateChar ->
           0
       | otherwise ->
-          capitalizationMismatchPenaltyWeight
+          weights.capitalizationMismatchPenaltyWeight
     _ ->
       0
-
-capitalizationMismatchPenaltyWeight :: Double
-capitalizationMismatchPenaltyWeight =
-  0.6
 
 firstAlphabeticChar :: Text -> Maybe Char
 firstAlphabeticChar text =
@@ -264,9 +334,9 @@ matchTokenIdf index queryToken storedToken matchKind =
     _ ->
       tokenIdf index storedToken
 
-missingTokenPenalty :: TokenSearchIndex key value -> SearchToken -> Double
-missingTokenPenalty index token =
-  0.75 * tokenIdf index token
+missingTokenPenalty :: SearchWeights -> TokenSearchIndex key value -> SearchToken -> Double
+missingTokenPenalty weights index token =
+  weights.missingTokenPenaltyWeight * tokenIdf index token
 
 tokenSimilarity :: Int -> Double
 tokenSimilarity distance =
@@ -319,14 +389,6 @@ canonicalMatchSimilarity =
 synonymMatchSimilarity :: Double
 synonymMatchSimilarity =
   0.85
-
-exactTextMatchBonusWeight :: Double
-exactTextMatchBonusWeight =
-  100.0
-
-fullCoverageNoExtraBonusWeight :: Double
-fullCoverageNoExtraBonusWeight =
-  0.6
 
 tokenEditDistance :: SearchToken -> SearchToken -> Int
 tokenEditDistance queryToken storedToken =
