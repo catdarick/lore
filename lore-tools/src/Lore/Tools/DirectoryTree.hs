@@ -18,8 +18,8 @@ where
 import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
-import Data.Char (isSpace, toLower)
-import Data.List (elemIndex, isPrefixOf, sortBy)
+import Data.Char (toLower)
+import Data.List (elemIndex, sortBy)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Ord (comparing)
@@ -39,8 +39,14 @@ import Lore.Tools.Directory
     relativeProjectPath,
     resolveDirectoryInsideProject,
   )
+import Lore.Tools.DirectoryTree.Gitignore
+  ( GitignoredDirectoryMatcher,
+    isHiddenDirectoryPath,
+    loadGitignoredDirectoryMatchers,
+    matchesGitignoredDirectory,
+  )
 import Lore.Session (SessionContext (..))
-import System.Directory (canonicalizePath, doesFileExist)
+import System.Directory (canonicalizePath)
 import System.FilePath
   ( isAbsolute,
     makeRelative,
@@ -782,82 +788,6 @@ shouldOpenDirectory focusPaths relativePath gitignoredMatchers =
       focusPath /= "."
         && (isHiddenDirectoryPath focusPath || matchesGitignoredDirectory gitignoredMatchers focusPath)
         && focusRelated focusPath
-
-isHiddenDirectoryPath :: FilePath -> Bool
-isHiddenDirectoryPath path =
-  any isHiddenSegment (splitDirectories (normalizeRelativePath path))
-  where
-    isHiddenSegment segment =
-      segment /= "."
-        && segment /= ".."
-        && not (null segment)
-        && head segment == '.'
-
-data GitignoredDirectoryMatcher
-  = GitignoredDirectoryName FilePath
-  | GitignoredDirectoryPrefix FilePath
-  deriving stock (Eq, Show)
-
-loadGitignoredDirectoryMatchers :: FilePath -> IO [GitignoredDirectoryMatcher]
-loadGitignoredDirectoryMatchers projectRootPath = do
-  let gitignorePath = projectRootPath </> ".gitignore"
-  exists <- doesFileExist gitignorePath
-  if not exists
-    then pure []
-    else parseGitignoredDirectoryMatchers <$> readFile gitignorePath
-
-parseGitignoredDirectoryMatchers :: String -> [GitignoredDirectoryMatcher]
-parseGitignoredDirectoryMatchers content =
-  mapMaybe parseGitignoredDirectoryMatcher (lines content)
-
-parseGitignoredDirectoryMatcher :: String -> Maybe GitignoredDirectoryMatcher
-parseGitignoredDirectoryMatcher rawLine = do
-  let trimmedLine = trimLine rawLine
-  normalizedPattern <- normalizeGitignoredDirectoryPattern trimmedLine
-  pure $
-    if '/' `elem` normalizedPattern
-      then GitignoredDirectoryPrefix (normalizeRelativePath normalizedPattern)
-      else GitignoredDirectoryName normalizedPattern
-
-normalizeGitignoredDirectoryPattern :: String -> Maybe FilePath
-normalizeGitignoredDirectoryPattern patternLine
-  | null patternLine = Nothing
-  | "#" `isPrefixOf` patternLine = Nothing
-  | "!" `isPrefixOf` patternLine = Nothing
-  | any (`elem` patternLine) ['*', '?', '['] = Nothing
-  | otherwise =
-      case dropTrailingSlash (dropLeadingSlash patternLine) of
-        "" -> Nothing
-        normalized -> Just normalized
-  where
-    dropLeadingSlash path =
-      case path of
-        '/' : rest -> rest
-        _ -> path
-
-    dropTrailingSlash path =
-      reverse (dropWhile (== '/') (reverse path))
-
-trimLine :: String -> String
-trimLine =
-  dropWhileEnd isSpace . dropWhile isSpace
-  where
-    dropWhileEnd predicate =
-      reverse . dropWhile predicate . reverse
-
-matchesGitignoredDirectory :: [GitignoredDirectoryMatcher] -> FilePath -> Bool
-matchesGitignoredDirectory matchers path =
-  any (`matches` normalizedPath) matchers
-  where
-    normalizedPath = normalizeRelativePath path
-    segments = splitDirectories normalizedPath
-
-    matches matcher candidatePath =
-      case matcher of
-        GitignoredDirectoryName directoryName ->
-          directoryName `elem` segments
-        GitignoredDirectoryPrefix prefix ->
-          isAncestorOrSelf prefix candidatePath
 
 summarizeDirectory :: FilePath -> IO DirectoryTreeStats
 summarizeDirectory directoryPath = do

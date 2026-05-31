@@ -26,6 +26,7 @@ library
       Lore.Tools.CreateTemporalModule
       Lore.Tools.Directory
       Lore.Tools.DirectoryTree
+      Lore.Tools.DirectoryTree.Gitignore
       Lore.Tools.DiscoverDirectory
       Lore.Tools.DiscoverProject
       Lore.Tools.ExecuteCode
