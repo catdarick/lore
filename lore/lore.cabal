@@ -71,6 +71,7 @@ library
       Lore.Internal.Definition.Cache.TypedModuleFacts
       Lore.Internal.Definition.Cache.Types
       Lore.Internal.Definition.Callbacks
+      Lore.Internal.Definition.Graph
       Lore.Internal.Definition.Index
       Lore.Internal.Definition.Query
       Lore.Internal.Definition.SourceTree
