@@ -4,8 +4,10 @@ module Lore.Internal.Definition.Analysis.Dependencies
 where
 
 import Data.Foldable (foldl')
+import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Lore.Internal.Definition.Analysis.Common (nameUniqueKey)
 import Lore.Internal.Definition.Analysis.Occurrences (isFollowableReference)
 import Lore.Internal.Definition.Types
 
@@ -20,6 +22,14 @@ buildDependencies bindings memberIndexesById occurrencesById maybeCoreFacts =
   where
     coreEvidenceDependenciesByBinder =
       maybe Map.empty (.coreEvidenceDependenciesByBinder) maybeCoreFacts
+
+    coreSemanticDependenciesByBinder =
+      IntMap.fromListWith
+        (<>)
+        [ (nameUniqueKey binderName, semanticNames)
+        | (binderName, semanticNames) <-
+            Map.toList (maybe Map.empty (.coreSemanticDependenciesByBinder) maybeCoreFacts)
+        ]
 
     mkDependencies definitionId source =
       let memberIndex =
@@ -59,11 +69,17 @@ buildDependencies bindings memberIndexesById occurrencesById maybeCoreFacts =
               definitionNames
               rootNames
               usedInstancesByReferenceNameRaw
+          coreSemanticNames =
+            [ semanticName
+            | definitionName <- Set.toList definitionNames,
+              semanticName <- IntMap.findWithDefault [] (nameUniqueKey definitionName) coreSemanticDependenciesByBinder
+            ]
        in DefinitionDependencies
             { dependencyDirectReferenceNames =
                 Set.unions (Map.elems directReferencesByReferenceName),
               dependencyUsedInstanceNames =
                 Set.unions (Map.elems usedInstancesByReferenceName),
+              dependencyCoreSemanticNames = coreSemanticNames,
               dependencyDirectReferenceNamesByReferenceName = directReferencesByReferenceName,
               dependencyUsedInstanceNamesByReferenceName = usedInstancesByReferenceName
             }

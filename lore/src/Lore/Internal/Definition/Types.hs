@@ -232,10 +232,15 @@ data DefinitionDependencies = DefinitionDependencies
     -- Query-time recursion should use scoped maps directly.
     dependencyDirectReferenceNames :: !(Set.Set GHC.Name),
     -- | Compatibility aggregate derived from scoped map values.
-    -- Includes used instance dictionaries and other Core-derived semantic
-    -- dependencies needed to preserve class/evidence reachability.
+    -- Includes directly used instance dictionaries needed by definition-closure
+    -- expansion.
     -- Query-time recursion should use scoped maps directly.
     dependencyUsedInstanceNames :: !(Set.Set GHC.Name),
+    -- | Core-derived reachability dependencies for project-wide dead-code
+    -- analysis. These may be transitive across local top-level binders and are
+    -- intentionally separate from the direct evidence dependencies used by
+    -- definition-closure queries.
+    dependencyCoreSemanticNames :: ![GHC.Name],
     dependencyDirectReferenceNamesByReferenceName :: !(Map.Map GHC.Name (Set.Set GHC.Name)),
     dependencyUsedInstanceNamesByReferenceName :: !(Map.Map GHC.Name (Set.Set GHC.Name))
   }

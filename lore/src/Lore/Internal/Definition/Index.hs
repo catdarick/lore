@@ -31,6 +31,7 @@ emptyDefinitionDependencies =
   DefinitionDependencies
     { dependencyDirectReferenceNames = Set.empty,
       dependencyUsedInstanceNames = Set.empty,
+      dependencyCoreSemanticNames = [],
       dependencyDirectReferenceNamesByReferenceName = Map.empty,
       dependencyUsedInstanceNamesByReferenceName = Map.empty
     }

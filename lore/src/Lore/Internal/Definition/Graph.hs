@@ -15,26 +15,22 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Foldable (foldl')
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
-import Data.Maybe (maybeToList)
 import qualified Data.Set as Set
 import GHC.Conc (getNumCapabilities)
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
-import Lore.Internal.Definition.Analysis (buildDefinitionBindings)
+import Lore.Internal.Definition.Analysis (buildDefinitionModuleIndex)
 import Lore.Internal.Definition.Analysis.Common (nameUniqueKey)
-import Lore.Internal.Definition.Analysis.Occurrences (isFollowableReference)
 import Lore.Internal.Definition.Cache.ModuleArtifacts
   ( DefinitionModuleArtifacts (..),
     lookupDefinitionModuleArtifactsForModules,
   )
 import Lore.Internal.Definition.Types
-  ( DeclarationSpans (..),
-    DefinitionBindings (..),
+  ( DefinitionDependencies (..),
     DefinitionId,
+    DefinitionModuleIndex (..),
     DefinitionSource (..),
-    MinimalCoreModuleFacts (..),
     MinimalTypedModuleFacts (..),
-    MinimalTypedOccurrence (..),
   )
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries, modSummariesToMap)
 import Lore.Monad (MonadLore)
@@ -46,15 +42,9 @@ newtype DefinitionGraph = DefinitionGraph (Map.Map DefinitionId (Set.Set Definit
 data ProjectDefinitionIndex = ProjectDefinitionIndex
   { projectDefinitionsById :: Map.Map DefinitionId DefinitionSource,
     projectDefinitionIdByName :: Map.Map GHC.Name DefinitionId,
-    projectDependenciesById :: Map.Map DefinitionId ProjectDependencyNames,
+    projectDependenciesById :: Map.Map DefinitionId DefinitionDependencies,
     projectInstanceHeadTypeDefinitionIdsByInstance :: Map.Map DefinitionId (Set.Set DefinitionId),
     projectInstanceDefinitionIds :: Set.Set DefinitionId
-  }
-  deriving stock (Eq, Generic)
-
-data ProjectDependencyNames = ProjectDependencyNames
-  { projectDependencyDirectReferenceNames :: !(Set.Set GHC.Name),
-    projectDependencyCoreSemanticNames :: ![GHC.Name]
   }
   deriving stock (Eq, Generic)
 
@@ -70,10 +60,6 @@ instance NFData ProjectDefinitionIndex where
           Map.size projectInstanceHeadTypeDefinitionIdsByInstance `seq`
             Set.size projectInstanceDefinitionIds `seq`
               ()
-
-instance NFData ProjectDependencyNames where
-  rnf dependencies =
-    projectDependencyWeight dependencies `seq` ()
 
 loadProjectDefinitionIndex :: (MonadLore m) => m ProjectDefinitionIndex
 loadProjectDefinitionIndex = do
@@ -158,12 +144,6 @@ forceProjectDefinitionIndex projectIndex = do
   _ <- liftIO (evaluate (Set.size projectIndex.projectInstanceDefinitionIds))
   pure projectIndex
 
-forceDefinitionBindings :: (MonadIO m) => DefinitionBindings -> m DefinitionBindings
-forceDefinitionBindings bindings = do
-  forceDefinitionSourceMap bindings.bindingDefinitionsById
-  forceDefinitionIdMap bindings.bindingDefinitionIdByName
-  pure bindings
-
 forceDefinitionSourceMap :: (MonadIO m) => Map.Map DefinitionId DefinitionSource -> m ()
 forceDefinitionSourceMap definitionsById = do
   _ <-
@@ -183,7 +163,7 @@ forceDefinitionIdMap :: (MonadIO m) => Map.Map GHC.Name DefinitionId -> m ()
 forceDefinitionIdMap definitionIdByName =
   liftIO (evaluate (Map.size definitionIdByName)) >> pure ()
 
-forceDependenciesById :: (MonadIO m) => Map.Map DefinitionId ProjectDependencyNames -> m (Map.Map DefinitionId ProjectDependencyNames)
+forceDependenciesById :: (MonadIO m) => Map.Map DefinitionId DefinitionDependencies -> m (Map.Map DefinitionId DefinitionDependencies)
 forceDependenciesById dependenciesById = do
   _ <-
     liftIO $
@@ -191,16 +171,17 @@ forceDependenciesById dependenciesById = do
         Map.size dependenciesById
           + foldl'
             ( \total dependencies ->
-                total + projectDependencyWeight dependencies
+                total + dependencyWeight dependencies
             )
             0
             (Map.elems dependenciesById)
   pure dependenciesById
 
-projectDependencyWeight :: ProjectDependencyNames -> Int
-projectDependencyWeight dependencies =
-  Set.size dependencies.projectDependencyDirectReferenceNames
-    + length dependencies.projectDependencyCoreSemanticNames
+dependencyWeight :: DefinitionDependencies -> Int
+dependencyWeight dependencies =
+  Set.size dependencies.dependencyDirectReferenceNames
+    + Set.size dependencies.dependencyUsedInstanceNames
+    + length dependencies.dependencyCoreSemanticNames
 
 buildProjectIndexForModule ::
   (MonadLore m) =>
@@ -208,32 +189,25 @@ buildProjectIndexForModule ::
   DefinitionModuleArtifacts ->
   m ProjectDefinitionIndex
 buildProjectIndexForModule homeModule DefinitionModuleArtifacts {definitionArtifactParsedFacts, definitionArtifactTypedFacts, definitionArtifactCoreFacts} = do
-  let bindings =
-        buildDefinitionBindings homeModule definitionArtifactParsedFacts definitionArtifactTypedFacts
-  forcedBindings <- forceDefinitionBindings bindings
-  let directReferencesById =
-        collectDirectReferencesByDefinitionId
-          forcedBindings
-          forcedBindings.bindingDefinitionsById
-          definitionArtifactTypedFacts.typedOccurrences
-  let dependenciesById =
-        buildDeadCodeDependenciesFromDirectRefs
-          forcedBindings
+  let moduleIndex =
+        buildDefinitionModuleIndex
+          homeModule
+          definitionArtifactParsedFacts
+          definitionArtifactTypedFacts
           definitionArtifactCoreFacts
-          directReferencesById
       instanceDefinitionIds =
         collectInstanceDefinitionIds
-          forcedBindings.bindingDefinitionIdByName
+          moduleIndex.definitionIdByName
           definitionArtifactTypedFacts
       instanceHeadTypeDefinitionIdsByInstance =
         collectInstanceHeadTypeDefinitionIdsByInstance
-          forcedBindings.bindingDefinitionIdByName
+          moduleIndex.definitionIdByName
           definitionArtifactTypedFacts
   let projectIndex =
         ProjectDefinitionIndex
-          { projectDefinitionsById = forcedBindings.bindingDefinitionsById,
-            projectDefinitionIdByName = forcedBindings.bindingDefinitionIdByName,
-            projectDependenciesById = dependenciesById,
+          { projectDefinitionsById = moduleIndex.definitionsById,
+            projectDefinitionIdByName = moduleIndex.definitionIdByName,
+            projectDependenciesById = moduleIndex.dependenciesById,
             projectInstanceHeadTypeDefinitionIdsByInstance = instanceHeadTypeDefinitionIdsByInstance,
             projectInstanceDefinitionIds = instanceDefinitionIds
           }
@@ -267,91 +241,10 @@ collectInstanceHeadTypeDefinitionIdsByInstance definitionIdByName typedFacts =
               ]
     ]
 
-buildDeadCodeDependenciesFromDirectRefs ::
-  DefinitionBindings ->
-  Maybe MinimalCoreModuleFacts ->
-  Map.Map DefinitionId (Set.Set GHC.Name) ->
-  Map.Map DefinitionId ProjectDependencyNames
-buildDeadCodeDependenciesFromDirectRefs bindings maybeCoreFacts directReferencesById =
-  Map.fromList
-    [ (definitionId, dependenciesForDefinition definitionId source)
-    | (definitionId, source) <- Map.toList bindings.bindingDefinitionsById
-    ]
-  where
-    coreSemanticDependenciesByBinder =
-      IntMap.fromListWith
-        (<>)
-        [ (nameUniqueKey binderName, semanticNames)
-        | (binderName, semanticNames) <-
-            Map.toList (maybe Map.empty (.coreSemanticDependenciesByBinder) maybeCoreFacts)
-        ]
-
-    dependenciesForDefinition definitionId source =
-      ProjectDependencyNames
-        { projectDependencyDirectReferenceNames =
-            Map.findWithDefault Set.empty definitionId directReferencesById,
-          projectDependencyCoreSemanticNames =
-            [ semanticName
-            | definitionName <- Set.toList source.definitionSourceNames,
-              semanticName <- IntMap.findWithDefault [] (nameUniqueKey definitionName) coreSemanticDependenciesByBinder
-            ]
-        }
-
-collectDirectReferencesByDefinitionId ::
-  DefinitionBindings ->
-  Map.Map DefinitionId DefinitionSource ->
-  [MinimalTypedOccurrence] ->
-  Map.Map DefinitionId (Set.Set GHC.Name)
-collectDirectReferencesByDefinitionId bindings definitionsById typedOccurrences =
-  foldl'
-    addOccurrenceReference
-    (Map.fromSet (const Set.empty) (Map.keysSet definitionsById))
-    typedOccurrences
-  where
-    addOccurrenceReference referencesById occurrence =
-      case resolveOccurrenceOwnerId occurrence of
-        Just definitionId
-          | Just source <- Map.lookup definitionId definitionsById,
-            isFollowableReference source.definitionSourceNames source.definitionSourceSpans occurrence.typedOccurrenceName ->
-              Map.adjust (Set.insert occurrence.typedOccurrenceName) definitionId referencesById
-        _ ->
-          referencesById
-
-    resolveOccurrenceOwnerId occurrence =
-      case occurrence.typedOccurrenceParent >>= (`Map.lookup` bindings.bindingDefinitionIdByName) of
-        Just definitionId ->
-          Just definitionId
-        Nothing ->
-          resolveOwnerIdBySpan occurrence.typedOccurrenceSpan
-
-    definitionSpansById =
-      [ (definitionId, declarationTargetSpans source.definitionSourceSpans)
-      | (definitionId, source) <- Map.toList definitionsById
-      ]
-
-    resolveOwnerIdBySpan occurrenceSpan =
-      case [ definitionId
-           | (definitionId, targetSpans) <- definitionSpansById,
-             spanWithin targetSpans occurrenceSpan
-           ] of
-        (definitionId : _) ->
-          Just definitionId
-        [] ->
-          Nothing
-
-declarationTargetSpans :: DeclarationSpans -> [GHC.SrcSpan]
-declarationTargetSpans declarationSpans =
-  declarationSpans.declarationSpan
-    : maybeToList declarationSpans.signatureSpan
-
-spanWithin :: [GHC.SrcSpan] -> GHC.SrcSpan -> Bool
-spanWithin targetSpans span' =
-  any (span' `GHC.isSubspanOf`) targetSpans
-
 resolveChunk ::
   (MonadLore m) =>
   IntMap.IntMap DefinitionId ->
-  [(DefinitionId, ProjectDependencyNames)] ->
+  [(DefinitionId, DefinitionDependencies)] ->
   m [(DefinitionId, Set.Set DefinitionId)]
 resolveChunk definitionIdByUnique dependencyChunk =
   mapM resolveDependencyItem dependencyChunk
@@ -363,34 +256,29 @@ resolveChunk definitionIdByUnique dependencyChunk =
 
 resolveDependencies ::
   IntMap.IntMap DefinitionId ->
-  ProjectDependencyNames ->
+  DefinitionDependencies ->
   Set.Set DefinitionId
 resolveDependencies definitionIdByUnique dependencies =
-  foldCoreDependencyNames
-    (foldDirectDependencyNames Set.empty dependencies.projectDependencyDirectReferenceNames)
-    dependencies.projectDependencyCoreSemanticNames
-  where
-    foldDirectDependencyNames initial names =
-      Set.foldl'
-        ( \resolvedDependencyIds dependencyName ->
-            case IntMap.lookup (nameUniqueKey dependencyName) definitionIdByUnique of
-              Just dependencyId ->
-                Set.insert dependencyId resolvedDependencyIds
-              Nothing ->
-                resolvedDependencyIds
-        )
-        initial
-        names
+  resolveDependencyNames
+    definitionIdByUnique
+    (resolveDependencyNames definitionIdByUnique Set.empty dependencies.dependencyDirectReferenceNames)
+    dependencies.dependencyCoreSemanticNames
 
-    foldCoreDependencyNames =
-      foldl'
-        ( \resolvedDependencyIds dependencyName ->
-            case IntMap.lookup (nameUniqueKey dependencyName) definitionIdByUnique of
-              Just dependencyId ->
-                Set.insert dependencyId resolvedDependencyIds
-              Nothing ->
-                resolvedDependencyIds
-        )
+resolveDependencyNames ::
+  (Foldable f) =>
+  IntMap.IntMap DefinitionId ->
+  Set.Set DefinitionId ->
+  f GHC.Name ->
+  Set.Set DefinitionId
+resolveDependencyNames definitionIdByUnique =
+  foldl' insertDependencyName
+  where
+    insertDependencyName resolvedDependencyIds dependencyName =
+      case IntMap.lookup (nameUniqueKey dependencyName) definitionIdByUnique of
+        Just dependencyId ->
+          Set.insert dependencyId resolvedDependencyIds
+        Nothing ->
+          resolvedDependencyIds
 
 chunkList :: Int -> [a] -> [[a]]
 chunkList chunkSize xs

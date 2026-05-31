@@ -31,10 +31,10 @@ library
       Lore.Tools.DiscoverProject
       Lore.Tools.ExecuteCode
       Lore.Tools.FindDeadCode
+      Lore.Tools.FindDeadCode.Request
       Lore.Tools.FindReferences
       Lore.Tools.FindReferences.Snippet
       Lore.Tools.FindReferences.Types
-      Lore.Tools.FindDeadCode.Request
       Lore.Tools.GetDefinition
       Lore.Tools.GetTypeOfExpression
       Lore.Tools.Internal.CompactClassInstance
