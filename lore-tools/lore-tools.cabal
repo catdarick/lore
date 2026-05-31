@@ -32,6 +32,8 @@ library
       Lore.Tools.ExecuteCode
       Lore.Tools.FindDeadCode
       Lore.Tools.FindReferences
+      Lore.Tools.FindReferences.Snippet
+      Lore.Tools.FindReferences.Types
       Lore.Tools.GetDefinition
       Lore.Tools.GetTypeOfExpression
       Lore.Tools.Internal.CompactClassInstance
