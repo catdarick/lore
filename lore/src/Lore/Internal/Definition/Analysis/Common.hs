@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-identities #-}
+
 module Lore.Internal.Definition.Analysis.Common
   ( collectLocatedRdrNames,
     collectTyped,
