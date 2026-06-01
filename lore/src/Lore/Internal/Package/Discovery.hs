@@ -1,17 +1,20 @@
 module Lore.Internal.Package.Discovery
-  ( discoverCabalManifestPaths,
-    discoverManifestPaths,
-    discoverStackManifestPaths,
+  ( discoverPackageRoots,
+    discoverStackPackageRoots,
+    discoverCabalPackageRoots,
     extractCabalProjectPackageEntries,
   )
 where
 
+import Control.Monad (filterM)
 import qualified Data.ByteString as BS
-import Data.List (isPrefixOf, nub, sort, stripPrefix)
+import Data.List (isPrefixOf, sort, stripPrefix)
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Yaml as Yaml
 import Lore.Internal.File (findFilesByExtensionRecursively)
 import Lore.Internal.Package.Path (normalizeRelativePath)
+import Lore.Internal.Package.Root (PackageRoot (..), normalizePackageRoots)
 import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (makeRelative, splitDirectories, takeDirectory, takeExtension, takeFileName, (</>))
@@ -50,16 +53,16 @@ instance Yaml.FromJSON StackPackageEntry where
               extraDep = isExtraDep
             }
 
-discoverManifestPaths :: ProjectProvider -> FilePath -> IO (Either String [FilePath])
-discoverManifestPaths provider projectRoot =
+discoverPackageRoots :: ProjectProvider -> FilePath -> IO (Either String [PackageRoot])
+discoverPackageRoots provider projectRoot =
   case provider of
     StackProject ->
-      discoverStackManifestPaths projectRoot
+      discoverStackPackageRoots projectRoot
     CabalProject ->
-      discoverCabalManifestPaths projectRoot
+      discoverCabalPackageRoots projectRoot
 
-discoverStackManifestPaths :: FilePath -> IO (Either String [FilePath])
-discoverStackManifestPaths projectRoot = do
+discoverStackPackageRoots :: FilePath -> IO (Either String [PackageRoot])
+discoverStackPackageRoots projectRoot = do
   stackYamlContent <- BS.readFile (projectRoot </> "stack.yaml")
   case Yaml.decodeEither' stackYamlContent of
     Left parseError ->
@@ -70,13 +73,11 @@ discoverStackManifestPaths projectRoot = do
             if null configuredPackageEntries
               then ["."]
               else configuredPackageEntries
-      eiManifestPaths <- mapM (resolveStackManifestPathsFromEntry projectRoot) localPackageEntries
-      pure $ do
-        manifestPaths <- sequence eiManifestPaths
-        pure (sort (nub (concat manifestPaths)))
+      eiRoots <- mapM (resolveStackPackageRootFromEntry projectRoot) localPackageEntries
+      pure (normalizePackageRoots <$> sequence eiRoots)
 
-resolveStackManifestPathsFromEntry :: FilePath -> FilePath -> IO (Either String [FilePath])
-resolveStackManifestPathsFromEntry projectRoot packageEntry
+resolveStackPackageRootFromEntry :: FilePath -> FilePath -> IO (Either String PackageRoot)
+resolveStackPackageRootFromEntry projectRoot packageEntry
   | containsWildcard packageEntry =
       pure
         ( Left
@@ -87,85 +88,71 @@ resolveStackManifestPathsFromEntry projectRoot packageEntry
         )
   | otherwise = do
       let resolvedEntryPath = normalizeRelativePath (projectRoot </> packageEntry)
-      isManifestFile <- doesFileExist resolvedEntryPath
-      if isManifestFile
+      isFile <- doesFileExist resolvedEntryPath
+      if isFile
         then
-          if isSupportedStackManifestPath resolvedEntryPath
-            then pure (Right [resolvedEntryPath])
-            else pure (Left ("stack.yaml package entry does not point to package.yaml or .cabal manifest: " <> packageEntry))
+          if takeFileName resolvedEntryPath == "package.yaml"
+            then
+              pure
+                ( Right
+                    PackageRoot
+                      { packageRootPath = takeDirectory resolvedEntryPath,
+                        packageRootPreferredCabalFile = Nothing
+                      }
+                )
+            else
+              if takeExtension resolvedEntryPath == ".cabal"
+                then
+                  pure
+                    ( Right
+                        PackageRoot
+                          { packageRootPath = takeDirectory resolvedEntryPath,
+                            packageRootPreferredCabalFile = Just resolvedEntryPath
+                          }
+                    )
+                else pure (Left ("stack.yaml package entry must point to a package directory, package.yaml, or .cabal file: " <> packageEntry))
         else do
-          isEntryDirectory <- doesDirectoryExist resolvedEntryPath
-          if isEntryDirectory
-            then resolveStackDirectoryManifestPath packageEntry resolvedEntryPath
+          isDir <- doesDirectoryExist resolvedEntryPath
+          if isDir
+            then
+              pure
+                ( Right
+                    PackageRoot
+                      { packageRootPath = resolvedEntryPath,
+                        packageRootPreferredCabalFile = Nothing
+                      }
+                )
             else pure (Left ("stack.yaml package entry does not exist: " <> packageEntry))
 
-isSupportedStackManifestPath :: FilePath -> Bool
-isSupportedStackManifestPath path =
-  takeFileName path == "package.yaml" || takeExtension path == ".cabal"
-
-resolveStackDirectoryManifestPath :: FilePath -> FilePath -> IO (Either String [FilePath])
-resolveStackDirectoryManifestPath packageEntry resolvedEntryPath = do
-  let packageYamlPath = resolvedEntryPath </> "package.yaml"
-  packageYamlExists <- doesFileExist packageYamlPath
-  entries <- listDirectory resolvedEntryPath
-  let topLevelCabalFiles =
-        sort
-          [ resolvedEntryPath </> entry
-          | entry <- entries,
-            takeExtension entry == ".cabal"
-          ]
-  if packageYamlExists
-    then pure (Right [packageYamlPath])
-    else case topLevelCabalFiles of
-      [singleCabalFile] -> pure (Right [singleCabalFile])
-      [] -> pure (Left ("No package.yaml or .cabal file found in stack package directory: " <> packageEntry))
-      _ ->
-        pure
-          ( Left
-              ( "Multiple .cabal files found in stack package directory: "
-                  <> packageEntry
-                  <> ". Use an explicit package manifest path in stack.yaml."
-              )
-          )
-
-discoverCabalManifestPaths :: FilePath -> IO (Either String [FilePath])
-discoverCabalManifestPaths projectRoot = do
+discoverCabalPackageRoots :: FilePath -> IO (Either String [PackageRoot])
+discoverCabalPackageRoots projectRoot = do
   cabalProjectExists <- doesFileExist (projectRoot </> "cabal.project")
   if cabalProjectExists
-    then resolveCabalManifestPathsFromProjectFile projectRoot
-    else discoverRootCabalManifestPaths projectRoot
+    then resolveCabalPackageRootsFromProjectFile projectRoot
+    else
+      pure
+        ( Right
+            [ PackageRoot
+                { packageRootPath = normalizeRelativePath projectRoot,
+                  packageRootPreferredCabalFile = Nothing
+                }
+            ]
+        )
 
-resolveCabalManifestPathsFromProjectFile :: FilePath -> IO (Either String [FilePath])
-resolveCabalManifestPathsFromProjectFile projectRoot = do
+resolveCabalPackageRootsFromProjectFile :: FilePath -> IO (Either String [PackageRoot])
+resolveCabalPackageRootsFromProjectFile projectRoot = do
   cabalProjectText <- readFile (projectRoot </> "cabal.project")
   let packageEntries = extractCabalProjectPackageEntries cabalProjectText
   if null packageEntries
     then pure (Left "Detected Cabal project, but 'cabal.project' does not define any package entries in the packages: section.")
     else do
-      eiManifestPaths <- mapM (resolveCabalManifestPathsFromEntry projectRoot) packageEntries
+      eiRoots <- mapM (resolveCabalPackageRootsFromEntry projectRoot) packageEntries
       pure $ do
-        manifestPaths <- sequence eiManifestPaths
-        pure (sort (nub (concat manifestPaths)))
+        roots <- sequence eiRoots
+        pure (normalizePackageRoots (concat roots))
 
-discoverRootCabalManifestPaths :: FilePath -> IO (Either String [FilePath])
-discoverRootCabalManifestPaths projectRoot = do
-  rootEntries <- listDirectory projectRoot
-  let rootManifests =
-        sort
-          [ projectRoot </> entry
-          | entry <- rootEntries,
-            takeExtension entry == ".cabal"
-          ]
-  case rootManifests of
-    [] ->
-      pure
-        ( Left
-            "Detected Cabal project, but no *.cabal file was found at the project root. Add a root package file or a cabal.project packages: stanza."
-        )
-    _ -> pure (Right rootManifests)
-
-resolveCabalManifestPathsFromEntry :: FilePath -> FilePath -> IO (Either String [FilePath])
-resolveCabalManifestPathsFromEntry projectRoot packageEntry
+resolveCabalPackageRootsFromEntry :: FilePath -> FilePath -> IO (Either String [PackageRoot])
+resolveCabalPackageRootsFromEntry projectRoot packageEntry
   | hasUnsupportedWildcard packageEntry =
       pure
         ( Left
@@ -175,27 +162,85 @@ resolveCabalManifestPathsFromEntry projectRoot packageEntry
             )
         )
   | containsWildcard packageEntry =
-      resolveCabalManifestPathsFromWildcardEntry projectRoot packageEntry
+      resolveCabalPackageRootsFromWildcardEntry projectRoot packageEntry
   | otherwise = do
       let resolvedEntryPath = normalizeRelativePath (projectRoot </> packageEntry)
-      isManifestFile <- doesFileExist resolvedEntryPath
-      if isManifestFile
+      isFile <- doesFileExist resolvedEntryPath
+      if isFile
         then
-          if takeExtension resolvedEntryPath == ".cabal"
-            then pure (Right [resolvedEntryPath])
-            else pure (Left ("cabal.project package entry does not point to a .cabal file: " <> packageEntry))
+          if takeFileName resolvedEntryPath == "package.yaml"
+            then
+              pure
+                ( Right
+                    [ PackageRoot
+                        { packageRootPath = takeDirectory resolvedEntryPath,
+                          packageRootPreferredCabalFile = Nothing
+                        }
+                    ]
+                )
+            else
+              if takeExtension resolvedEntryPath == ".cabal"
+                then
+                  pure
+                    ( Right
+                        [ PackageRoot
+                            { packageRootPath = takeDirectory resolvedEntryPath,
+                              packageRootPreferredCabalFile = Just resolvedEntryPath
+                            }
+                        ]
+                    )
+                else pure (Left ("cabal.project package entry must point to a package directory, package.yaml, or .cabal file: " <> packageEntry))
         else do
-          isEntryDirectory <- doesDirectoryExist resolvedEntryPath
-          if isEntryDirectory
-            then do
-              cabalFiles <- sort <$> findFilesByExtensionRecursively Nothing resolvedEntryPath ".cabal"
-              let topLevelCabalFiles =
-                    filter ((== resolvedEntryPath) . takeDirectory) cabalFiles
-              case topLevelCabalFiles of
-                [singleManifest] -> pure (Right [singleManifest])
-                [] -> pure (Left ("No .cabal file found in package directory: " <> packageEntry))
-                _ -> pure (Left ("Multiple .cabal files found in package directory: " <> packageEntry <> ". Use explicit manifest file paths in cabal.project."))
+          isDir <- doesDirectoryExist resolvedEntryPath
+          if isDir
+            then
+              pure
+                ( Right
+                    [ PackageRoot
+                        { packageRootPath = resolvedEntryPath,
+                          packageRootPreferredCabalFile = Nothing
+                        }
+                    ]
+                )
             else pure (Left ("cabal.project package entry does not exist: " <> packageEntry))
+
+resolveCabalPackageRootsFromWildcardEntry :: FilePath -> FilePath -> IO (Either String [PackageRoot])
+resolveCabalPackageRootsFromWildcardEntry projectRoot packageEntry
+  | takeExtension packageEntry == ".cabal" = do
+      candidateCabalFiles <- sort <$> findFilesByExtensionRecursively Nothing projectRoot ".cabal"
+      let normalizedPatternSegments = splitDirectories (normalizeRelativePath packageEntry)
+          matches =
+            [ PackageRoot
+                { packageRootPath = takeDirectory path,
+                  packageRootPreferredCabalFile = Just path
+                }
+            | path <- candidateCabalFiles,
+              let relativePath = normalizeRelativePath (makeRelative projectRoot path),
+              wildcardPathMatches normalizedPatternSegments (splitDirectories relativePath)
+            ]
+      if null matches
+        then pure (Left ("No package manifests matched cabal.project wildcard entry: " <> packageEntry))
+        else pure (Right (normalizePackageRoots matches))
+  | otherwise = do
+      candidateDirectories <- listDirectoriesRecursively defaultPackageDiscoveryIgnoredDirs projectRoot
+      let normalizedPatternSegments = splitDirectories (normalizeRelativePath packageEntry)
+      wildcardMatches <-
+        filterM
+          (directoryLooksLikePackageRoot . (projectRoot </>))
+          [ relativeDir
+          | relativeDir <- map (normalizeRelativePath . makeRelative projectRoot) candidateDirectories,
+            wildcardPathMatches normalizedPatternSegments (splitDirectories relativeDir)
+          ]
+      let matchedRoots =
+            [ PackageRoot
+                { packageRootPath = normalizeRelativePath (projectRoot </> relativeDir),
+                  packageRootPreferredCabalFile = Nothing
+                }
+            | relativeDir <- wildcardMatches
+            ]
+      if null matchedRoots
+        then pure (Left ("No package roots matched cabal.project wildcard entry: " <> packageEntry))
+        else pure (Right (normalizePackageRoots matchedRoots))
 
 containsWildcard :: FilePath -> Bool
 containsWildcard path =
@@ -205,19 +250,43 @@ hasUnsupportedWildcard :: FilePath -> Bool
 hasUnsupportedWildcard path =
   any (`elem` ['[', ']']) path
 
-resolveCabalManifestPathsFromWildcardEntry :: FilePath -> FilePath -> IO (Either String [FilePath])
-resolveCabalManifestPathsFromWildcardEntry projectRoot packageEntry = do
-  candidateCabalFiles <- sort <$> findFilesByExtensionRecursively Nothing projectRoot ".cabal"
-  let normalizedPatternSegments = splitDirectories (normalizeRelativePath packageEntry)
-      matches =
-        [ path
-        | path <- candidateCabalFiles,
-          let relativePath = normalizeRelativePath (makeRelative projectRoot path),
-          wildcardPathMatches normalizedPatternSegments (splitDirectories relativePath)
+defaultPackageDiscoveryIgnoredDirs :: Set.Set FilePath
+defaultPackageDiscoveryIgnoredDirs =
+  Set.fromList
+    [ ".git",
+      ".stack-work",
+      "dist",
+      "dist-newstyle",
+      ".direnv",
+      ".cabal-sandbox"
+    ]
+
+listDirectoriesRecursively :: Set.Set FilePath -> FilePath -> IO [FilePath]
+listDirectoriesRecursively ignoredDirNames rootDir = do
+  directEntries <- listDirectory rootDir
+  directSubdirs <-
+    filterM
+      doesDirectoryExist
+      [rootDir </> entry | entry <- directEntries, not (Set.member entry ignoredDirNames)]
+  nestedSubdirs <- concat <$> mapM (listDirectoriesRecursively ignoredDirNames) directSubdirs
+  pure (rootDir : nestedSubdirs)
+
+directoryLooksLikePackageRoot :: FilePath -> IO Bool
+directoryLooksLikePackageRoot dir = do
+  packageYamlExists <- doesFileExist (dir </> "package.yaml")
+  cabalFiles <- listTopLevelCabalFiles dir
+  pure (packageYamlExists || not (null cabalFiles))
+
+listTopLevelCabalFiles :: FilePath -> IO [FilePath]
+listTopLevelCabalFiles dir = do
+  entries <- listDirectory dir
+  pure
+    ( sort
+        [ dir </> entry
+        | entry <- entries,
+          takeExtension entry == ".cabal"
         ]
-  if null matches
-    then pure (Left ("No package manifests matched cabal.project wildcard entry: " <> packageEntry))
-    else pure (Right matches)
+    )
 
 wildcardPathMatches :: [FilePath] -> [FilePath] -> Bool
 wildcardPathMatches patternSegments candidateSegments =

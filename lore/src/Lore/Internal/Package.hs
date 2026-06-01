@@ -23,7 +23,6 @@ import Control.Monad.RWS (asks)
 import qualified Data.ByteString as BS
 import Data.Either (partitionEithers)
 import Data.List (intercalate, isPrefixOf)
-import qualified Data.Map as Map
 import Data.Maybe (maybeToList)
 import qualified Data.Set as Set
 import qualified Distribution.Compiler as CabalCompiler
@@ -41,10 +40,10 @@ import qualified Distribution.Types.UnqualComponentName as CabalComponentName
 import qualified Distribution.Utils.Path as CabalPath
 import qualified Distribution.Version as CabalVersion
 import qualified GHC
-import qualified Hpack.Config as Hpack
 import qualified Language.Haskell.Extension as CabalExtension
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..))
-import Lore.Internal.Package.Discovery (discoverManifestPaths)
+import Lore.Internal.Ghc.PackageEnvironment.Types (GhcEnvironmentSnapshot (..))
+import Lore.Internal.Package.Materialize (materializeCabalPackageFiles)
 import Lore.Internal.Package.Path
   ( commonSetIntersection,
     componentMainModulePathCandidates,
@@ -54,143 +53,42 @@ import Lore.Internal.Package.Path
     normalizeRelativePath,
   )
 import Lore.Internal.Package.Types (ComponentData (..), ComponentKind (..), PackageData (..))
-import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
-import System.FilePath (takeDirectory, takeExtension, takeFileName)
+import System.FilePath (takeDirectory)
 import UnliftIO.Exception (throwString)
 
 prepareComponentsData :: (MonadLore m) => m [PackageData]
 prepareComponentsData = do
-  provider <- asks projectProvider
-  sessionProjectRoot <- asks projectRoot
-  let manifestKindLabel =
-        case provider of
-          StackProject -> "package.yaml"
-          CabalProject -> ".cabal"
-  Log.debug $ "Loading " <> manifestKindLabel <> " manifests and extracting units data..."
-  eiManifestPaths <- liftIO (discoverManifestPaths provider sessionProjectRoot)
-  case eiManifestPaths of
-    Left err -> do
-      throwString err
-    Right manifestPaths -> do
-      eiPackages <- forM manifestPaths (processManifest provider)
-      let (errors, packages) = partitionEithers eiPackages
-      unless (null errors) $
-        throwString (intercalate "\n  -" ("Errors encountered while loading package manifests:" : errors))
-      let componentsCount = length (concatMap (.components) packages)
-      Log.debug $ "Successfully loaded " <> show (length packages) <> " package manifests, resulting in " <> show componentsCount <> " components"
-      pure packages
-  where
-    processManifest provider manifestPath =
-      case provider of
-        StackProject ->
-          processStackManifest manifestPath
-        CabalProject ->
-          processCabalPackage manifestPath
+  ghcVersion <- asks (ghcEnvironmentCompilerVersion . ghcEnvironmentSnapshot)
+  packageRoots <- asks sessionPackageRoots
+  cabalFiles <- materializeCabalPackageFiles packageRoots
+  Log.debug $
+    "Loading .cabal manifests and extracting package/component data: "
+      <> show cabalFiles
+  eiPackages <- forM cabalFiles (processCabalPackage ghcVersion)
+  let (errors, packages) = partitionEithers eiPackages
+  unless (null errors) $
+    throwString $
+      intercalate
+        "\n  -"
+        ("Errors encountered while loading package .cabal files:" : errors)
+  let componentsCount = length (concatMap (.components) packages)
+  Log.debug $
+    "Successfully loaded "
+      <> show (length packages)
+      <> " .cabal package manifests, resulting in "
+      <> show componentsCount
+      <> " components"
+  pure packages
 
 discoverProject :: (MonadLore m) => m [PackageData]
 discoverProject =
   prepareComponentsData
 
-processStackPackage :: (MonadIO m) => FilePath -> m (Either String PackageData)
-processStackPackage packageFile = do
-  r <-
-    liftIO $
-      Hpack.readPackageConfig
-        Hpack.defaultDecodeOptions
-          { Hpack.decodeOptionsTarget = packageFile
-          }
-  case r of
-    Left err -> pure $ Left $ "Failed to read " <> packageFile <> ": " <> err
-    Right config -> do
-      let pkg = Hpack.decodeResultPackage config
-      pure $
-        Right
-          PackageData
-            { packageManifestPath = packageFile,
-              packageRoot = takeDirectory packageFile,
-              packageName = extractPackageNameFromHpack pkg,
-              components = extractHpackComponents pkg
-            }
-
-processStackManifest :: (MonadIO m) => FilePath -> m (Either String PackageData)
-processStackManifest manifestPath
-  | takeFileName manifestPath == "package.yaml" =
-      processStackPackage manifestPath
-  | takeExtension manifestPath == ".cabal" =
-      processCabalPackage manifestPath
-  | otherwise =
-      pure
-        ( Left
-            ( "Unsupported stack package manifest: "
-                <> manifestPath
-                <> ". Expected package.yaml or .cabal."
-            )
-        )
-
-extractHpackComponents :: Hpack.Package -> [ComponentData]
-extractHpackComponents pkg =
-  let libs =
-        maybeToList ((ComponentKindLibrary,"library",) <$> Hpack.packageLibrary pkg)
-          <> map (\(name, section) -> (ComponentKindInternalLibrary, "library:" <> name, section)) (Map.toList (Hpack.packageInternalLibraries pkg))
-      exes = map (\(name, section) -> (ComponentKindExecutable, "executable:" <> name, section)) (Map.toList (Hpack.packageExecutables pkg))
-      tests = map (\(name, section) -> (ComponentKindTest, "test:" <> name, section)) (Map.toList (Hpack.packageTests pkg))
-      benches = map (\(name, section) -> (ComponentKindBenchmark, "benchmark:" <> name, section)) (Map.toList (Hpack.packageBenchmarks pkg))
-   in map (\(kind, name, section) -> extractHpackComponentData kind extractHpackLibraryModules (const Nothing) name section) libs
-        <> map (\(kind, name, section) -> extractHpackComponentData kind extractHpackExecutableModules Hpack.executableMain name section) (exes <> tests <> benches)
-
-extractPackageNameFromHpack :: Hpack.Package -> String
-extractPackageNameFromHpack = Hpack.packageName
-
-extractHpackComponentData :: ComponentKind -> (a -> Set.Set GHC.ModuleName) -> (a -> Maybe FilePath) -> String -> Hpack.Section a -> ComponentData
-extractHpackComponentData kind moduleExtractor extractMainModule name section =
-  ComponentData
-    { componentKind = kind,
-      componentName = name,
-      mainModulePath = extractMainModule (Hpack.sectionData section),
-      language = (\(Hpack.Language lang) -> Language lang) <$> Hpack.sectionLanguage section,
-      ghcOptions = Set.fromList $ map GhcOption $ Hpack.sectionGhcOptions section,
-      defaultExtensions = Set.fromList $ map Extension $ Hpack.sectionDefaultExtensions section,
-      dependencies = extractHpackSectionDependencies section,
-      sourceDirs = Set.fromList $ Hpack.sectionSourceDirs section,
-      modules = moduleExtractor (Hpack.sectionData section)
-    }
-
-extractHpackSectionDependencies :: Hpack.Section a -> Set.Set String
-extractHpackSectionDependencies section = Set.fromList $ Map.keys $ Hpack.unDependencies $ Hpack.sectionDependencies section
-
-extractHpackLibraryModules :: Hpack.Library -> Set.Set GHC.ModuleName
-extractHpackLibraryModules lib =
-  Set.fromList $
-    map hpackModuleToGhcModuleName $
-      filter (not . shouldDropHpackModule) $
-        concat
-          [ Hpack.libraryExposedModules lib,
-            Hpack.libraryOtherModules lib,
-            Hpack.libraryGeneratedModules lib
-          ]
-
-extractHpackExecutableModules :: Hpack.Executable -> Set.Set GHC.ModuleName
-extractHpackExecutableModules exe =
-  Set.fromList $
-    map hpackModuleToGhcModuleName $
-      filter (not . shouldDropHpackModule) $
-        concat
-          [ Hpack.executableOtherModules exe,
-            Hpack.executableGeneratedModules exe
-          ]
-
-hpackModuleToGhcModuleName :: Hpack.Module -> GHC.ModuleName
-hpackModuleToGhcModuleName (Hpack.Module modName) = GHC.mkModuleName modName
-
-shouldDropHpackModule :: Hpack.Module -> Bool
-shouldDropHpackModule (Hpack.Module modName) =
-  shouldDropModuleName modName
-
-processCabalPackage :: (MonadIO m) => FilePath -> m (Either String PackageData)
-processCabalPackage cabalFile = do
+processCabalPackage :: (MonadIO m) => CabalVersion.Version -> FilePath -> m (Either String PackageData)
+processCabalPackage ghcVersion cabalFile = do
   eiCabalFileContent <- liftIO (try (BS.readFile cabalFile) :: IO (Either IOException BS.ByteString))
   pure $ do
     cabalFileContent <-
@@ -217,7 +115,7 @@ processCabalPackage cabalFile = do
         Right parsed -> Right parsed
     let compilerInfo =
           CabalCompiler.unknownCompilerInfo
-            (CabalCompiler.CompilerId CabalCompiler.GHC CabalVersion.nullVersion)
+            (CabalCompiler.CompilerId CabalCompiler.GHC ghcVersion)
             CabalCompiler.NoAbiTag
         platform = CabalSystem.Platform CabalSystem.buildArch CabalSystem.buildOS
         requestedComponents =

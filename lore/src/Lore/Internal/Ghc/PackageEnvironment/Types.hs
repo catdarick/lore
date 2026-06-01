@@ -18,6 +18,7 @@ where
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified Distribution.Version as CabalVersion
 
 newtype UnitIdText = UnitIdText
   { unUnitIdText :: String
@@ -56,6 +57,7 @@ data PackageIndex = PackageIndex
 
 data GhcEnvironmentSnapshot = GhcEnvironmentSnapshot
   { ghcEnvironmentCompilerExe :: FilePath,
+    ghcEnvironmentCompilerVersion :: CabalVersion.Version,
     ghcEnvironmentGhcPkgExe :: FilePath,
     ghcEnvironmentLibDir :: FilePath,
     ghcEnvironmentPackageDbStack :: PackageDbStack,

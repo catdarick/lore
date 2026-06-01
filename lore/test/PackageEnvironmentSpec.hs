@@ -4,6 +4,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
+import qualified Distribution.Version as CabalVersion
 import Lore.Internal.Ghc.PackageEnvironment.Index (parsePackageEntries)
 import Lore.Internal.Ghc.PackageEnvironment.Parse
   ( packagePathToPackageDbStack,
@@ -324,6 +325,7 @@ spec = do
         `shouldBe` Right
           GhcEnvironmentSnapshot
             { ghcEnvironmentCompilerExe = "/tmp/fake-ghc",
+              ghcEnvironmentCompilerVersion = CabalVersion.mkVersion [9, 6, 5],
               ghcEnvironmentGhcPkgExe = "/tmp/fake-ghc-pkg",
               ghcEnvironmentLibDir = "/tmp/fake-libdir",
               ghcEnvironmentPackageDbStack = PackageDbStack [GlobalPackageDb],
@@ -442,6 +444,7 @@ mkSnapshot :: [PackageIndexEntry] -> Map.Map PackageNameText (Set.Set UnitIdText
 mkSnapshot packageEntries selectedUnitIdsByPackageName =
   GhcEnvironmentSnapshot
     { ghcEnvironmentCompilerExe = "ghc",
+      ghcEnvironmentCompilerVersion = CabalVersion.mkVersion [9, 6, 5],
       ghcEnvironmentGhcPkgExe = "ghc-pkg",
       ghcEnvironmentLibDir = "/libdir",
       ghcEnvironmentPackageDbStack = PackageDbStack [GlobalPackageDb],
@@ -478,6 +481,7 @@ mkProbeOutput :: Maybe FilePath -> Maybe String -> Maybe T.Text -> String
 mkProbeOutput maybeEnvironmentPath maybePackagePath maybeEnvironmentContents =
   unlines
     ( [ "__LORE_GHC_EXE__:/tmp/fake-ghc",
+        "__LORE_GHC_VERSION__:9.6.5",
         "__LORE_GHC_PKG_EXE__:/tmp/fake-ghc-pkg",
         "__LORE_GHC_LIBDIR__:/tmp/fake-libdir",
         "__LORE_GHC_ENVIRONMENT__:" <> maybe "" id maybeEnvironmentPath,

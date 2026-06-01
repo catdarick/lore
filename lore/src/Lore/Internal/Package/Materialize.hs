@@ -1,0 +1,153 @@
+module Lore.Internal.Package.Materialize
+  ( PackageMaterializeRunner (..),
+    PackageRoot (..),
+    defaultPackageMaterializeRunner,
+    defaultPackageMaterializeRunnerFor,
+    materializeCabalPackageFilesIO,
+    materializeCabalPackageFileIO,
+    materializeCabalPackageFiles,
+    findSingleTopLevelCabalFile,
+  )
+where
+
+import Control.Exception (IOException, try)
+import Control.Monad (when)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.RWS (MonadReader, asks)
+import Data.List (sort)
+import Data.Time (getCurrentTime)
+import GHC.Records (HasField)
+import Lore.Internal.BuildTool.Environment (runProcessInWorkingDir)
+import Lore.Internal.Package.Root (PackageRoot (..))
+import Lore.Internal.ProjectProvider (ProjectProvider (..))
+import Lore.Internal.SourceText (relativeSourcePath)
+import Lore.Logger (LogLevel (..), LogMessage (..), LoggerHandle (..))
+import System.Directory (doesFileExist, listDirectory)
+import System.FilePath (takeExtension, (</>))
+
+data PackageMaterializeRunner = PackageMaterializeRunner
+  { runHpackGenerator :: FilePath -> IO (Either String ())
+  }
+
+defaultPackageMaterializeRunner :: PackageMaterializeRunner
+defaultPackageMaterializeRunner =
+  PackageMaterializeRunner
+    { runHpackGenerator = \packageRoot -> do
+        hpackResult <- runProcessInWorkingDir packageRoot "hpack" []
+        pure (() <$ hpackResult)
+    }
+
+defaultPackageMaterializeRunnerFor :: ProjectProvider -> PackageMaterializeRunner
+defaultPackageMaterializeRunnerFor projectProvider =
+  case projectProvider of
+    StackProject ->
+      PackageMaterializeRunner
+        { runHpackGenerator = \packageRoot -> do
+            hpackResult <- runProcessInWorkingDir packageRoot "stack" ["exec", "--", "hpack"]
+            pure (() <$ hpackResult)
+        }
+    CabalProject ->
+      defaultPackageMaterializeRunner
+
+materializeCabalPackageFilesIO ::
+  PackageMaterializeRunner ->
+  (String -> IO ()) ->
+  (FilePath -> FilePath) ->
+  [PackageRoot] ->
+  IO (Either String [FilePath])
+materializeCabalPackageFilesIO runner logInfo displayPath packageRoots =
+  sequence <$> mapM (materializeCabalPackageFileIO runner logInfo displayPath) packageRoots
+
+materializeCabalPackageFileIO ::
+  PackageMaterializeRunner ->
+  (String -> IO ()) ->
+  (FilePath -> FilePath) ->
+  PackageRoot ->
+  IO (Either String FilePath)
+materializeCabalPackageFileIO runner logInfo displayPath packageRoot = do
+  let rootPath = packageRoot.packageRootPath
+      packageYamlPath = rootPath </> "package.yaml"
+  packageYamlExists <- doesFileExist packageYamlPath
+  when packageYamlExists do
+    logInfo ("Detected package.yaml in " <> displayPath rootPath <> "; running hpack before reading generated .cabal.")
+
+  if packageYamlExists
+    then do
+      hpackResult <- runner.runHpackGenerator rootPath
+      case hpackResult of
+        Left err ->
+          pure
+            ( Left
+                ( "Detected package.yaml in "
+                    <> packageRoot.packageRootPath
+                    <> ", but failed to run hpack before reading the generated .cabal file. Install hpack or ensure it is available on PATH. "
+                    <> err
+                )
+            )
+        Right () ->
+          resolveCabalFilePath packageRoot
+    else resolveCabalFilePath packageRoot
+
+materializeCabalPackageFiles ::
+  (MonadIO m, MonadReader r m, HasField "projectRoot" r FilePath, HasField "loggerHandle" r LoggerHandle, HasField "projectProvider" r ProjectProvider) =>
+  [PackageRoot] ->
+  m [FilePath]
+materializeCabalPackageFiles packageRoots = do
+  sessionProjectRoot <- asks (.projectRoot)
+  loggerHandle <- asks (.loggerHandle)
+  projectProvider <- asks (.projectProvider)
+  eiCabalFiles <-
+    liftIO $
+      materializeCabalPackageFilesIO
+        (defaultPackageMaterializeRunnerFor projectProvider)
+        (logInfoWithHandle loggerHandle)
+        (relativeSourcePath sessionProjectRoot)
+        packageRoots
+  case eiCabalFiles of
+    Left err -> liftIO (ioError (userError err))
+    Right cabalFiles -> pure cabalFiles
+
+logInfoWithHandle :: LoggerHandle -> String -> IO ()
+logInfoWithHandle loggerHandle message = do
+  currentTime <- getCurrentTime
+  loggerHandle.putLog
+    LogMessage
+      { timestamp = currentTime,
+        level = Info,
+        content = message
+      }
+
+resolveCabalFilePath :: PackageRoot -> IO (Either String FilePath)
+resolveCabalFilePath packageRoot =
+  case packageRoot.packageRootPreferredCabalFile of
+    Just preferredCabalFile -> do
+      preferredCabalFileExists <- doesFileExist preferredCabalFile
+      if preferredCabalFileExists
+        then pure (Right preferredCabalFile)
+        else findSingleTopLevelCabalFile packageRoot.packageRootPath
+    Nothing ->
+      findSingleTopLevelCabalFile packageRoot.packageRootPath
+
+findSingleTopLevelCabalFile :: FilePath -> IO (Either String FilePath)
+findSingleTopLevelCabalFile packageRoot = do
+  eiEntries <- try (listDirectory packageRoot) :: IO (Either IOException [FilePath])
+  pure do
+    entries <- firstIoError ("Failed to list package directory " <> packageRoot <> ": ") eiEntries
+    let cabalFiles =
+          sort
+            [ packageRoot </> entry
+            | entry <- entries,
+              takeExtension entry == ".cabal"
+            ]
+    case cabalFiles of
+      [single] -> Right single
+      [] ->
+        Left ("No .cabal file found in package directory: " <> packageRoot)
+      _ ->
+        Left ("Multiple .cabal files found in package directory: " <> packageRoot <> ". Use explicit package entries or remove ambiguity.")
+
+firstIoError :: String -> Either IOException a -> Either String a
+firstIoError prefix ei =
+  case ei of
+    Left ioErr -> Left (prefix <> show ioErr)
+    Right value -> Right value

@@ -123,7 +123,9 @@ library
       Lore.Internal.Monad
       Lore.Internal.Package
       Lore.Internal.Package.Discovery
+      Lore.Internal.Package.Materialize
       Lore.Internal.Package.Path
+      Lore.Internal.Package.Root
       Lore.Internal.Package.Types
       Lore.Internal.ProjectProvider
       Lore.Internal.Session
@@ -200,7 +202,6 @@ library
     , ghc
     , ghc-boot
     , ghc-paths
-    , hpack
     , megaparsec
     , mtl
     , process
@@ -229,6 +230,7 @@ test-suite lore-test
       RedundantImportsSpec
       SourceEditSpec
       HomeModulesSpec
+      PackageDiscoverySpec
       PackageEnvironmentSpec
       TemporalModulesSpec
       TestSupport
@@ -292,7 +294,6 @@ test-suite lore-test
     , ghc
     , ghc-boot
     , ghc-paths
-    , hpack
     , hspec
     , megaparsec
     , mtl

@@ -9,11 +9,10 @@ module Lore.Internal.Package.Path
   )
 where
 
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.List (isPrefixOf, nub)
 import qualified Data.Set as Set
 import Lore.Internal.Package.Types (ComponentData (..), PackageData (..))
-import Lore.Monad (MonadLore)
 import System.Directory (doesFileExist)
 import System.FilePath (dropTrailingPathSeparator, normalise, splitDirectories, (</>))
 
@@ -54,7 +53,7 @@ isAncestorPath ancestor path =
   splitDirectories (normalizeRelativePath ancestor)
     `isPrefixOf` splitDirectories (normalizeRelativePath path)
 
-firstExistingPath :: (MonadLore m) => [FilePath] -> m (Maybe FilePath)
+firstExistingPath :: (MonadIO m) => [FilePath] -> m (Maybe FilePath)
 firstExistingPath [] = pure Nothing
 firstExistingPath (path : rest) = do
   exists <- liftIO (doesFileExist path)

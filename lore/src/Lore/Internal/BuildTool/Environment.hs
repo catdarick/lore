@@ -38,6 +38,8 @@ runProcessInWorkingDir workingDir command arguments =
               <> unwords arguments
               <> "' failed with exit code "
               <> show code
+              <> ". Stdout: "
+              <> stdoutText
               <> ". Stderr: "
               <> stderrText
           )

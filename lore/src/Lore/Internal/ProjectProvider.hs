@@ -21,20 +21,24 @@ detectProjectProvider projectRoot = do
       cabalProjectExists <- doesFileExist (projectRoot </> "cabal.project")
       if cabalProjectExists
         then pure (Right CabalProject)
-        else detectProviderFromRootCabalFile projectRoot
+        else detectFlatCabalOrHpackProject projectRoot
 
-detectProviderFromRootCabalFile :: FilePath -> IO (Either String ProjectProvider)
-detectProviderFromRootCabalFile projectRoot = do
+detectFlatCabalOrHpackProject :: FilePath -> IO (Either String ProjectProvider)
+detectFlatCabalOrHpackProject projectRoot = do
+  packageYamlExists <- doesFileExist (projectRoot </> "package.yaml")
   entries <- listDirectory projectRoot
   let rootCabalFiles = filter ((== ".cabal") . takeExtension) entries
-  case rootCabalFiles of
-    [_] -> pure (Right CabalProject)
-    [] ->
+  case (packageYamlExists, rootCabalFiles) of
+    (True, _) ->
+      pure (Right CabalProject)
+    (False, [_]) ->
+      pure (Right CabalProject)
+    (False, []) ->
       pure
         ( Left
-            "No supported project files were found. Expected one of: stack.yaml, cabal.project, or a single *.cabal file at the project root."
+            "No supported project files were found. Expected one of: stack.yaml, cabal.project, package.yaml, or a single *.cabal file at the project root."
         )
-    _ ->
+    (False, _) ->
       pure
         ( Left
             "Multiple root-level *.cabal files were found without a cabal.project file. Please add cabal.project to define package selection explicitly."

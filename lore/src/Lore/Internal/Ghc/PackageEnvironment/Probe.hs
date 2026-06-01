@@ -9,6 +9,7 @@ import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
+import qualified Distribution.Version as CabalVersion
 import Lore.Internal.BuildTool.Environment (runInBuildToolEnvironment)
 import Lore.Internal.Ghc.PackageEnvironment.Index (buildPackageIndex)
 import Lore.Internal.Ghc.PackageEnvironment.Parse
@@ -28,6 +29,7 @@ import Lore.Internal.Ghc.PackageEnvironment.Types
 import Lore.Internal.ProjectProvider (ProjectProvider)
 import System.Directory (doesFileExist)
 import System.FilePath (isRelative, normalise, (</>))
+import Text.Read (readMaybe)
 
 data GhcEnvironmentProbeRunner = GhcEnvironmentProbeRunner
   { runBuildToolProbe :: ProjectProvider -> FilePath -> String -> IO (Either String String),
@@ -78,6 +80,7 @@ captureGhcEnvironmentSnapshotWithRunner runner provider projectRoot = do
                 pure
                   GhcEnvironmentSnapshot
                     { ghcEnvironmentCompilerExe = normalizedEnvironment.normalizedGhcExe,
+                      ghcEnvironmentCompilerVersion = normalizedEnvironment.normalizedGhcVersion,
                       ghcEnvironmentGhcPkgExe = normalizedEnvironment.normalizedGhcPkgExe,
                       ghcEnvironmentLibDir = normalizedEnvironment.normalizedGhcLibDir,
                       ghcEnvironmentPackageDbStack = normalizedEnvironment.normalizedPackageDbStack,
@@ -87,6 +90,7 @@ captureGhcEnvironmentSnapshotWithRunner runner provider projectRoot = do
 
 data RawGhcEnvironment = RawGhcEnvironment
   { rawGhcExe :: FilePath,
+    rawGhcVersion :: String,
     rawGhcPkgExe :: FilePath,
     rawGhcLibDir :: FilePath,
     rawGhcEnvironmentValue :: Maybe FilePath,
@@ -101,6 +105,7 @@ data RawPackageDbSource
 
 data NormalizedGhcEnvironment = NormalizedGhcEnvironment
   { normalizedGhcExe :: FilePath,
+    normalizedGhcVersion :: CabalVersion.Version,
     normalizedGhcPkgExe :: FilePath,
     normalizedGhcLibDir :: FilePath,
     normalizedPackageDbStack :: PackageDbStack,
@@ -111,11 +116,13 @@ normalizeRawGhcEnvironment :: FilePath -> RawGhcEnvironment -> IO (Either String
 normalizeRawGhcEnvironment projectRoot rawGhcEnvironment = do
   packageDbSourceResult <- resolveRawPackageDbSource projectRoot rawGhcEnvironment
   pure do
+    ghcVersion <- parseVersionText rawGhcEnvironment.rawGhcVersion
     packageDbSource <- packageDbSourceResult
     normalizedPackageEnvironment <- parseRawPackageDbSource packageDbSource
     pure
       NormalizedGhcEnvironment
         { normalizedGhcExe = rawGhcEnvironment.rawGhcExe,
+          normalizedGhcVersion = ghcVersion,
           normalizedGhcPkgExe = rawGhcEnvironment.rawGhcPkgExe,
           normalizedGhcLibDir = rawGhcEnvironment.rawGhcLibDir,
           normalizedPackageDbStack = normalizedPackageEnvironment.normalizedPackageDbStack,
@@ -196,6 +203,7 @@ parseRawGhcEnvironment :: String -> Either String RawGhcEnvironment
 parseRawGhcEnvironment output = do
   let outputLines = lines output
   ghcExe <- readRequiredProbeField output ghcExecutablePrefix
+  ghcVersion <- readRequiredProbeField output ghcVersionPrefix
   ghcPkgExe <- readRequiredProbeField output ghcPkgExecutablePrefix
   ghcLibDir <- readRequiredProbeField output ghcLibDirPrefix
   ghcEnvironmentRaw <- readRequiredProbeField output ghcEnvironmentPrefix
@@ -204,6 +212,7 @@ parseRawGhcEnvironment output = do
   pure
     RawGhcEnvironment
       { rawGhcExe = ghcExe,
+        rawGhcVersion = ghcVersion,
         rawGhcPkgExe = ghcPkgExe,
         rawGhcLibDir = ghcLibDir,
         rawGhcEnvironmentValue = nonEmptyValue ghcEnvironmentRaw,
@@ -261,6 +270,7 @@ renderEnvironmentProbeScript =
       "fi",
       "libdir=\"$($compiler --print-libdir)\"",
       "printf \"__LORE_GHC_EXE__:%s\\n\" \"$compiler\"",
+      "printf \"__LORE_GHC_VERSION__:%s\\n\" \"$compiler_version\"",
       "printf \"__LORE_GHC_PKG_EXE__:%s\\n\" \"$ghc_pkg\"",
       "printf \"__LORE_GHC_LIBDIR__:%s\\n\" \"$libdir\"",
       "printf \"__LORE_GHC_ENVIRONMENT__:%s\\n\" \"${GHC_ENVIRONMENT:-}\"",
@@ -274,6 +284,9 @@ renderEnvironmentProbeScript =
 
 ghcExecutablePrefix :: String
 ghcExecutablePrefix = "__LORE_GHC_EXE__:"
+
+ghcVersionPrefix :: String
+ghcVersionPrefix = "__LORE_GHC_VERSION__:"
 
 ghcPkgExecutablePrefix :: String
 ghcPkgExecutablePrefix = "__LORE_GHC_PKG_EXE__:"
@@ -298,6 +311,28 @@ ensureTrailingPeriod text
   | null text = text
   | last text == '.' = text
   | otherwise = text <> "."
+
+parseVersionText :: String -> Either String CabalVersion.Version
+parseVersionText raw =
+  case traverse readMaybe (splitOnChar '.' raw) of
+    Just parts
+      | not (null parts) ->
+          Right (CabalVersion.mkVersion parts)
+    _ ->
+      Left ("Failed to parse GHC version from environment probe: " <> raw)
+
+splitOnChar :: Char -> String -> [String]
+splitOnChar delimiter = go []
+  where
+    go currentChunk remaining =
+      case remaining of
+        [] ->
+          [reverse currentChunk]
+        nextChar : restChars
+          | nextChar == delimiter ->
+              reverse currentChunk : go [] restChars
+          | otherwise ->
+              go (nextChar : currentChunk) restChars
 
 validateSelectedUnitIds ::
   Set.Set UnitIdText ->
