@@ -6,6 +6,7 @@ module Lore.Internal.Definition.Cache.CoreModuleFacts
   )
 where
 
+import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Control.Monad.Reader (asks)
 import qualified Data.Map.Strict as Map
@@ -23,10 +24,17 @@ lookupCoreModuleFactsCache homeModule = do
   CoreModuleFactsCache coreFactsByModule <- readMVar cacheVar
   pure (Map.lookup homeModule coreFactsByModule)
 
-storeCoreModuleFactsCacheInContext :: SessionContext -> GHC.Module -> MinimalCoreModuleFacts -> IO ()
-storeCoreModuleFactsCacheInContext sessionContext homeModule coreFacts =
-  modifyMVar_ (coreModuleFactsCacheVar sessionContext) \(CoreModuleFactsCache coreFactsByModule) ->
-    evaluate (CoreModuleFactsCache (Map.insert homeModule coreFacts coreFactsByModule))
+storeCoreModuleFactsCacheInContext ::
+  SessionContext ->
+  GHC.Module ->
+  MinimalCoreModuleFacts ->
+  IO ()
+storeCoreModuleFactsCacheInContext sessionContext homeModule coreFacts0 = do
+  coreFacts <- evaluate $ force coreFacts0
+  modifyMVar_ (coreModuleFactsCacheVar sessionContext) \(CoreModuleFactsCache coreFactsByModule) -> do
+    let !newCache =
+          CoreModuleFactsCache (Map.insert homeModule coreFacts coreFactsByModule)
+    pure newCache
 
 retainCoreModuleFactsCacheForLoadedModules :: (MonadLore m) => Set.Set GHC.Module -> m ()
 retainCoreModuleFactsCacheForLoadedModules loadedModules = do
