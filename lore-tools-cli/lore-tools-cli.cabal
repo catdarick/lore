@@ -34,6 +34,7 @@ library
       Lore.Tools.Cli.SingleShot
       Lore.Tools.Cli.Tools.Common
       Lore.Tools.Cli.Tools.CreateTemporalModule
+      Lore.Tools.Cli.Tools.DebugCacheMemory
       Lore.Tools.Cli.Tools.DiscoverDirectory
       Lore.Tools.Cli.Tools.DiscoverProject
       Lore.Tools.Cli.Tools.ExecuteCode
@@ -109,7 +110,7 @@ executable lore-cli
       GADTs
       TypeApplications
       OverloadedRecordDot
-  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts "-with-rtsopts=-N -Iw10"
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts "-with-rtsopts=-N -T -Iw10"
   build-depends:
       aeson
     , base >=4.7 && <5

@@ -1,6 +1,21 @@
 module Lore.Internal.Session
   ( SessionContext (..),
     SessionConfig (..),
+    emptyCoreModuleFactsCache,
+    emptyDefinitionModuleIndexCache,
+    emptyExternalSymbolsIndexCache,
+    emptyGeneratedMainModulesRegistry,
+    emptyHomeSymbolsIndexCache,
+    emptyInterpreterContextCache,
+    emptyLastLoadHomeModulesResultCache,
+    emptyModSummariesCache,
+    emptyNameToInstancesIndexCache,
+    emptyParsedModuleFactsCache,
+    emptyParsedOccurrenceModuleIndexCache,
+    emptySimilarSymbolsSearchIndexCache,
+    emptySymbolsDependencySetCache,
+    emptyTemporalModulesRegistry,
+    emptyTypedModuleFactsCache,
     preparePackageMaterializationBeforeEnvironmentProbe,
     preparePackageMaterializationBeforeEnvironmentProbeWithRunner,
     prepareSessionContext,
@@ -82,6 +97,66 @@ data SessionConfig = SessionConfig
     isTestSuiteFunctionalityRequired :: Bool
   }
 
+emptyHomeSymbolsIndexCache :: HomeSymbolsIndexCache
+emptyHomeSymbolsIndexCache =
+  HomeSymbolsIndexCache Nothing
+
+emptyExternalSymbolsIndexCache :: ExternalSymbolsIndexCache
+emptyExternalSymbolsIndexCache =
+  ExternalSymbolsIndexCache Nothing
+
+emptySimilarSymbolsSearchIndexCache :: SimilarSymbolsSearchIndexCache
+emptySimilarSymbolsSearchIndexCache =
+  SimilarSymbolsSearchIndexCache Nothing
+
+emptySymbolsDependencySetCache :: SymbolsDependencySetCache
+emptySymbolsDependencySetCache =
+  SymbolsDependencySetCache Set.empty
+
+emptyModSummariesCache :: ModSummariesCache
+emptyModSummariesCache =
+  ModSummariesCache Nothing
+
+emptyNameToInstancesIndexCache :: NameToInstancesIndexCache
+emptyNameToInstancesIndexCache =
+  NameToInstancesIndexCache Nothing
+
+emptyParsedOccurrenceModuleIndexCache :: ParsedOccurrenceModuleIndexCache
+emptyParsedOccurrenceModuleIndexCache =
+  ParsedOccurrenceModuleIndexCache Nothing
+
+emptyDefinitionModuleIndexCache :: DefinitionModuleIndexCache
+emptyDefinitionModuleIndexCache =
+  DefinitionModuleIndexCache Map.empty
+
+emptyTypedModuleFactsCache :: TypedModuleFactsCache
+emptyTypedModuleFactsCache =
+  TypedModuleFactsCache Map.empty
+
+emptyCoreModuleFactsCache :: CoreModuleFactsCache
+emptyCoreModuleFactsCache =
+  CoreModuleFactsCache Map.empty
+
+emptyParsedModuleFactsCache :: ParsedModuleFactsCache
+emptyParsedModuleFactsCache =
+  ParsedModuleFactsCache Map.empty
+
+emptyInterpreterContextCache :: InterpreterContextCache
+emptyInterpreterContextCache =
+  InterpreterContextCache Nothing
+
+emptyLastLoadHomeModulesResultCache :: LastLoadHomeModulesResultCache
+emptyLastLoadHomeModulesResultCache =
+  LastLoadHomeModulesResultCache Nothing
+
+emptyGeneratedMainModulesRegistry :: GeneratedMainModulesRegistry
+emptyGeneratedMainModulesRegistry =
+  GeneratedMainModulesRegistry Map.empty
+
+emptyTemporalModulesRegistry :: TemporalModulesRegistry
+emptyTemporalModulesRegistry =
+  TemporalModulesRegistry Nothing []
+
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
 prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, projectProviderOverride, loggerHandle, customPrelude, isTestSuiteFunctionalityRequired} = do
   eiProvider <-
@@ -101,21 +176,21 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, proj
             Left err -> pure (Left err)
             Right ghcEnvironmentSnapshot -> do
               ifaceCache <- GHC.newIfaceCache
-              homeSymbolsIndexCacheVar <- GHC.newMVar (HomeSymbolsIndexCache Nothing)
-              externalSymbolsIndexCacheVar <- GHC.newMVar (ExternalSymbolsIndexCache Nothing)
-              similarSymbolsSearchIndexCacheVar <- GHC.newMVar (SimilarSymbolsSearchIndexCache Nothing)
-              symbolsDependencySetCacheVar <- GHC.newMVar (SymbolsDependencySetCache Set.empty)
-              modSummariesCacheVar <- GHC.newMVar (ModSummariesCache Nothing)
-              nameToInstancesIndexCacheVar <- GHC.newMVar (NameToInstancesIndexCache Nothing)
-              parsedOccurrenceModuleIndexCacheVar <- GHC.newMVar (ParsedOccurrenceModuleIndexCache Nothing)
-              definitionModuleIndexCacheVar <- GHC.newMVar (DefinitionModuleIndexCache Map.empty)
-              typedModuleFactsCacheVar <- GHC.newMVar (TypedModuleFactsCache Map.empty)
-              coreModuleFactsCacheVar <- GHC.newMVar (CoreModuleFactsCache Map.empty)
-              parsedModuleFactsCacheVar <- GHC.newMVar (ParsedModuleFactsCache Map.empty)
-              interpreterContextCacheVar <- GHC.newMVar (InterpreterContextCache Nothing)
-              lastLoadHomeModulesResultCacheVar <- GHC.newMVar (LastLoadHomeModulesResultCache Nothing)
-              generatedMainModulesRegistryVar <- GHC.newMVar (GeneratedMainModulesRegistry Map.empty)
-              temporalModulesRegistryVar <- GHC.newMVar (TemporalModulesRegistry Nothing [])
+              homeSymbolsIndexCacheVar <- GHC.newMVar emptyHomeSymbolsIndexCache
+              externalSymbolsIndexCacheVar <- GHC.newMVar emptyExternalSymbolsIndexCache
+              similarSymbolsSearchIndexCacheVar <- GHC.newMVar emptySimilarSymbolsSearchIndexCache
+              symbolsDependencySetCacheVar <- GHC.newMVar emptySymbolsDependencySetCache
+              modSummariesCacheVar <- GHC.newMVar emptyModSummariesCache
+              nameToInstancesIndexCacheVar <- GHC.newMVar emptyNameToInstancesIndexCache
+              parsedOccurrenceModuleIndexCacheVar <- GHC.newMVar emptyParsedOccurrenceModuleIndexCache
+              definitionModuleIndexCacheVar <- GHC.newMVar emptyDefinitionModuleIndexCache
+              typedModuleFactsCacheVar <- GHC.newMVar emptyTypedModuleFactsCache
+              coreModuleFactsCacheVar <- GHC.newMVar emptyCoreModuleFactsCache
+              parsedModuleFactsCacheVar <- GHC.newMVar emptyParsedModuleFactsCache
+              interpreterContextCacheVar <- GHC.newMVar emptyInterpreterContextCache
+              lastLoadHomeModulesResultCacheVar <- GHC.newMVar emptyLastLoadHomeModulesResultCache
+              generatedMainModulesRegistryVar <- GHC.newMVar emptyGeneratedMainModulesRegistry
+              temporalModulesRegistryVar <- GHC.newMVar emptyTemporalModulesRegistry
               pure $
                 Right
                   SessionContext

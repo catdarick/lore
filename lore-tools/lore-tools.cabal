@@ -24,6 +24,7 @@ library
       Lore.Tools
       Lore.Tools.Config
       Lore.Tools.CreateTemporalModule
+      Lore.Tools.DebugCacheMemory
       Lore.Tools.Directory
       Lore.Tools.DirectoryTree
       Lore.Tools.DirectoryTree.Gitignore

@@ -8,6 +8,7 @@ import Lore.Tools.Cli.Internal.Tool
     SomeCliTool (SomeCliTool),
   )
 import Lore.Tools.Cli.Tools.CreateTemporalModule (createTemporalModuleCliTool)
+import Lore.Tools.Cli.Tools.DebugCacheMemory (debugCacheMemoryCliTool)
 import Lore.Tools.Cli.Tools.DiscoverDirectory (discoverDirectoryCliTool)
 import Lore.Tools.Cli.Tools.DiscoverProject (discoverProjectCliTool)
 import Lore.Tools.Cli.Tools.ExecuteCode (executeCodeCliTool)
@@ -37,6 +38,7 @@ cliTools =
     SomeCliTool lookupInstancesCliTool,
     SomeCliTool resolveInstanceCliTool,
     SomeCliTool createTemporalModuleCliTool,
+    SomeCliTool debugCacheMemoryCliTool,
     SomeCliTool getTypeOfExpressionCliTool,
     SomeCliTool executeCodeCliTool,
     SomeCliTool runTestSuiteCliTool
