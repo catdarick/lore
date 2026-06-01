@@ -4,6 +4,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
+import Lore.Internal.Ghc.PackageEnvironment.Index (parsePackageEntries)
 import Lore.Internal.Ghc.PackageEnvironment.Parse
   ( packagePathToPackageDbStack,
     parseGhcEnvironmentFile,
@@ -118,6 +119,154 @@ spec = do
             { resolvedPackageDbStack = PackageDbStack [GlobalPackageDb],
               resolvedExposedUnitIds = Set.singleton (UnitIdText "text-2.1.1-new")
             }
+
+  describe "parsePackageEntries" do
+    it "parses large package records using required top-level fields only" do
+      let record =
+            unlines
+              [ "name:                 some-package",
+                "version:              0.1.0.0",
+                "visibility:           public",
+                "id:                   some-package-0.1.0.0-JPV2jdQqutPI5GlgdpB2ST",
+                "key:                  some-package-0.1.0.0-JPV2jdQqutPI5GlgdpB2ST",
+                "description:",
+                "    Please see the README...",
+                "exposed:              True",
+                "exposed-modules:",
+                "    Dev.DevTools Dev.TimeTravel Dev.UserSetup",
+                "    Dev.UserSetup.SetupActions.CreditBuilder"
+              ]
+
+      parsePackageEntries record
+        `shouldBe` Right
+          [ PackageIndexEntry
+              { packageIndexPackageName = PackageNameText "some-package",
+                packageIndexUnitId = UnitIdText "some-package-0.1.0.0-JPV2jdQqutPI5GlgdpB2ST",
+                packageIndexVersion = "0.1.0.0",
+                packageIndexExposed = True
+              }
+          ]
+
+    it "ignores continuation lines that contain colons" do
+      let record =
+            unlines
+              [ "name: package-a",
+                "version: 1.0.0",
+                "id: package-a-1.0.0-abc",
+                "description:",
+                "    Something: with colon",
+                "exposed: False"
+              ]
+
+      parsePackageEntries record
+        `shouldBe` Right
+          [ PackageIndexEntry
+              { packageIndexPackageName = PackageNameText "package-a",
+                packageIndexUnitId = UnitIdText "package-a-1.0.0-abc",
+                packageIndexVersion = "1.0.0",
+                packageIndexExposed = False
+              }
+          ]
+
+    it "accepts unit-id when id is absent" do
+      let record =
+            unlines
+              [ "name: text",
+                "version: 2.0.2",
+                "unit-id: text-2.0.2",
+                "exposed: True"
+              ]
+
+      parsePackageEntries record
+        `shouldBe` Right
+          [ PackageIndexEntry
+              { packageIndexPackageName = PackageNameText "text",
+                packageIndexUnitId = UnitIdText "text-2.0.2",
+                packageIndexVersion = "2.0.2",
+                packageIndexExposed = True
+              }
+          ]
+
+    it "derives exposed from visibility when exposed is absent" do
+      let record =
+            unlines
+              [ "name: ghc",
+                "version: 9.6.5",
+                "id: ghc-9.6.5",
+                "visibility: public"
+              ]
+
+      parsePackageEntries record
+        `shouldBe` Right
+          [ PackageIndexEntry
+              { packageIndexPackageName = PackageNameText "ghc",
+                packageIndexUnitId = UnitIdText "ghc-9.6.5",
+                packageIndexVersion = "9.6.5",
+                packageIndexExposed = True
+              }
+          ]
+
+    it "defaults exposed to True when both exposed and visibility are absent" do
+      let record =
+            unlines
+              [ "name: custom",
+                "version: 1.0.0",
+                "id: custom-1.0.0"
+              ]
+
+      parsePackageEntries record
+        `shouldBe` Right
+          [ PackageIndexEntry
+              { packageIndexPackageName = PackageNameText "custom",
+                packageIndexUnitId = UnitIdText "custom-1.0.0",
+                packageIndexVersion = "1.0.0",
+                packageIndexExposed = True
+              }
+          ]
+
+    it "fails when both id and unit-id are missing" do
+      let record =
+            unlines
+              [ "name: text",
+                "version: 2.0.2",
+                "exposed: True"
+              ]
+
+      case parsePackageEntries record of
+        Left parseError ->
+          parseError `shouldContain` "Missing required field 'id' or 'unit-id'."
+        Right parsedEntries ->
+          expectationFailure ("Expected parse failure, got: " <> show parsedEntries)
+
+    it "parses multiple records separated by ---" do
+      let records =
+            unlines
+              [ "name: text",
+                "version: 2.0.2",
+                "id: text-2.0.2-old",
+                "exposed: True",
+                "---",
+                "name: text",
+                "version: 2.1.1",
+                "id: text-2.1.1-new",
+                "exposed: True"
+              ]
+
+      parsePackageEntries records
+        `shouldBe` Right
+          [ PackageIndexEntry
+              { packageIndexPackageName = PackageNameText "text",
+                packageIndexUnitId = UnitIdText "text-2.0.2-old",
+                packageIndexVersion = "2.0.2",
+                packageIndexExposed = True
+              },
+            PackageIndexEntry
+              { packageIndexPackageName = PackageNameText "text",
+                packageIndexUnitId = UnitIdText "text-2.1.1-new",
+                packageIndexVersion = "2.1.1",
+                packageIndexExposed = True
+              }
+          ]
 
   describe "captureGhcEnvironmentSnapshotWithRunner" do
     it "fails when selected unit-id is not in the package index" do
