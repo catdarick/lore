@@ -91,7 +91,20 @@ getSomeToolSpec someTool =
 --     "type": ["string", "null"]
 --   }
 --
--- This is useful for OpenAI tool / structured-output schemas.
+-- Nullable enums are converted from:
+--
+--   {
+--     "type": "string",
+--     "enum": ["foo", "bar"],
+--     "nullable": true
+--   }
+--
+-- into:
+--
+--   {
+--     "type": ["string", "null"],
+--     "enum": ["foo", "bar", null]
+--   }
 openApiNullableToJsonSchemaNullable :: J.Value -> J.Value
 openApiNullableToJsonSchemaNullable = \case
   J.Object object ->
@@ -104,38 +117,54 @@ openApiNullableToJsonSchemaNullable = \case
         withoutNullable =
           JKM.delete "nullable" processedObject
      in if nullable
-          then J.Object $ addNullToType withoutNullable
+          then
+            J.Object
+              . addNullToEnum
+              . addNullToType
+              $ withoutNullable
           else J.Object withoutNullable
   J.Array values ->
     J.Array $ fmap openApiNullableToJsonSchemaNullable values
   value ->
     value
-
-addNullToType :: J.Object -> J.Object
-addNullToType object =
-  case JKM.lookup "type" object of
-    Just (J.String typeName) ->
-      JKM.insert
-        (JK.fromString "type")
-        (J.Array $ V.fromList [J.String typeName, J.String "null"])
-        object
-    Just (J.Array types) ->
-      let hasNull =
-            J.String "null" `elem` V.toList types
-
-          newTypes =
-            if hasNull
-              then types
-              else V.snoc types (J.String "null")
-       in JKM.insert
+  where
+    addNullToType :: J.Object -> J.Object
+    addNullToType object =
+      case JKM.lookup "type" object of
+        Just (J.String typeName) ->
+          JKM.insert
             (JK.fromString "type")
-            (J.Array newTypes)
+            (J.Array $ V.fromList [J.String typeName, J.String "null"])
             object
-    -- If there is no "type", we cannot safely rewrite it as a type union.
-    -- For example, schemas using oneOf/anyOf/allOf may not have a direct type.
-    -- In that case, just remove nullable and leave the schema otherwise intact.
-    _ ->
-      object
+        Just (J.Array types) ->
+          let newTypes =
+                if J.String "null" `V.elem` types
+                  then types
+                  else V.snoc types (J.String "null")
+           in JKM.insert
+                (JK.fromString "type")
+                (J.Array newTypes)
+                object
+        -- If there is no "type", we cannot safely rewrite it as a type
+        -- union. Schemas using oneOf/anyOf/allOf, for example, may not
+        -- have a direct type.
+        _ ->
+          object
+
+    addNullToEnum :: J.Object -> J.Object
+    addNullToEnum object =
+      case JKM.lookup "enum" object of
+        Just (J.Array enumValues) ->
+          let newEnumValues =
+                if J.Null `V.elem` enumValues
+                  then enumValues
+                  else V.snoc enumValues J.Null
+           in JKM.insert
+                (JK.fromString "enum")
+                (J.Array newEnumValues)
+                object
+        _ ->
+          object
 
 moveFieldsAnnotationsIntoDescription :: OpenApi.Schema -> OpenApi.Schema
 moveFieldsAnnotationsIntoDescription schema =
