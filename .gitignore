@@ -13,3 +13,6 @@ dist-newstyle/cache
 .lore-work
 .lore-work-test
 lore-code.zip
+.env
+
+mcp-stdio-wrapper

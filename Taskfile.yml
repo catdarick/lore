@@ -1,5 +1,7 @@
 version: "3"
 
+dotenv: ['.env']
+
 tasks:
   build:
     desc: Build the workspace with stack
@@ -48,3 +50,14 @@ tasks:
           lore-mcp/test \
           lore-mcp/package.yaml \
           lore-mcp/README.md
+  
+  run-lore-tunnel:
+    desc: Run tunnel-client for lore-mcp; 
+    cmds:
+      - |
+        LORE_MCP_LOG_LEVEL=debug \
+        LORE_MCP_FEEDBACK_FILE=./lore-tunnel-feedback.txt \
+        LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE=false \
+        LORE_MCP_TOOL_ENABLED_NOTIFY_KNOWLEDGE_RESET=false \
+        LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE=false \
+        tunnel-client run --profile lore-mcp-to-lore
