@@ -37,7 +37,8 @@ import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import Test.Hspec
 import TestSupport
-  ( filterExportedSymbolNodesByTypeHint,
+  ( FixtureContext,
+    filterExportedSymbolNodesByTypeHint,
     findRootSymbols,
     findSymbols,
     fixtureLore,
@@ -45,15 +46,16 @@ import TestSupport
     listExportedSymbolsByModule,
     lookupRootSymbolInfo,
     withFixtureCopy,
+    withFixtureSpec,
   )
 
 spec :: Spec
 spec =
-  do
+  withFixtureSpec do
     describe "lookupRootSymbolInfo" do
-      it "deduplicates root-resolved results when a type and constructor share a name" do
+      it "deduplicates root-resolved results when a type and constructor share a name" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Indexed"
 
@@ -61,29 +63,29 @@ spec =
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . symbolName) result
           `shouldSatisfy` any (isInfixOf "Indexed")
 
-      it "classifies non-value symbols by declaration kind" do
+      it "classifies non-value symbols by declaration kind" \fixture -> do
         indexedInfo <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             resolvePreferredRootSymbolInfos "Demo.Indexed"
 
         nameSetInfo <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             resolvePreferredRootSymbolInfos "Demo.NameSet"
 
         hasIndexInfo <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             resolvePreferredRootSymbolInfos "Demo.HasIndex"
 
         elemInfo <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             resolvePreferredRootSymbolInfos "Demo.Elem"
 
         bucketInfo <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             resolvePreferredRootSymbolInfos "Demo.Bucket"
 
@@ -93,9 +95,9 @@ spec =
         demoCategories elemInfo `shouldBe` [SymbolTypeFamily]
         demoCategories bucketInfo `shouldBe` [SymbolDataFamily]
 
-      it "filters symbol matches by definition module hint" do
+      it "filters symbol matches by definition module hint" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Demo.Support.supportSeed"
 
@@ -103,20 +105,20 @@ spec =
         fmap (GHC.moduleNameString . GHC.moduleName . definedIn) result
           `shouldBe` ["Demo.Support"]
 
-      it "filters symbol matches by export module hint" do
+      it "filters symbol matches by export module hint" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Prelude.map"
 
         null result `shouldBe` False
         all (symbolExportedFromModule "Prelude") result `shouldBe` True
 
-      it "accepts both defining and re-exporting module qualifiers" do
-        withFixtureCopy \fixtureRoot -> do
+      it "accepts both defining and re-exporting module qualifiers" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           addReexportQualifierFixture fixtureRoot
           (internalQualified, exportingQualified) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               internalQualified <- lookupRootSymbolInfo "Some.Internal.Module.foo"
               exportingQualified <- lookupRootSymbolInfo "Some.Exporting.Module.foo"
@@ -129,9 +131,9 @@ spec =
           fmap (GHC.moduleNameString . GHC.moduleName . definedIn) exportingQualified
             `shouldBe` ["Some.Internal.Module"]
 
-      it "supports module-qualified dotted operators" do
+      it "supports module-qualified dotted operators" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Demo.Support..+."
 
@@ -139,9 +141,9 @@ spec =
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . symbolName) result
           `shouldSatisfy` any (isInfixOf ".+.")
 
-      it "supports parenthesized operator queries" do
+      it "supports parenthesized operator queries" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "(.+.)"
 
@@ -149,9 +151,9 @@ spec =
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . symbolName) result
           `shouldSatisfy` any (isInfixOf ".+.")
 
-      it "supports module-qualified parenthesized operator queries" do
+      it "supports module-qualified parenthesized operator queries" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Demo.Support.(.+.)"
 
@@ -159,9 +161,9 @@ spec =
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . symbolName) result
           `shouldSatisfy` any (isInfixOf ".+.")
 
-      it "survives two consecutive reloads before lookupRootSymbolInfo" do
+      it "survives two consecutive reloads before lookupRootSymbolInfo" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             lookupRootSymbolInfo "Demo.Support.supportSeed"
@@ -170,11 +172,11 @@ spec =
         fmap (GHC.moduleNameString . GHC.moduleName . definedIn) result
           `shouldBe` ["Demo.Support"]
 
-      it "finds exported and unexported record fields from DuplicateRecordFields modules" do
-        withFixtureCopy \fixtureRoot -> do
+      it "finds exported and unexported record fields from DuplicateRecordFields modules" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           addRecordFieldLookupFixture fixtureRoot
           (exportedFieldSymbols, unexportedFieldSymbols, qualifiedFieldSymbols, constructorSymbols) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               exportedFieldSymbols <- findSymbols "userName"
               unexportedFieldSymbols <- findSymbols "hiddenValue"
@@ -229,9 +231,9 @@ spec =
             `shouldSatisfy` any (isInfixOf "Hidden")
 
     describe "findSymbols" do
-      it "supports module-qualified hints before filtering candidates" do
+      it "supports module-qualified hints before filtering candidates" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "Demo.Support.supportSeed"
 
@@ -239,11 +241,11 @@ spec =
         fmap (\exportedSymbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe exportedSymbol.name)) result
           `shouldBe` ["Demo.Support"]
 
-      it "accepts re-exporting module-qualified hints" do
-        withFixtureCopy \fixtureRoot -> do
+      it "accepts re-exporting module-qualified hints" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           addReexportQualifierFixture fixtureRoot
           (internalQualified, exportingQualified) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               internalQualified <- findSymbols "Some.Internal.Module.foo"
               exportingQualified <- findSymbols "Some.Exporting.Module.foo"
@@ -256,9 +258,9 @@ spec =
           fmap (fmap (GHC.moduleNameString . GHC.moduleName) . Plugins.nameModule_maybe . (.name)) exportingQualified
             `shouldBe` [Just "Some.Internal.Module"]
 
-      it "includes non-exported top-level symbols from home modules" do
+      it "includes non-exported top-level symbols from home modules" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "supportValues"
 
@@ -267,11 +269,11 @@ spec =
         fmap (\symbol -> maybe "" (GHC.moduleNameString . GHC.moduleName) (Plugins.nameModule_maybe symbol.name)) result
           `shouldBe` ["Demo.Support"]
 
-      it "supports owner-qualified lookups for same-module DuplicateRecordFields selectors" do
-        withFixtureCopy \fixtureRoot -> do
+      it "supports owner-qualified lookups for same-module DuplicateRecordFields selectors" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           addRecordFieldLookupFixture fixtureRoot
           (leftTaggedSymbols, rightTaggedSymbols) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               leftTaggedSymbols <- findSymbols "Demo.sharedValue@LeftTagged"
               rightTaggedSymbols <- findSymbols "Demo.sharedValue@RightTagged"
@@ -287,9 +289,9 @@ spec =
           map renderOcc rightTaggedSymbols
             `shouldSatisfy` all (isInfixOf "sharedValue")
 
-      it "supports module-qualified dotted operators" do
+      it "supports module-qualified dotted operators" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "Demo.Support..+."
 
@@ -297,9 +299,9 @@ spec =
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . name) result
           `shouldSatisfy` any (isInfixOf ".+.")
 
-      it "supports parenthesized operator queries" do
+      it "supports parenthesized operator queries" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "(.+.)"
 
@@ -307,9 +309,9 @@ spec =
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . name) result
           `shouldSatisfy` any (isInfixOf ".+.")
 
-      it "supports module-qualified parenthesized operator queries" do
+      it "supports module-qualified parenthesized operator queries" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "Demo.Support.(.+.)"
 
@@ -317,9 +319,9 @@ spec =
         fmap (Outputable.showSDocUnsafe . Outputable.ppr . name) result
           `shouldSatisfy` any (isInfixOf ".+.")
 
-      it "survives two consecutive reloads before findSymbols" do
+      it "survives two consecutive reloads before findSymbols" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             findSymbols "supportValues"
@@ -330,9 +332,9 @@ spec =
           `shouldBe` ["Demo.Support"]
 
     describe "listExportedSymbolsByModule" do
-      it "lists exported symbols for the requested module and excludes unexported ones" do
+      it "lists exported symbols for the requested module and excludes unexported ones" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             listExportedSymbolsByModule "Demo.Support" Nothing
 
@@ -343,17 +345,17 @@ spec =
         occNames `shouldSatisfy` elem ".+."
         occNames `shouldSatisfy` not . elem "supportValues"
 
-      it "returns an empty list when the module is not visible" do
+      it "returns an empty list when the module is not visible" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             listExportedSymbolsByModule "No.Such.Module" Nothing
 
         null result `shouldBe` True
 
-      it "supports packageName when it references the loaded home package" do
+      it "supports packageName when it references the loaded home package" \fixture -> do
         result <-
-          fixtureLore do
+          fixtureLore fixture do
             _ <- loadHomeModules defaultLoadHomeModulesOptions
             listExportedSymbolsByModule "Demo.Support" (Just "demo-fixture")
 
@@ -364,15 +366,15 @@ spec =
         occNames `shouldSatisfy` elem ".+."
         occNames `shouldSatisfy` not . elem "supportValues"
 
-      it "filters by direct surface type mentions instead of transitive metadata" do
-        withFixtureCopy \fixtureRoot -> do
+      it "filters by direct surface type mentions instead of transitive metadata" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let moduleDir = fixtureRoot </> "src" </> "TestHint"
               moduleFile = moduleDir </> "Filter.hs"
           createDirectoryIfMissing True moduleDir
           TIO.writeFile moduleFile directTypeHintFixtureModuleSource
 
           result <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               exports <- listExportedSymbolsByModule "TestHint.Filter" Nothing
               pure (filterExportedSymbolNodesByTypeHint "String" exports)
@@ -382,40 +384,40 @@ spec =
           occNames `shouldSatisfy` not . elem "WrapSomeException"
 
     describe "lookupIntersectingInstances" do
-      it "intersects class instances across multiple symbol queries" do
-        withFixtureInstances \fixtureRoot -> do
+      it "intersects class instances across multiple symbol queries" \fixture -> do
+        withFixtureInstances fixture \fixtureRoot -> do
           (queryMatchCounts, renderedInstances) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               lookupIntersectingInstancesForQueries False ["HasIndex", "Indexed"]
 
           queryMatchCounts `shouldSatisfy` all (> 0)
           renderedInstances `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
 
-      it "supports root-resolved symbol queries before intersecting instances" do
-        withFixtureInstances \fixtureRoot -> do
+      it "supports root-resolved symbol queries before intersecting instances" \fixture -> do
+        withFixtureInstances fixture \fixtureRoot -> do
           (queryMatchCounts, renderedInstances) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               lookupIntersectingInstancesForRootQueries ["indexedValues", "HasIndex"]
 
           queryMatchCounts `shouldSatisfy` all (> 0)
           renderedInstances `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
 
-      it "supports module-qualified symbol queries" do
-        withFixtureInstances \fixtureRoot -> do
+      it "supports module-qualified symbol queries" \fixture -> do
+        withFixtureInstances fixture \fixtureRoot -> do
           (queryMatchCounts, renderedInstances) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               lookupIntersectingInstancesForQueries True ["Demo.Indexed", "HasIndex"]
 
           queryMatchCounts `shouldSatisfy` all (> 0)
           renderedInstances `shouldSatisfy` matchesRenderedInstance "HasIndex (Indexed Int)"
 
-      it "intersects family instances across multiple symbol queries" do
-        withFixtureInstances \fixtureRoot -> do
+      it "intersects family instances across multiple symbol queries" \fixture -> do
+        withFixtureInstances fixture \fixtureRoot -> do
           (queryMatchCounts, renderedInstances) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               lookupIntersectingInstancesForQueries False ["Elem", "Indexed"]
 
@@ -423,10 +425,10 @@ spec =
           renderedInstances `shouldSatisfy` matchesRenderedInstance "Elem (Indexed a) = a"
 
     describe "listDirectInstances" do
-      it "filters out non-direct associated instances" do
-        withFixtureIndirectInstances \fixtureRoot -> do
+      it "filters out non-direct associated instances" \fixture -> do
+        withFixtureIndirectInstances fixture \fixtureRoot -> do
           (renderedAssociated, renderedDirect) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               _ <- loadHomeModules defaultLoadHomeModulesOptions
               indexedSymbolInfos <- lookupRootSymbolInfo "Indexed"
               case indexedSymbolInfos of
@@ -462,16 +464,16 @@ directTypeHintFixtureModuleSource =
       "data WrapSomeException = WrapSomeException SomeException"
     ]
 
-withFixtureInstances :: (FilePath -> IO a) -> IO a
-withFixtureInstances action =
-  withFixtureCopy \fixtureRoot -> do
+withFixtureInstances :: FixtureContext -> (FilePath -> IO a) -> IO a
+withFixtureInstances fixture action =
+  withFixtureCopy fixture \fixtureRoot -> do
     enableFlexibleInstances fixtureRoot
     appendDemoInstances fixtureRoot
     action fixtureRoot
 
-withFixtureIndirectInstances :: (FilePath -> IO a) -> IO a
-withFixtureIndirectInstances action =
-  withFixtureCopy \fixtureRoot -> do
+withFixtureIndirectInstances :: FixtureContext -> (FilePath -> IO a) -> IO a
+withFixtureIndirectInstances fixture action =
+  withFixtureCopy fixture \fixtureRoot -> do
     enableFlexibleInstances fixtureRoot
     appendDemoInstances fixtureRoot
     appendDemoIndirectInstances fixtureRoot

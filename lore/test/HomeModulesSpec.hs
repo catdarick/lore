@@ -28,16 +28,16 @@ import Lore.TemporalModules (TemporalModule (..))
 import System.Directory (createDirectoryIfMissing, doesFileExist, makeAbsolute, removeFile)
 import System.FilePath ((</>))
 import Test.Hspec
-import TestSupport (fixtureLoreAt, withFixtureCopy)
+import TestSupport (fixtureLoreAt, withFixtureCopy, withFixtureSpec)
 
 spec :: Spec
 spec =
-  do
+  withFixtureSpec do
     describe "home-modules planning helpers" do
-      it "computeExternalHomeModuleDependencies subtracts local packages and conditionally adds directory" do
-        withFixtureCopy \fixtureRoot -> do
+      it "computeExternalHomeModuleDependencies subtracts local packages and conditionally adds directory" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           (depsWithoutTestSuite, depsWithTestSuite) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               inputs <- prepareHomeModulesLoadInputs
               let packages = inputs.homeModulesPackages
               pure
@@ -49,10 +49,10 @@ spec =
           Set.member "directory" depsWithoutTestSuite `shouldBe` False
           Set.member "directory" depsWithTestSuite `shouldBe` True
 
-      it "prepareHomeModulesLoadPlan derives cache identity from package environment" do
-        withFixtureCopy \fixtureRoot -> do
+      it "prepareHomeModulesLoadPlan derives cache identity from package environment" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           cacheKey <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               inputs <- prepareHomeModulesLoadInputs
               plan <- prepareHomeModulesLoadPlan inputs
               pure plan.homeModulesLoadConfig.homeModulesPackageEnvironmentCacheKey
@@ -60,10 +60,10 @@ spec =
           Set.null cacheKey `shouldBe` False
           any (isPrefixOf "package-db:") (Set.toList cacheKey) `shouldBe` True
 
-      it "computeHomeModuleSourceDirs includes package source dirs and temporal module dirs" do
-        withFixtureCopy \fixtureRoot -> do
+      it "computeHomeModuleSourceDirs includes package source dirs and temporal module dirs" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           sourceDirs <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               inputs <- prepareHomeModulesLoadInputs
               let packages = inputs.homeModulesPackages
               let temporalPath = fixtureRoot </> ".lore-work-test" </> "temporal-modules" </> "Temporal" </> "Sample.hs"
@@ -73,10 +73,10 @@ spec =
           Set.member (fixtureRoot </> "src") sourceDirs `shouldBe` True
           Set.member (fixtureRoot </> ".lore-work-test" </> "temporal-modules" </> "Temporal") sourceDirs `shouldBe` True
 
-      it "buildHomeModulesSelection keeps module and file targets separate and includes temporal modules" do
-        withFixtureCopy \fixtureRoot -> do
+      it "buildHomeModulesSelection keeps module and file targets separate and includes temporal modules" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           (selection, plannedFileTargets) <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               dflags <- GHC.getSessionDynFlags
               inputs <- prepareHomeModulesLoadInputs
               let packages = inputs.homeModulesPackages
@@ -100,8 +100,8 @@ spec =
           homeModulesSelectionTotal selection
             `shouldBe` Set.size selection.namedHomeModules + Set.size selection.fileHomeModuleSources
 
-      it "prepareHomeModulesComponentPlan synthesizes executable Main modules into generated file targets" do
-        withFixtureCopy \fixtureRoot -> do
+      it "prepareHomeModulesComponentPlan synthesizes executable Main modules into generated file targets" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let packageFile = fixtureRoot </> "package.yaml"
               executableMainPath = fixtureRoot </> "app" </> "Main.hs"
 
@@ -122,7 +122,7 @@ spec =
               ]
 
           generatedTargets <-
-            fixtureLoreAt fixtureRoot do
+            fixtureLoreAt fixture fixtureRoot do
               inputs <- prepareHomeModulesLoadInputs
               componentPlan <- prepareHomeModulesComponentPlan inputs.homeModulesPackages
               pure
@@ -143,8 +143,8 @@ spec =
               expectationFailure ("Expected exactly one generated main module target, got: " <> show generatedTargets)
 
     describe "loadHomeModules diagnostics" do
-      it "handles package definitions with no loadable components" do
-        withFixtureCopy \fixtureRoot -> do
+      it "handles package definitions with no loadable components" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let packageFile = fixtureRoot </> "package.yaml"
               fixtureCabalFile = fixtureRoot </> "demo-fixture.cabal"
           fixtureCabalExists <- doesFileExist fixtureCabalFile
@@ -160,7 +160,7 @@ spec =
               ]
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions
 
           loadResult.loadHomeModulesSucceeded `shouldBe` True
@@ -168,8 +168,8 @@ spec =
           loadResult.loadHomeModulesLoaded `shouldBe` 0
           loadResult.loadHomeModulesFailed `shouldBe` 0
 
-      it "returns diagnostics when loading fails" do
-        withFixtureCopy \fixtureRoot -> do
+      it "returns diagnostics when loading fails" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           rewriteDemo demoFile $
             T.replace
@@ -177,7 +177,7 @@ spec =
               "lookupOrZero pairs key ="
 
           loadResult@LoadHomeModulesResult {loadHomeModulesDiagnostics} <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions
 
           loadResult.loadHomeModulesSucceeded `shouldBe` False
@@ -186,11 +186,11 @@ spec =
             `shouldSatisfy` any (T.isInfixOf "parse error")
           loadResult.loadHomeModulesFailed `shouldSatisfy` (> 0)
 
-      it "MULTIPKG_LANGUAGE respects the configured default language in the multipackage workspace" do
+      it "MULTIPKG_LANGUAGE respects the configured default language in the multipackage workspace" \fixture -> do
         repoRoot <- makeAbsolute ".."
 
         loadResult <-
-          fixtureLoreAt repoRoot $
+          fixtureLoreAt fixture repoRoot $
             HomeModules.loadHomeModules defaultLoadHomeModulesOptions
 
         loadResult.loadHomeModulesDiagnostics `shouldBe` []
@@ -200,8 +200,8 @@ spec =
         loadResult.loadHomeModulesAutofixed `shouldBe` 0
 
     describe "loadHomeModules auto-refactor (redundant imports only)" do
-      it "does not retry cleanup when auto-refactor is disabled" do
-        withFixtureCopy \fixtureRoot -> do
+      it "does not retry cleanup when auto-refactor is disabled" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           enableWarningErrors fixtureRoot
           rewriteDemo demoFile $
@@ -213,7 +213,7 @@ spec =
           sourceBefore <- TIO.readFile demoFile
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions
 
           sourceAfter <- TIO.readFile demoFile
@@ -221,8 +221,8 @@ spec =
           loadResult.loadHomeModulesAutofixed `shouldBe` 0
           sourceAfter `shouldBe` sourceBefore
 
-      it "does not fix missing imports" do
-        withFixtureCopy \fixtureRoot -> do
+      it "does not fix missing imports" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           rewriteDemo demoFile $
             T.unlines
@@ -231,7 +231,7 @@ spec =
           sourceBefore <- TIO.readFile demoFile
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           sourceAfter <- TIO.readFile demoFile
@@ -239,8 +239,8 @@ spec =
           loadResult.loadHomeModulesAutofixed `shouldBe` 0
           sourceAfter `shouldBe` sourceBefore
 
-      it "applies redundant-import cleanup on failed load and succeeds after retry" do
-        withFixtureCopy \fixtureRoot -> do
+      it "applies redundant-import cleanup on failed load and succeeds after retry" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           enableWarningErrors fixtureRoot
           rewriteDemo demoFile $
@@ -251,7 +251,7 @@ spec =
               )
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
@@ -261,8 +261,8 @@ spec =
           map fst loadResult.loadHomeModulesAutofixSummaryByFile `shouldBe` ["src/Demo.hs"]
           T.isInfixOf "import qualified Data.Sequence as Seq" demoSource `shouldBe` False
 
-      it "succeeds on a second explicit load after in-loop cleanup" do
-        withFixtureCopy \fixtureRoot -> do
+      it "succeeds on a second explicit load after in-loop cleanup" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           enableWarningErrors fixtureRoot
           rewriteDemo demoFile $
@@ -273,18 +273,18 @@ spec =
               )
 
           firstLoad <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
           secondLoad <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions
 
           firstLoad.loadHomeModulesSucceeded `shouldBe` True
           firstLoad.loadHomeModulesAutofixed `shouldBe` 1
           secondLoad.loadHomeModulesSucceeded `shouldBe` True
 
-      it "does not clean imports when load succeeds" do
-        withFixtureCopy \fixtureRoot -> do
+      it "does not clean imports when load succeeds" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           rewriteDemo demoFile $
             T.replace
@@ -294,7 +294,7 @@ spec =
               )
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
@@ -302,8 +302,8 @@ spec =
           loadResult.loadHomeModulesAutofixed `shouldBe` 0
           T.isInfixOf "import qualified Data.IntMap.Strict as IntMap" demoSource `shouldBe` True
 
-      it "rewrites only the targeted import and preserves neighboring import comments" do
-        withFixtureCopy \fixtureRoot -> do
+      it "rewrites only the targeted import and preserves neighboring import comments" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           enableWarningErrors fixtureRoot
           rewriteDemo demoFile $
@@ -325,7 +325,7 @@ spec =
                 "import qualified Data.Set as Set (Set, fromList, member) -- keep-set-comment\n"
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
@@ -336,8 +336,8 @@ spec =
           T.isInfixOf "listToMaybe" demoSource `shouldBe` False
           T.isInfixOf "import Data.Maybe\n  ( fromMaybe\n  )" demoSource `shouldBe` True
 
-      it "skips explicit-import cleanup when the import list payload contains comments" do
-        withFixtureCopy \fixtureRoot -> do
+      it "skips explicit-import cleanup when the import list payload contains comments" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           enableWarningErrors fixtureRoot
           rewriteDemo demoFile $
@@ -353,7 +353,7 @@ spec =
               )
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
@@ -362,8 +362,8 @@ spec =
           T.isInfixOf "keep-comment" demoSource `shouldBe` True
           T.isInfixOf "listToMaybe" demoSource `shouldBe` True
 
-      it "removes an unused value-operator import item from a multiline qualified import list" do
-        withFixtureCopy \fixtureRoot -> do
+      it "removes an unused value-operator import item from a multiline qualified import list" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           enableWarningErrors fixtureRoot
           rewriteDemo demoFile $
@@ -380,7 +380,7 @@ spec =
               )
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
@@ -389,8 +389,8 @@ spec =
           T.isInfixOf "(.+.)" demoSource `shouldBe` False
           T.isInfixOf "supportStep" demoSource `shouldBe` True
 
-      it "removes an unused constructor import item while preserving needed imports from the same module" do
-        withFixtureCopy \fixtureRoot -> do
+      it "removes an unused constructor import item while preserving needed imports from the same module" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
               supportFile = fixtureRoot </> "src" </> "Demo" </> "Support.hs"
           enableWarningErrors fixtureRoot
@@ -403,7 +403,7 @@ spec =
               "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep, CtorOnly(CtorOnly))\n"
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
@@ -412,8 +412,8 @@ spec =
           T.isInfixOf "CtorOnly(CtorOnly)" demoSource `shouldBe` False
           T.isInfixOf "supportStep" demoSource `shouldBe` True
 
-      it "removes an unused operator-constructor import item from a parent import" do
-        withFixtureCopy \fixtureRoot -> do
+      it "removes an unused operator-constructor import item from a parent import" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
               supportFile = fixtureRoot </> "src" </> "Demo" </> "Support.hs"
           enableWarningErrors fixtureRoot
@@ -427,7 +427,7 @@ spec =
                 "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep, Op((:|)))\n"
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
@@ -436,8 +436,8 @@ spec =
           T.isInfixOf "Op((:|))" demoSource `shouldBe` False
           T.isInfixOf "supportStep" demoSource `shouldBe` True
 
-      it "removes an unused pattern import item from an explicit qualified import list" do
-        withFixtureCopy \fixtureRoot -> do
+      it "removes an unused pattern import item from an explicit qualified import list" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
               supportFile = fixtureRoot </> "src" </> "Demo" </> "Support.hs"
           enableWarningErrors fixtureRoot
@@ -456,7 +456,7 @@ spec =
                 "import qualified Demo.Support as Support (SupportRecord, mkSupportRecord, supportSeed, supportStep, pattern SeedPattern)\n"
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
@@ -465,8 +465,8 @@ spec =
           T.isInfixOf "pattern SeedPattern" demoSource `shouldBe` False
           T.isInfixOf "supportSeed" demoSource `shouldBe` True
 
-      it "removes an unused type import item declared with explicit namespace" do
-        withFixtureCopy \fixtureRoot -> do
+      it "removes an unused type import item declared with explicit namespace" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           enableWarningErrors fixtureRoot
           rewriteDemo demoFile $
@@ -479,7 +479,7 @@ spec =
               )
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
@@ -487,8 +487,8 @@ spec =
           loadResult.loadHomeModulesAutofixed `shouldBe` 1
           T.isInfixOf "import Data.Proxy" demoSource `shouldBe` False
 
-      it "removes an unused type-operator import item declared with explicit namespace" do
-        withFixtureCopy \fixtureRoot -> do
+      it "removes an unused type-operator import item declared with explicit namespace" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
           let demoFile = fixtureRoot </> "src" </> "Demo.hs"
           enableWarningErrors fixtureRoot
           rewriteDemo demoFile $
@@ -501,7 +501,7 @@ spec =
               )
 
           loadResult <-
-            fixtureLoreAt fixtureRoot $
+            fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile

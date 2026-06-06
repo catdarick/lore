@@ -10,57 +10,58 @@ import Lore.Interpreter (executeStatement)
 import System.Directory (doesFileExist, removeFile)
 import System.FilePath ((</>))
 import Test.Hspec
-import TestSupport (fixtureLoreAt, withFixtureCopy)
+import TestSupport (fixtureLoreAt, withFixtureCopy, withFixtureSpec)
 
 spec :: Spec
 spec =
-  describe "temporal modules" do
-    it "creates multiple temporal modules and loads them on reload" do
-      withFixtureCopy \fixtureRoot -> do
-        (firstPath, secondPath, evalResult) <-
-          fixtureLoreAt fixtureRoot do
-            firstPath <- createTemporalModule
-            secondPath <- createTemporalModule
-            liftIO $ writeModule firstPath "tempOneValue" "11"
-            liftIO $ writeModule secondPath "tempTwoValue" "31"
-            _ <- loadHomeModules defaultLoadHomeModulesOptions
-            evalResult <- executeStatement "(tempOneValue, tempTwoValue)"
-            pure (firstPath, secondPath, evalResult)
+  withFixtureSpec do
+    describe "temporal modules" do
+      it "creates multiple temporal modules and loads them on reload" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          (firstPath, secondPath, evalResult) <-
+            fixtureLoreAt fixture fixtureRoot do
+              firstPath <- createTemporalModule
+              secondPath <- createTemporalModule
+              liftIO $ writeModule firstPath "tempOneValue" "11"
+              liftIO $ writeModule secondPath "tempTwoValue" "31"
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
+              evalResult <- executeStatement "(tempOneValue, tempTwoValue)"
+              pure (firstPath, secondPath, evalResult)
 
-        doesFileExist firstPath `shouldReturn` True
-        doesFileExist secondPath `shouldReturn` True
-        evalResult `shouldBe` Right "(11,31)"
+          doesFileExist firstPath `shouldReturn` True
+          doesFileExist secondPath `shouldReturn` True
+          evalResult `shouldBe` Right "(11,31)"
 
-    it "keeps only existing temporal modules on subsequent reloads" do
-      withFixtureCopy \fixtureRoot -> do
-        (temporalPath, beforeDeleteResult, afterDeleteResult) <-
-          fixtureLoreAt fixtureRoot do
-            temporalPath <- createTemporalModule
-            liftIO $ writeModule temporalPath "ephemeralValue" "42"
-            _ <- loadHomeModules defaultLoadHomeModulesOptions
-            beforeDeleteResult <- executeStatement "ephemeralValue"
-            liftIO $ removeFile temporalPath
-            _ <- loadHomeModules defaultLoadHomeModulesOptions
-            afterDeleteResult <- executeStatement "ephemeralValue"
-            pure (temporalPath, beforeDeleteResult, afterDeleteResult)
+      it "keeps only existing temporal modules on subsequent reloads" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          (temporalPath, beforeDeleteResult, afterDeleteResult) <-
+            fixtureLoreAt fixture fixtureRoot do
+              temporalPath <- createTemporalModule
+              liftIO $ writeModule temporalPath "ephemeralValue" "42"
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
+              beforeDeleteResult <- executeStatement "ephemeralValue"
+              liftIO $ removeFile temporalPath
+              _ <- loadHomeModules defaultLoadHomeModulesOptions
+              afterDeleteResult <- executeStatement "ephemeralValue"
+              pure (temporalPath, beforeDeleteResult, afterDeleteResult)
 
-        beforeDeleteResult `shouldBe` Right "42"
-        afterDeleteResult `shouldSatisfy` isMissingSymbolFailure
-        doesFileExist temporalPath `shouldReturn` False
+          beforeDeleteResult `shouldBe` Right "42"
+          afterDeleteResult `shouldSatisfy` isMissingSymbolFailure
+          doesFileExist temporalPath `shouldReturn` False
 
-    it "disables warning-as-error behavior for temporal modules" do
-      withFixtureCopy \fixtureRoot -> do
-        enableWarningErrors fixtureRoot
-        (loadResult, evalResult) <-
-          fixtureLoreAt fixtureRoot do
-            temporalPath <- createTemporalModule
-            liftIO $ appendUntypedBinding temporalPath "warningValue = 5"
-            loadResult <- loadHomeModules defaultLoadHomeModulesOptions
-            evalResult <- executeStatement "warningValue"
-            pure (loadResult, evalResult)
+      it "disables warning-as-error behavior for temporal modules" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          enableWarningErrors fixtureRoot
+          (loadResult, evalResult) <-
+            fixtureLoreAt fixture fixtureRoot do
+              temporalPath <- createTemporalModule
+              liftIO $ appendUntypedBinding temporalPath "warningValue = 5"
+              loadResult <- loadHomeModules defaultLoadHomeModulesOptions
+              evalResult <- executeStatement "warningValue"
+              pure (loadResult, evalResult)
 
-        loadResult.loadHomeModulesSucceeded `shouldBe` True
-        evalResult `shouldBe` Right "5"
+          loadResult.loadHomeModulesSucceeded `shouldBe` True
+          evalResult `shouldBe` Right "5"
 
 writeModule :: FilePath -> String -> String -> IO ()
 writeModule modulePath bindingName bindingValue =

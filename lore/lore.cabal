@@ -234,6 +234,7 @@ test-suite lore-test
       PackageEnvironmentSpec
       TemporalModulesSpec
       TestSupport
+      TestSupportSpec
       SomeModule
   hs-source-dirs:
       test

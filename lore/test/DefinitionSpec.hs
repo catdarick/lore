@@ -19,32 +19,32 @@ import Lore.Monad (MonadLore)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (joinPath, splitDirectories, (</>))
 import Test.Hspec
-import TestSupport (findSymbols, fixtureLore, fixtureLoreAt, lookupRootSymbolChains, withFixtureCopy)
+import TestSupport (FixtureContext, findSymbols, fixtureLore, fixtureLoreAt, lookupRootSymbolChains, withFixtureCopy, withFixtureSpec)
 
 loadHomeModules :: (MonadLore m) => HomeModules.LoadHomeModulesOptions -> m ()
 loadHomeModules options = void (HomeModules.loadHomeModules options)
 
 spec :: Spec
-spec = do
+spec = withFixtureSpec do
   describe "resolveDefinitionSourceNamed + renderDefinitionSourceSlice" do
-    it "resolves declaration spans for a symbol" do
-      slice <- fixtureDefinition "lookupOrZero"
+    it "resolves declaration spans for a symbol" \fixture -> do
+      slice <- fixtureDefinition fixture "lookupOrZero"
 
       shouldHaveSingleDefinitionText
         slice
         "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
         (Just "lookupOrZero :: [(String, Int)] -> String -> Int")
-    it "resolves definitions that reference another module" do
-      slice <- fixtureDefinition "crossModuleRecord"
+    it "resolves definitions that reference another module" \fixture -> do
+      slice <- fixtureDefinition fixture "crossModuleRecord"
 
       shouldHaveSingleDefinitionText
         slice
         "crossModuleRecord value =\n  Support.mkSupportRecord (Support.supportStep value)"
         (Just "crossModuleRecord :: Int -> Support.SupportRecord")
 
-    it "resolves definitions for unexported symbols from another home module" do
+    it "resolves definitions for unexported symbols from another home module" \fixture -> do
       slice <-
-        fixtureLore do
+        fixtureLore fixture do
           loadHomeModules defaultLoadHomeModulesOptions
           symbols <- findSymbols "Demo.Support.supportValues"
           targetName <-
@@ -63,65 +63,65 @@ spec = do
       GHC.moduleNameString (GHC.moduleName slice.definitionModule) `shouldBe` "Demo.Support"
       any (isInfixOf "supportValues :: Map.Map String Int") definitionTexts `shouldBe` True
 
-    it "includes references used inside a where block" do
-      slice <- fixtureDefinition "lookupWithWhere"
+    it "includes references used inside a where block" \fixture -> do
+      slice <- fixtureDefinition fixture "lookupWithWhere"
 
       shouldHaveSingleDefinitionText
         slice
         "lookupWithWhere pairs key =\n  fromMaybe fallback (Map.lookup key table)\n  where\n    table = Map.fromList pairs\n    fallback = Map.size table"
         (Just "lookupWithWhere :: [(String, Int)] -> String -> Int")
 
-    it "resolves all clauses of a multi-equation top-level function" do
-      slice <- fixtureDefinition "isTrue"
+    it "resolves all clauses of a multi-equation top-level function" \fixture -> do
+      slice <- fixtureDefinition fixture "isTrue"
 
       shouldHaveSingleDefinitionText
         slice
         "isTrue \"True\" = True\nisTrue \"False\" = False\nisTrue _ = False"
         (Just "isTrue :: String -> Bool")
 
-    it "resolves the correct declaration for a type alias" do
-      slice <- fixtureDefinition "NameSet"
+    it "resolves the correct declaration for a type alias" \fixture -> do
+      slice <- fixtureDefinition fixture "NameSet"
 
       shouldHaveSingleDefinitionText
         slice
         "type NameSet = Set.Set String"
         Nothing
 
-    it "resolves the correct declaration for a type family" do
-      slice <- fixtureDefinition "Elem"
+    it "resolves the correct declaration for a type family" \fixture -> do
+      slice <- fixtureDefinition fixture "Elem"
 
       shouldHaveSingleDefinitionText
         slice
         "type family Elem (container :: Type) :: Type"
         Nothing
 
-    it "resolves the correct declaration for a data family" do
-      slice <- fixtureDefinition "Bucket"
+    it "resolves the correct declaration for a data family" \fixture -> do
+      slice <- fixtureDefinition fixture "Bucket"
 
       shouldHaveSingleDefinitionText
         slice
         "data family Bucket (item :: Type) :: Type"
         Nothing
 
-    it "resolves the correct declaration for a data type" do
-      slice <- fixtureDefinition "Indexed"
+    it "resolves the correct declaration for a data type" \fixture -> do
+      slice <- fixtureDefinition fixture "Indexed"
 
       shouldHaveSingleDefinitionText
         slice
         "data Indexed a = Indexed\n  { indexedNames :: NameSet,\n    indexedValues :: Map.Map String a\n  }"
         Nothing
 
-    it "resolves the correct declaration for a class" do
-      slice <- fixtureDefinition "HasIndex"
+    it "resolves the correct declaration for a class" \fixture -> do
+      slice <- fixtureDefinition fixture "HasIndex"
 
       shouldHaveSingleDefinitionText
         slice
         "class HasIndex a where\n  toIndex :: a -> Map.Map String a"
         Nothing
 
-    it "survives two consecutive reloads before resolving a definition slice" do
+    it "survives two consecutive reloads before resolving a definition slice" \fixture -> do
       slice <-
-        fixtureLore do
+        fixtureLore fixture do
           loadHomeModules defaultLoadHomeModulesOptions
           loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "lookupOrZero"
@@ -134,16 +134,16 @@ spec = do
         "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
         (Just "lookupOrZero :: [(String, Int)] -> String -> Int")
 
-    it "resolves a shared top-level pattern binding for the first bound name" do
-      slice <- fixtureDefinition "pairLeft"
+    it "resolves a shared top-level pattern binding for the first bound name" \fixture -> do
+      slice <- fixtureDefinition fixture "pairLeft"
 
       shouldHaveSingleDefinitionText
         slice
         "(pairLeft, pairRight) =\n  ( fromMaybe 0 (Map.lookup \"left\" table),\n    Map.size table\n  )\n  where\n    table = Map.fromList [(\"left\", 1), (\"right\", 2)]"
         (Just "pairLeft, pairRight :: Int")
 
-    it "resolves a shared top-level pattern binding for the second bound name" do
-      slice <- fixtureDefinition "pairRight"
+    it "resolves a shared top-level pattern binding for the second bound name" \fixture -> do
+      slice <- fixtureDefinition fixture "pairRight"
 
       shouldHaveSingleDefinitionText
         slice
@@ -151,9 +151,9 @@ spec = do
         (Just "pairLeft, pairRight :: Int")
 
   describe "mergeDefinitionSlices" do
-    it "merges declarations from the same module" do
-      zero <- fixtureDefinition "lookupOrZero"
-      one <- fixtureDefinition "lookupOrOne"
+    it "merges declarations from the same module" \fixture -> do
+      zero <- fixtureDefinition fixture "lookupOrZero"
+      one <- fixtureDefinition fixture "lookupOrOne"
 
       case mergeDefinitionSlices [zero, one] of
         Just merged ->
@@ -161,8 +161,8 @@ spec = do
         Nothing ->
           expectationFailure "expected merged slice"
 
-    it "deduplicates repeated declaration spans when merged slices overlap" do
-      zero <- fixtureDefinition "lookupOrZero"
+    it "deduplicates repeated declaration spans when merged slices overlap" \fixture -> do
+      zero <- fixtureDefinition fixture "lookupOrZero"
 
       case mergeDefinitionSlices [zero, zero] of
         Just merged ->
@@ -171,10 +171,10 @@ spec = do
           expectationFailure "expected merged slice"
 
   describe "resolveDefinitionClosureSourcesNamed + renderDefinitionClosureSlices" do
-    it "respects the requested recursion depth for same-module function references" do
-      depthZero <- fixtureDefinitionClosure 0 "derivedValue"
-      depthOne <- fixtureDefinitionClosure 1 "derivedValue"
-      depthTwo <- fixtureDefinitionClosure 2 "derivedValue"
+    it "respects the requested recursion depth for same-module function references" \fixture -> do
+      depthZero <- fixtureDefinitionClosure fixture 0 "derivedValue"
+      depthOne <- fixtureDefinitionClosure fixture 1 "derivedValue"
+      depthTwo <- fixtureDefinitionClosure fixture 2 "derivedValue"
 
       depthZero
         `shouldHaveModuleDefinitions` [ ( "Demo",
@@ -197,8 +197,8 @@ spec = do
                                         )
                                       ]
 
-    it "includes referenced types when recursively resolving a function definition" do
-      closure <- fixtureDefinitionClosure 1 "mkIndexed"
+    it "includes referenced types when recursively resolving a function definition" \fixture -> do
+      closure <- fixtureDefinitionClosure fixture 1 "mkIndexed"
 
       closure
         `shouldHaveModuleDefinitions` [ ( "Demo",
@@ -209,15 +209,15 @@ spec = do
                                         )
                                       ]
 
-    it "recurses through dependencies of the directly referenced constructor, not all constructors on the root declaration" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses through dependencies of the directly referenced constructor, not all constructors on the root declaration" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "ConstructorDeps.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile constructorScopedDependencyFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.ConstructorDeps.someFunction"
             targetName <-
@@ -237,15 +237,15 @@ spec = do
                                           )
                                         ]
 
-    it "recurses through dependencies of the referenced class method, not sibling methods on the same class" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses through dependencies of the referenced class method, not sibling methods on the same class" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "ClassDeps.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile classMethodScopedDependencyFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.ClassDeps.runAlpha"
             targetName <-
@@ -265,8 +265,8 @@ spec = do
                                           )
                                         ]
 
-    it "recurses through dependencies of referenced constructors across module boundaries, not sibling constructors" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses through dependencies of referenced constructors across module boundaries, not sibling constructors" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             supportFile = moduleDir </> "ConstructorSupport.hs"
             userFile = moduleDir </> "ConstructorUser.hs"
@@ -275,7 +275,7 @@ spec = do
         TIO.writeFile userFile constructorUserFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.ConstructorUser.someFunction"
             targetName <-
@@ -298,15 +298,15 @@ spec = do
                                           )
                                         ]
 
-    it "recurses from the second binder of a shared top-level declaration through root-scoped dependencies" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses from the second binder of a shared top-level declaration through root-scoped dependencies" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "SharedTopLevel.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile sharedTopLevelDependencyFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.SharedTopLevel.pairRight"
             targetName <-
@@ -327,15 +327,15 @@ spec = do
                                           )
                                         ]
 
-    it "recurses through dependencies of constructors declared in one shared GADT signature" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses through dependencies of constructors declared in one shared GADT signature" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "SharedGadtConstructors.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile sharedGadtConstructorDependencyFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.SharedGadtConstructors.useB"
             targetName <-
@@ -355,15 +355,15 @@ spec = do
                                           )
                                         ]
 
-    it "recurses from a directly requested GADT constructor through only that constructor's dependencies" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses from a directly requested GADT constructor through only that constructor's dependencies" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "DirectGadtConstructor.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile directGadtConstructorDependencyFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.DirectGadtConstructor.SomeMinimalTypedModuleFacts"
             targetName <-
@@ -382,15 +382,15 @@ spec = do
                                           )
                                         ]
 
-    it "recurses from a directly requested regular constructor through only that constructor's dependencies" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses from a directly requested regular constructor through only that constructor's dependencies" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "DirectRegularConstructor.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile directRegularConstructorDependencyFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.DirectRegularConstructor.EitherBar"
             targetName <-
@@ -409,15 +409,15 @@ spec = do
                                           )
                                         ]
 
-    it "recurses from a directly requested class method through only that method's dependencies" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses from a directly requested class method through only that method's dependencies" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "DirectClassMethod.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile directClassMethodDependencyFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.DirectClassMethod.buildAlpha"
             targetName <-
@@ -436,15 +436,15 @@ spec = do
                                           )
                                         ]
 
-    it "recurses from a directly requested record field through only that field's type dependencies" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses from a directly requested record field through only that field's type dependencies" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "DirectRecordField.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile directRecordFieldDependencyFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.DirectRecordField.alphaField"
             targetName <-
@@ -463,15 +463,15 @@ spec = do
                                           )
                                         ]
 
-    it "recurses through dependencies of class methods declared in one shared signature" do
-      withFixtureCopy \fixtureRoot -> do
+    it "recurses through dependencies of class methods declared in one shared signature" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "SharedClassSignature.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile sharedClassMethodDependencyFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.SharedClassSignature.runG"
             targetName <-
@@ -491,8 +491,8 @@ spec = do
                                           )
                                         ]
 
-    it "stops on already visited definitions when recursion encounters a cycle" do
-      closure <- fixtureDefinitionClosure 4 "mutualLeft"
+    it "stops on already visited definitions when recursion encounters a cycle" \fixture -> do
+      closure <- fixtureDefinitionClosure fixture 4 "mutualLeft"
 
       closure
         `shouldHaveModuleDefinitions` [ ( "Demo",
@@ -502,8 +502,8 @@ spec = do
                                         )
                                       ]
 
-    it "recursively resolves referenced symbols across module boundaries" do
-      closure <- fixtureDefinitionClosure 2 "crossModuleRecord"
+    it "recursively resolves referenced symbols across module boundaries" \fixture -> do
+      closure <- fixtureDefinitionClosure fixture 2 "crossModuleRecord"
 
       closure
         `shouldHaveModuleDefinitions` [ ( "Demo",
@@ -519,9 +519,9 @@ spec = do
                                         )
                                       ]
 
-    it "orders recursive closure results with dependencies before the queried root definition" do
+    it "orders recursive closure results with dependencies before the queried root definition" \fixture -> do
       moduleOrder <-
-        fixtureLore do
+        fixtureLore fixture do
           loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "crossModuleRecord"
           targetName <- maybe (error "symbol not found: crossModuleRecord") pure (findFixtureSymbol "crossModuleRecord" exportedSymbols)
@@ -531,9 +531,9 @@ spec = do
       last moduleOrder `shouldBe` "Demo"
       "Demo.Support" `shouldSatisfy` (`elem` moduleOrder)
 
-    it "orders nested dependencies before their dependents within closure output" do
+    it "orders nested dependencies before their dependents within closure output" \fixture -> do
       definitionOrder <-
-        fixtureLore do
+        fixtureLore fixture do
           loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "derivedValue"
           targetName <- maybe (error "symbol not found: derivedValue") pure (findFixtureSymbol "derivedValue" exportedSymbols)
@@ -542,9 +542,9 @@ spec = do
 
       definitionOrder `shouldBe` ["seedValue", "bumpWithSeed", "derivedValue"]
 
-    it "keeps transitive dependencies before direct dependencies in branching closures" do
+    it "keeps transitive dependencies before direct dependencies in branching closures" \fixture -> do
       definitionOrder <-
-        fixtureLore do
+        fixtureLore fixture do
           loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "crossModuleBundle"
           targetName <- maybe (error "symbol not found: crossModuleBundle") pure (findFixtureSymbol "crossModuleBundle" exportedSymbols)
@@ -561,8 +561,8 @@ spec = do
       indexOf "crossModuleRecord" `shouldSatisfy` (< indexOf "crossModuleBundle")
       indexOf "crossModuleSeed" `shouldSatisfy` (< indexOf "crossModuleBundle")
 
-    it "merges same-module closure declarations when dependencies are split across references" do
-      closure <- fixtureDefinitionClosure 2 "crossModuleBundle"
+    it "merges same-module closure declarations when dependencies are split across references" \fixture -> do
+      closure <- fixtureDefinitionClosure fixture 2 "crossModuleBundle"
 
       closure
         `shouldHaveModuleDefinitions` [ ( "Demo",
@@ -580,15 +580,15 @@ spec = do
                                         )
                                       ]
 
-    it "includes the concretely used class instance in recursive closure output" do
-      withFixtureCopy \fixtureRoot -> do
+    it "includes the concretely used class instance in recursive closure output" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestClosure"
             moduleFile = moduleDir </> "Render.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile usedInstanceClosureFixtureModuleSource
 
         closure <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestClosure.Render.renderInt"
             targetName <-
@@ -608,9 +608,9 @@ spec = do
                                           )
                                         ]
 
-    it "survives two consecutive reloads before resolving a definition closure" do
+    it "survives two consecutive reloads before resolving a definition closure" \fixture -> do
       closure <-
-        fixtureLore do
+        fixtureLore fixture do
           loadHomeModules defaultLoadHomeModulesOptions
           loadHomeModules defaultLoadHomeModulesOptions
           exportedSymbols <- findSymbols "crossModuleRecord"
@@ -633,14 +633,14 @@ spec = do
                                       ]
 
   describe "resolveReferenceDefinitions" do
-    it "finds top-level definitions and instance definitions that reference the target" do
-      withFixtureCopy \fixtureRoot -> do
+    it "finds top-level definitions and instance definitions that reference the target" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let demoFile = fixtureRoot </> "src" </> "Demo.hs"
         enableFlexibleInstances fixtureRoot
         TIO.appendFile demoFile referenceInstanceDefinitions
 
         references <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "Demo.Support.supportSeed"
             targetName <-
@@ -662,15 +662,15 @@ spec = do
                                                 )
                                               ]
 
-    it "merges root chains with the same root before matching references" do
-      withFixtureCopy \fixtureRoot -> do
+    it "merges root chains with the same root before matching references" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestChain"
             moduleFile = moduleDir </> "Roots.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile mergedRootChainFixtureModuleSource
 
         references <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             resolvedRootChains <- lookupRootSymbolChains "TestChain.Roots.Wrapped"
             case resolvedRootChains of
@@ -695,15 +695,15 @@ spec = do
         length occurrenceKeys `shouldBe` length (nub occurrenceKeys)
 
   describe "resolveReferenceMatches" do
-    it "returns exact matched reference spans for each occurrence in a definition" do
-      withFixtureCopy \fixtureRoot -> do
+    it "returns exact matched reference spans for each occurrence in a definition" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestRefs"
             moduleFile = moduleDir </> "Snippet.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile preciseReferenceMatchesFixtureModuleSource
 
         referenceMatches <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestRefs.Snippet.target"
             targetName <-
@@ -720,15 +720,15 @@ spec = do
           other ->
             expectationFailure ("expected a single definition-level reference match, got: " <> show (length other))
 
-    it "returns exact reference spans inside case alternatives" do
-      withFixtureCopy \fixtureRoot -> do
+    it "returns exact reference spans inside case alternatives" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
         let moduleDir = fixtureRoot </> "src" </> "TestRefs"
             moduleFile = moduleDir </> "CaseSectionSnippet.hs"
         createDirectoryIfMissing True moduleDir
         TIO.writeFile moduleFile caseSectionReferenceFixtureModuleSource
 
         referenceMatches <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             loadHomeModules defaultLoadHomeModulesOptions
             exportedSymbols <- findSymbols "TestRefs.CaseSectionSnippet.target"
             targetName <-
@@ -741,8 +741,8 @@ spec = do
         sort (concatMap (mapMaybe matchedSpanStartLine . referenceMatchExactSpans) referenceMatches) `shouldBe` [14]
 
   describe "renderDefinitionModulesText" do
-    it "renders a single definition as a minified module fragment" do
-      rendered <- fixtureRenderedDefinition "lookupOrZero"
+    it "renders a single definition as a minified module fragment" \fixture -> do
+      rendered <- fixtureRenderedDefinition fixture "lookupOrZero"
 
       rendered
         `shouldBe` unlines
@@ -753,8 +753,8 @@ spec = do
             "  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
           ]
 
-    it "renders recursive closures grouped by file" do
-      rendered <- fixtureRenderedDefinitionClosure 2 "crossModuleRecord"
+    it "renders recursive closures grouped by file" \fixture -> do
+      rendered <- fixtureRenderedDefinitionClosure fixture 2 "crossModuleRecord"
 
       rendered
         `shouldBe` unlines
@@ -874,18 +874,18 @@ sliceRealSpan realSpan contents =
     joinLines [] = ""
     joinLines xs = foldr1 (\line rest -> line <> "\n" <> rest) xs
 
-fixtureDefinition :: String -> IO DefinitionSlice
-fixtureDefinition symbol =
-  fixtureLore do
+fixtureDefinition :: FixtureContext -> String -> IO DefinitionSlice
+fixtureDefinition fixture symbol =
+  fixtureLore fixture do
     loadHomeModules defaultLoadHomeModulesOptions
     exportedSymbols <- findSymbols (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
     source <- maybe (error ("definition not found: " <> symbol)) pure =<< resolveDefinitionSourceNamed targetName
     renderDefinitionSourceSlice source
 
-fixtureDefinitionClosure :: Int -> String -> IO [DefinitionSlice]
-fixtureDefinitionClosure depth symbol =
-  fixtureLore do
+fixtureDefinitionClosure :: FixtureContext -> Int -> String -> IO [DefinitionSlice]
+fixtureDefinitionClosure fixture depth symbol =
+  fixtureLore fixture do
     loadHomeModules defaultLoadHomeModulesOptions
     exportedSymbols <- findSymbols (pack symbol)
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
@@ -901,13 +901,13 @@ renderDefinitionClosureSlices namedSources = do
   renderedSlices <- mapM (renderDefinitionSourceSlice . (.definitionSource)) namedSources
   pure (mergeRenderedDefinitionModules renderedSlices)
 
-fixtureRenderedDefinition :: String -> IO String
-fixtureRenderedDefinition symbol =
-  renderDefinitionSlicesText . pure =<< fixtureDefinition symbol
+fixtureRenderedDefinition :: FixtureContext -> String -> IO String
+fixtureRenderedDefinition fixture symbol =
+  renderDefinitionSlicesText . pure =<< fixtureDefinition fixture symbol
 
-fixtureRenderedDefinitionClosure :: Int -> String -> IO String
-fixtureRenderedDefinitionClosure depth symbol =
-  renderDefinitionSlicesText =<< fixtureDefinitionClosure depth symbol
+fixtureRenderedDefinitionClosure :: FixtureContext -> Int -> String -> IO String
+fixtureRenderedDefinitionClosure fixture depth symbol =
+  renderDefinitionSlicesText =<< fixtureDefinitionClosure fixture depth symbol
 
 renderDefinitionSlicesText :: [DefinitionSlice] -> IO String
 renderDefinitionSlicesText definitionSlices = do

@@ -1,5 +1,12 @@
 module TestSupport
-  ( fixtureLore,
+  ( FixtureBuildProvider (..),
+    FixtureContext,
+    fixtureSourceRoot,
+    fixtureProjectRoot,
+    selectFixtureBuildProvider,
+    withFixtureContext,
+    withFixtureSpec,
+    fixtureLore,
     fixtureLoreAt,
     fixtureLoreAtWithConfig,
     withFixtureCopy,
@@ -31,30 +38,71 @@ import Lore.Session (SessionConfig, runLore)
 import qualified Lore.Session as Session
 import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory, makeAbsolute, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
+import qualified System.Process as Process
+import Test.Hspec (Spec, SpecWith, around)
 
-fixtureLore :: LoreMonadT IO a -> IO a
-fixtureLore action = do
-  fixtureRoot <- makeAbsolute ("test" </> "fixtures" </> "demo")
-  fixtureLoreAt fixtureRoot action
+data FixtureBuildProvider
+  = FixtureProviderCabal
+  | FixtureProviderStack
+  deriving (Eq, Show)
 
-fixtureLoreAt :: FilePath -> LoreMonadT IO a -> IO a
-fixtureLoreAt fixtureRoot action =
+data FixtureContext = FixtureContext
+  { fixtureSourceRoot :: FilePath,
+    fixtureProjectRoot :: FilePath,
+    fixtureBuildProvider :: FixtureBuildProvider,
+    fixtureProjectProvider :: Session.ProjectProvider
+  }
+
+withFixtureSpec :: SpecWith FixtureContext -> Spec
+withFixtureSpec =
+  around withFixtureContext
+
+withFixtureContext :: (FixtureContext -> IO a) -> IO a
+withFixtureContext =
+  bracket prepareFixtureContext cleanupFixtureContext
+
+prepareFixtureContext :: IO FixtureContext
+prepareFixtureContext = do
+  sourceRoot <- makeAbsolute ("test" </> "fixtures" </> "demo")
+  provider <- detectFixtureBuildProvider
+  projectRoot <- createTempDirectoryPath
+  copyFixtureSourceTree sourceRoot projectRoot
+  materializeFixture provider projectRoot
+  pure
+    FixtureContext
+      { fixtureSourceRoot = sourceRoot,
+        fixtureProjectRoot = projectRoot,
+        fixtureBuildProvider = provider,
+        fixtureProjectProvider = toProjectProvider provider
+      }
+
+cleanupFixtureContext :: FixtureContext -> IO ()
+cleanupFixtureContext context =
+  removePathForcibly context.fixtureProjectRoot
+
+fixtureLore :: FixtureContext -> LoreMonadT IO a -> IO a
+fixtureLore context action =
+  fixtureLoreAt context context.fixtureProjectRoot action
+
+fixtureLoreAt :: FixtureContext -> FilePath -> LoreMonadT IO a -> IO a
+fixtureLoreAt context fixtureRoot action =
   fixtureLoreAtWithConfig
+    context
     (sessionConfigWithLogger noLogHandle)
     fixtureRoot
     action
 
-fixtureLoreAtWithConfig :: SessionConfig -> FilePath -> LoreMonadT IO a -> IO a
-fixtureLoreAtWithConfig sessionConfig fixtureRoot action = do
-  provider <- resolveFixtureProjectProvider fixtureRoot
+fixtureLoreAtWithConfig :: FixtureContext -> SessionConfig -> FilePath -> LoreMonadT IO a -> IO a
+fixtureLoreAtWithConfig context sessionConfig fixtureRoot action =
   withClearedGhcEnvironment $
     runLore
       sessionConfig
         { Session.projectRoot = fixtureRoot,
           Session.ghcWorkDir = fixtureRoot </> ".lore-work-test",
-          Session.projectProviderOverride = Just provider
+          Session.projectProviderOverride = Just context.fixtureProjectProvider
         }
       action
 
@@ -70,15 +118,14 @@ sessionConfigWithLogger loggerHandle =
       Session.isTestSuiteFunctionalityRequired = False
     }
 
-withFixtureCopy :: (FilePath -> IO a) -> IO a
-withFixtureCopy action = do
-  fixtureRoot <- makeAbsolute ("test" </> "fixtures" </> "demo")
-  bracket (prepareFixtureCopy fixtureRoot) removePathForcibly action
+withFixtureCopy :: FixtureContext -> (FilePath -> IO a) -> IO a
+withFixtureCopy context =
+  bracket prepareFixtureCopy removePathForcibly
   where
-    prepareFixtureCopy fixtureRoot = do
+    prepareFixtureCopy = do
       fixtureCopyRoot <- createTempDirectoryPath
-      copyDirectoryRecursive fixtureRoot fixtureCopyRoot
-      normalizeFixtureBuildFiles fixtureCopyRoot
+      copyFixtureSourceTree context.fixtureSourceRoot fixtureCopyRoot
+      materializeFixture context.fixtureBuildProvider fixtureCopyRoot
       pure fixtureCopyRoot
 
 createTempDirectoryPath :: IO FilePath
@@ -90,19 +137,33 @@ createTempDirectoryPath = do
   createDirectory tempFilePath
   pure tempFilePath
 
-copyDirectoryRecursive :: FilePath -> FilePath -> IO ()
-copyDirectoryRecursive sourceDir targetDir = do
+copyFixtureSourceTree :: FilePath -> FilePath -> IO ()
+copyFixtureSourceTree sourceDir targetDir = do
   createDirectoryIfMissing True targetDir
   entries <- listDirectory sourceDir
-  mapM_ copyEntry entries
+  mapM_ copyEntry (filter (`Set.notMember` fixtureGeneratedEntryNames) entries)
   where
     copyEntry entryName = do
       let sourcePath = sourceDir </> entryName
           targetPath = targetDir </> entryName
       isDirectory <- doesDirectoryExist sourcePath
       if isDirectory
-        then copyDirectoryRecursive sourcePath targetPath
+        then copyFixtureSourceTree sourcePath targetPath
         else copyFile sourcePath targetPath
+
+fixtureGeneratedEntryNames :: Set.Set FilePath
+fixtureGeneratedEntryNames =
+  Set.fromList
+    [ ".lore-work-test",
+      ".stack-work",
+      "dist-newstyle",
+      "stack.yaml",
+      "stack.yaml.lock",
+      "cabal.project",
+      "cabal.project.local",
+      "cabal.project.freeze",
+      ".hspec-failures"
+    ]
 
 withClearedGhcEnvironment :: IO a -> IO a
 withClearedGhcEnvironment action =
@@ -121,42 +182,84 @@ withClearedGhcEnvironment action =
       maybe (pure ()) (setEnv "GHC_ENVIRONMENT") previousGhcEnvironment
       maybe (pure ()) (setEnv "GHC_PACKAGE_PATH") previousGhcPackagePath
 
-normalizeFixtureBuildFiles :: FilePath -> IO ()
-normalizeFixtureBuildFiles fixtureCopyRoot = do
-  provider <- detectFixtureBuildProvider
-  removeBuildProviderFiles fixtureCopyRoot
+materializeFixture :: FixtureBuildProvider -> FilePath -> IO ()
+materializeFixture provider fixtureCopyRoot = do
   case provider of
     FixtureProviderCabal -> materializeCabalFixture fixtureCopyRoot
     FixtureProviderStack -> materializeStackFixture fixtureCopyRoot
 
-data FixtureBuildProvider
-  = FixtureProviderCabal
-  | FixtureProviderStack
-
 detectFixtureBuildProvider :: IO FixtureBuildProvider
 detectFixtureBuildProvider = do
-  maybeOverride <- lookupEnv "LORE_FIXTURE_PROVIDER"
-  pure $
-    case fmap (map toLower) maybeOverride of
-      Just "cabal" -> FixtureProviderCabal
-      Just "stack" -> FixtureProviderStack
-      _ -> FixtureProviderStack
+  override <- lookupEnv "LORE_FIXTURE_PROVIDER"
+  maybeStackExe <- lookupEnv "STACK_EXE"
+  maybeGhcEnvironment <- lookupEnv "GHC_ENVIRONMENT"
+  maybeGhcPackagePath <- lookupEnv "GHC_PACKAGE_PATH"
 
-removeBuildProviderFiles :: FilePath -> IO ()
-removeBuildProviderFiles fixtureCopyRoot = do
-  mapM_ removeFileIfExists buildProviderFiles
+  either error pure $
+    selectFixtureBuildProvider
+      override
+      maybeStackExe
+      maybeGhcEnvironment
+      maybeGhcPackagePath
+
+selectFixtureBuildProvider ::
+  Maybe String ->
+  Maybe String ->
+  Maybe String ->
+  Maybe String ->
+  Either String FixtureBuildProvider
+selectFixtureBuildProvider maybeOverride maybeStackExe maybeGhcEnvironment maybeGhcPackagePath =
+  case fmap (map toLower) maybeOverride of
+    Just "stack" -> Right FixtureProviderStack
+    Just "cabal" -> Right FixtureProviderCabal
+    Just unsupported ->
+      Left
+        ( "Unsupported LORE_FIXTURE_PROVIDER value: "
+            <> unsupported
+            <> ". Expected \"stack\" or \"cabal\"."
+        )
+    Nothing
+      | isNonEmpty maybeStackExe ->
+          Right FixtureProviderStack
+      | maybeGhcEnvironment == Just "-",
+        isNonEmpty maybeGhcPackagePath ->
+          Right FixtureProviderStack
+      | isNonEmpty maybeGhcEnvironment ->
+          Right FixtureProviderCabal
+      | otherwise ->
+          Left
+            "Could not detect the fixture build provider. Set LORE_FIXTURE_PROVIDER to \"stack\" or \"cabal\"."
   where
-    buildProviderFiles =
-      [ fixtureCopyRoot </> "stack.yaml",
-        fixtureCopyRoot </> "stack.yaml.lock",
-        fixtureCopyRoot </> "cabal.project",
-        fixtureCopyRoot </> "cabal.project.local",
-        fixtureCopyRoot </> "cabal.project.freeze"
-      ]
+    isNonEmpty =
+      maybe False (not . null)
+
+toProjectProvider :: FixtureBuildProvider -> Session.ProjectProvider
+toProjectProvider FixtureProviderStack = Session.StackProject
+toProjectProvider FixtureProviderCabal = Session.CabalProject
 
 materializeCabalFixture :: FilePath -> IO ()
 materializeCabalFixture fixtureCopyRoot = do
   writeFile (fixtureCopyRoot </> "cabal.project") "packages:\n  .\n"
+  prepareCabalFixturePackageEnvironment fixtureCopyRoot
+
+prepareCabalFixturePackageEnvironment :: FilePath -> IO ()
+prepareCabalFixturePackageEnvironment fixtureCopyRoot = do
+  withClearedGhcEnvironment $
+    do
+      runFixtureCommand
+        fixtureCopyRoot
+        "cabal"
+        ["build", "--only-dependencies", "all"]
+      ensureCabalFixturePackageDb fixtureCopyRoot
+
+ensureCabalFixturePackageDb :: FilePath -> IO ()
+ensureCabalFixturePackageDb fixtureCopyRoot = do
+  ghcVersion <- trim <$> readFixtureCommand fixtureCopyRoot "ghc" ["--numeric-version"]
+  let packageDb = fixtureCopyRoot </> "dist-newstyle" </> "packagedb" </> ("ghc-" <> ghcVersion)
+  packageDbExists <- doesDirectoryExist packageDb
+  when (not packageDbExists) do
+    createDirectoryIfMissing True (fixtureCopyRoot </> "dist-newstyle" </> "packagedb")
+    runFixtureCommand fixtureCopyRoot "ghc-pkg" ["init", packageDb]
 
 materializeStackFixture :: FilePath -> IO ()
 materializeStackFixture fixtureCopyRoot = do
@@ -169,6 +272,37 @@ materializeStackFixture fixtureCopyRoot = do
         (fixtureCopyRoot </> "stack.yaml")
         ("resolver: " <> resolver <> "\n\npackages:\n- .\n")
       copyProjectStackLockIfExists projectRoot fixtureCopyRoot
+
+runFixtureCommand :: FilePath -> FilePath -> [String] -> IO ()
+runFixtureCommand cwd command args = do
+  _ <- readFixtureCommandWithExit cwd command args
+  pure ()
+
+readFixtureCommand :: FilePath -> FilePath -> [String] -> IO String
+readFixtureCommand cwd command args = do
+  (stdoutText, _) <- readFixtureCommandWithExit cwd command args
+  pure stdoutText
+
+readFixtureCommandWithExit :: FilePath -> FilePath -> [String] -> IO (String, String)
+readFixtureCommandWithExit cwd command args = do
+  (exitCode, stdoutText, stderrText) <-
+    Process.readCreateProcessWithExitCode
+      (Process.proc command args) {Process.cwd = Just cwd}
+      ""
+  case exitCode of
+    ExitSuccess -> pure (stdoutText, stderrText)
+    ExitFailure code ->
+      error $
+        unlines
+          [ "Fixture preparation command failed.",
+            "cwd: " <> cwd,
+            "command: " <> unwords (command : args),
+            "exit code: " <> show code,
+            "stdout:",
+            stdoutText,
+            "stderr:",
+            stderrText
+          ]
 
 findProjectRootWithStackFiles :: IO (Maybe FilePath)
 findProjectRootWithStackFiles = do
@@ -205,19 +339,6 @@ copyProjectStackLockIfExists projectRoot fixtureCopyRoot = do
 
 trim :: String -> String
 trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
-
-removeFileIfExists :: FilePath -> IO ()
-removeFileIfExists path = do
-  exists <- doesFileExist path
-  when exists (removeFile path)
-
-resolveFixtureProjectProvider :: FilePath -> IO Session.ProjectProvider
-resolveFixtureProjectProvider fixtureRoot = do
-  hasStackConfig <- doesFileExist (fixtureRoot </> "stack.yaml")
-  pure $
-    if hasStackConfig
-      then Session.StackProject
-      else Session.CabalProject
 
 findSymbols :: (Lore.MonadLore m) => Text -> m [Lore.Symbol]
 findSymbols query =

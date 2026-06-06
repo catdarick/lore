@@ -22,24 +22,24 @@ import Lore
 import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.FilePath ((</>))
 import Test.Hspec
-import TestSupport (findSymbols, fixtureLoreAt, withFixtureCopy)
+import TestSupport (FixtureContext, findSymbols, fixtureLoreAt, withFixtureCopy, withFixtureSpec)
 
 spec :: Spec
-spec = do
+spec = withFixtureSpec do
   describe "findDeadCode" do
-    it "keeps transitive dependencies reachable from executable main alive" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "keeps transitive dependencies reachable from executable main alive" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         let deadNames = deadDefinitionOccNames result
         deadNames `shouldContain` ["deadRoot", "deadDependency"]
         deadNames `shouldNotContain` ["liveRoot", "liveDependency"]
         deadNames `shouldNotContain` ["testMainHelper"]
 
-    it "filters reported dead definitions by target module without changing global reachability" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "filters reported dead definitions by target module without changing global reachability" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             requireLoadedHomeModules
             targetModule <- requireSymbolModule "DeadCode.Lib" "deadRoot"
             findDeadCode defaultDeadCodeOptions {deadCodeTargetModules = Just (Set.singleton targetModule)}
@@ -49,10 +49,10 @@ spec = do
         deadNames `shouldNotContain` ["liveRoot", "liveDependency"]
         result.deadCodeTotalDefinitions `shouldSatisfy` (> 0)
 
-    it "treats alive modules as root sets" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "treats alive modules as root sets" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             requireLoadedHomeModules
             aliveModule <- requireSymbolModule "Dev" "runSomething"
             findDeadCode defaultDeadCodeOptions {deadCodeAliveModules = Set.singleton aliveModule}
@@ -60,10 +60,10 @@ spec = do
         let deadNames = deadDefinitionOccNames result
         deadNames `shouldNotContain` ["deadRoot", "deadDependency"]
 
-    it "treats alive symbols as roots" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "treats alive symbols as roots" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             requireLoadedHomeModules
             deadRoot <- requireSymbol "DeadCode.Lib" "deadRoot"
             findDeadCode defaultDeadCodeOptions {deadCodeAliveNames = Set.singleton deadRoot}
@@ -71,63 +71,63 @@ spec = do
         let deadNames = deadDefinitionOccNames result
         deadNames `shouldNotContain` ["deadRoot", "deadDependency"]
 
-    it "does not treat test mains as alive roots" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "does not treat test mains as alive roots" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         deadDefinitionOccNames result `shouldContain` ["testOnly"]
 
-    it "keeps used type-family instances alive" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "keeps used type-family instances alive" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         let moduleDeadNames =
               deadDefinitionOccNamesInModule "DeadCode.TypeFamily" result
         moduleDeadNames `shouldBe` []
 
-    it "reports unused type/data family instances as dead" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "reports unused type/data family instances as dead" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         let deadNames = deadDefinitionOccNames result
         deadNames `shouldContainPrefix` "D:R:UnusedDisplay"
 
-    it "keeps unused external-only type/data family instances alive by default" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "keeps unused external-only type/data family instances alive by default" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         let deadNames = deadDefinitionOccNames result
         deadNames `shouldNotContainPrefix` "D:R:ExternalDisplay"
 
-    it "reports unused class instances as dead" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "reports unused class instances as dead" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         let deadNames = deadDefinitionOccNames result
         deadNames `shouldContain` ["UnusedClassData"]
         deadNames `shouldContainPrefix` "$fShowUnusedClassData"
 
-    it "keeps instances with only external head types alive by default" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "keeps instances with only external head types alive by default" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         let moduleDeadNames =
               deadDefinitionOccNamesInModule "DeadCode.ExternalOnlyInstance" result
         moduleDeadNames `shouldNotContainPrefix` "$fExternalOnlyInt"
 
-    it "reports unused derived instances as dead" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "reports unused derived instances as dead" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         let moduleDeadNames =
               deadDefinitionOccNamesInModule "DeadCode.UnusedDerived" result
         moduleDeadNames `shouldContain` ["DerivedData"]
         moduleDeadNames `shouldContainPrefix` "$fGenericDerivedData"
 
-    it "keeps associated type family instances declared in class instances alive" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "keeps associated type family instances declared in class instances alive" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             requireLoadedHomeModules
             wrapperType <- requireSymbol "DeadCode.AssociatedTypeInstance" "Wrapper"
             findDeadCode defaultDeadCodeOptions {deadCodeAliveNames = Set.singleton wrapperType}
@@ -137,10 +137,10 @@ spec = do
         moduleDeadNames `shouldNotContainPrefix` "$fHasAssocWrapper"
         moduleDeadNames `shouldNotContainPrefix` "D:R:AssocWrapper"
 
-    it "keeps associated type family instances alive for multi-parameter class instances" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "keeps associated type family instances alive for multi-parameter class instances" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             requireLoadedHomeModules
             wrapperType <- requireSymbol "DeadCode.AssociatedTypeInstanceMulti" "Wrapper2"
             findDeadCode defaultDeadCodeOptions {deadCodeAliveNames = Set.singleton wrapperType}
@@ -150,18 +150,18 @@ spec = do
         moduleDeadNames `shouldNotContainPrefix` "$fHasAssoc2Wrapper2"
         moduleDeadNames `shouldNotContainPrefix` "D:R:Assoc2Wrapper2"
 
-    it "keeps associated type family instances alive when class is imported" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "keeps associated type family instances alive when class is imported" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         let moduleDeadNames =
               deadDefinitionOccNamesInModule "DeadCode.AssociatedTypeImportedInstance" result
         moduleDeadNames `shouldNotContainPrefix` "D:R:AssocImported"
 
-    it "keeps class instances alive when any instance-head type is alive" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "keeps class instances alive when any instance-head type is alive" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             requireLoadedHomeModules
             headAliveType <- requireSymbol "DeadCode.InstanceHeadAlive" "HeadAlive"
             findDeadCode defaultDeadCodeOptions {deadCodeAliveNames = Set.singleton headAliveType}
@@ -169,10 +169,10 @@ spec = do
               deadDefinitionOccNamesInModule "DeadCode.InstanceHeadAlive" result
         moduleDeadNames `shouldNotContainPrefix` "$fHeadClassHeadAlive"
 
-    it "keeps plain class instances alive when any instance-head type is alive" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "keeps plain class instances alive when any instance-head type is alive" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
-          fixtureLoreAt fixtureRoot do
+          fixtureLoreAt fixture fixtureRoot do
             requireLoadedHomeModules
             headAliveType <- requireSymbol "DeadCode.PlainInstanceHeadAlive" "HeadAlive2"
             findDeadCode defaultDeadCodeOptions {deadCodeAliveNames = Set.singleton headAliveType}
@@ -180,11 +180,11 @@ spec = do
               deadDefinitionOccNamesInModule "DeadCode.PlainInstanceHeadAlive" result
         moduleDeadNames `shouldNotContainPrefix` "$fMarkerHeadAlive2"
 
-    it "reports entry-module resolution warnings instead of silently dropping them" do
-      withFixtureDeadCodeProject \fixtureRoot -> do
+    it "reports entry-module resolution warnings instead of silently dropping them" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
         TIO.appendFile (fixtureRoot </> "package.yaml") brokenEntryPackageSuffix
         result <-
-          runFindDeadCode fixtureRoot defaultDeadCodeOptions
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         map T.unpack result.deadCodeWarnings
           `shouldSatisfy` any (List.isInfixOf "Failed to resolve entry module for")
 
@@ -196,9 +196,9 @@ defaultDeadCodeOptions =
       deadCodeAliveNames = Set.empty
     }
 
-runFindDeadCode :: FilePath -> DeadCodeOptions -> IO DeadCodeResult
-runFindDeadCode fixtureRoot options =
-  fixtureLoreAt fixtureRoot do
+runFindDeadCode :: FixtureContext -> FilePath -> DeadCodeOptions -> IO DeadCodeResult
+runFindDeadCode fixture fixtureRoot options =
+  fixtureLoreAt fixture fixtureRoot do
     requireLoadedHomeModules
     findDeadCode options
 
@@ -269,9 +269,9 @@ shouldContainPrefix :: [String] -> String -> Expectation
 shouldContainPrefix names prefix =
   any (List.isPrefixOf prefix) names `shouldBe` True
 
-withFixtureDeadCodeProject :: (FilePath -> IO a) -> IO a
-withFixtureDeadCodeProject action =
-  withFixtureCopy \fixtureRoot -> do
+withFixtureDeadCodeProject :: FixtureContext -> (FilePath -> IO a) -> IO a
+withFixtureDeadCodeProject fixture action =
+  withFixtureCopy fixture \fixtureRoot -> do
     writeFixtureDeadCodeModules fixtureRoot
     appendFixtureDeadCodeComponents fixtureRoot
     action fixtureRoot

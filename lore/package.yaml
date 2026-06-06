@@ -109,6 +109,7 @@ tests:
     - PackageEnvironmentSpec
     - TemporalModulesSpec
     - TestSupport
+    - TestSupportSpec
     - SomeModule
     ghc-options:
     - -threaded
