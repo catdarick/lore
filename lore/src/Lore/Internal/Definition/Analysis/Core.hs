@@ -1,6 +1,5 @@
 module Lore.Internal.Definition.Analysis.Core
-  ( buildEvidenceDependenciesByBinder,
-    buildSemanticDependenciesByBinder,
+  ( buildCoreDependenciesByBinder,
   )
 where
 
@@ -18,46 +17,13 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Unique.Set as GHC.UniqueSet
 import Lore.Internal.Definition.Analysis.Common (nameUniqueKey)
 
-buildEvidenceDependenciesByBinder ::
-  Set.Set GHC.Name ->
-  [GHC.CoreBind] ->
-  Map.Map GHC.Name [GHC.Name]
-buildEvidenceDependenciesByBinder interestingBinders coreBinds =
-  Map.fromListWith (<>) $
-    concatMap bindingEntries coreBinds
-  where
-    keepEntry binderName evidenceDependencies =
-      [ (binderName, evidenceDependencies)
-      | Set.member binderName interestingBinders,
-        not (null evidenceDependencies)
-      ]
-
-    bindingEntries = \case
-      GHC.NonRec binder rhs ->
-        let evidenceDependencies =
-              dedupeSemanticNamesByUnique (collectDirectEvidenceDependenciesInExpr rhs)
-         in keepEntry (GHC.getName binder) evidenceDependencies
-      GHC.Rec pairs ->
-        concat
-          [ keepEntry (GHC.getName binder) evidenceDependencies
-          | (binder, rhs) <- pairs,
-            let evidenceDependencies =
-                  dedupeSemanticNamesByUnique (collectDirectEvidenceDependenciesInExpr rhs)
-          ]
-
-buildSemanticDependenciesByBinder ::
+buildCoreDependenciesByBinder ::
   Set.Set GHC.Name ->
   Set.Set GHC.Name ->
   [GHC.CoreBind] ->
-  Map.Map GHC.Name [GHC.Name]
-buildSemanticDependenciesByBinder interestingBinders interestingDependencyNames coreBinds =
-  Map.fromList
-    [ (binderName, semanticDependencies)
-    | (binderKey, (binderName, _)) <- IntMap.toList topLevelBindingsByKey,
-      IntSet.member binderKey interestingBinderKeys,
-      Just semanticDependencies <- [IntMap.lookup binderKey semanticDependenciesByKey],
-      not (null semanticDependencies)
-    ]
+  (Map.Map GHC.Name [GHC.Name], Map.Map GHC.Name [GHC.Name])
+buildCoreDependenciesByBinder interestingBinders interestingDependencyNames coreBinds =
+  (evidenceDependenciesByBinder, semanticDependenciesByBinder)
   where
     interestingBinderKeys =
       IntSet.fromList (map nameUniqueKey (Set.toList interestingBinders))
@@ -76,8 +42,28 @@ buildSemanticDependenciesByBinder interestingBinders interestingDependencyNames 
         (collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKeys . snd)
         topLevelBindingsByKey
 
+    evidenceDependenciesByBinder =
+      Map.fromList
+        [ (binderName, evidenceDependencies)
+        | (binderKey, (binderName, _)) <- IntMap.toList topLevelBindingsByKey,
+          IntSet.member binderKey interestingBinderKeys,
+          Just directDependencies <- [IntMap.lookup binderKey directDependenciesByKey],
+          let evidenceDependencies =
+                dedupeSemanticNamesByUnique directDependencies.coreDirectEvidenceNames,
+          not (null evidenceDependencies)
+        ]
+
     semanticDependenciesByKey =
       buildTransitiveCoreSemanticDependencies directDependenciesByKey
+
+    semanticDependenciesByBinder =
+      Map.fromList
+        [ (binderName, semanticDependencies)
+        | (binderKey, (binderName, _)) <- IntMap.toList topLevelBindingsByKey,
+          IntSet.member binderKey interestingBinderKeys,
+          Just semanticDependencies <- [IntMap.lookup binderKey semanticDependenciesByKey],
+          not (null semanticDependencies)
+        ]
 
 buildTransitiveCoreSemanticDependencies ::
   IntMap.IntMap CoreDirectDependencies ->
@@ -164,14 +150,16 @@ sccKeys = \case
 
 data CoreDirectDependencies = CoreDirectDependencies
   { coreDirectSemanticNames :: [GHC.Name],
-    coreDirectTopLevelBinderKeys :: [Int]
+    coreDirectTopLevelBinderKeys :: [Int],
+    coreDirectEvidenceNames :: [GHC.Name]
   }
 
 emptyCoreDirectDependencies :: CoreDirectDependencies
 emptyCoreDirectDependencies =
   CoreDirectDependencies
     { coreDirectSemanticNames = [],
-      coreDirectTopLevelBinderKeys = []
+      coreDirectTopLevelBinderKeys = [],
+      coreDirectEvidenceNames = []
     }
 
 appendCoreDirectDependencies :: CoreDirectDependencies -> CoreDirectDependencies -> CoreDirectDependencies
@@ -180,7 +168,9 @@ appendCoreDirectDependencies left right =
     { coreDirectSemanticNames =
         left.coreDirectSemanticNames <> right.coreDirectSemanticNames,
       coreDirectTopLevelBinderKeys =
-        left.coreDirectTopLevelBinderKeys <> right.coreDirectTopLevelBinderKeys
+        left.coreDirectTopLevelBinderKeys <> right.coreDirectTopLevelBinderKeys,
+      coreDirectEvidenceNames =
+        left.coreDirectEvidenceNames <> right.coreDirectEvidenceNames
     }
 
 concatCoreDirectDependencies :: [CoreDirectDependencies] -> CoreDirectDependencies
@@ -201,41 +191,6 @@ collectTopLevelBindingsByKey =
         | (binder, rhs) <- pairs
         ]
 
-collectDirectEvidenceDependenciesInExpr :: GHC.CoreExpr -> [GHC.Name]
-collectDirectEvidenceDependenciesInExpr = \case
-  GHC.Var variable ->
-    [GHC.getName variable | GHC.isDFunId variable]
-  GHC.Lit _ ->
-    []
-  GHC.App function argument ->
-    collectDirectEvidenceDependenciesInExpr function <> collectDirectEvidenceDependenciesInExpr argument
-  GHC.Lam _ body ->
-    collectDirectEvidenceDependenciesInExpr body
-  GHC.Let binding body ->
-    collectDirectEvidenceDependenciesInBind binding <> collectDirectEvidenceDependenciesInExpr body
-  GHC.Case scrutinee _ _ alternatives ->
-    collectDirectEvidenceDependenciesInExpr scrutinee
-      <> concatMap collectDirectEvidenceDependenciesInAlt alternatives
-  GHC.Cast expression _ ->
-    collectDirectEvidenceDependenciesInExpr expression
-  GHC.Tick _ expression ->
-    collectDirectEvidenceDependenciesInExpr expression
-  GHC.Type _ ->
-    []
-  GHC.Coercion _ ->
-    []
-
-collectDirectEvidenceDependenciesInBind :: GHC.CoreBind -> [GHC.Name]
-collectDirectEvidenceDependenciesInBind = \case
-  GHC.NonRec _ rhs ->
-    collectDirectEvidenceDependenciesInExpr rhs
-  GHC.Rec bindings ->
-    concatMap (collectDirectEvidenceDependenciesInExpr . snd) bindings
-
-collectDirectEvidenceDependenciesInAlt :: GHC.CoreAlt -> [GHC.Name]
-collectDirectEvidenceDependenciesInAlt (GHC.Alt _ _ expression) =
-  collectDirectEvidenceDependenciesInExpr expression
-
 collectDirectCoreDependenciesInExpr ::
   IntSet.IntSet ->
   IntSet.IntSet ->
@@ -250,7 +205,9 @@ collectDirectCoreDependenciesInExpr interestingDependencyKeys topLevelBindingKey
           then
             variableDependencies
               { coreDirectSemanticNames =
-                  variableName : variableDependencies.coreDirectSemanticNames
+                  variableName : variableDependencies.coreDirectSemanticNames,
+                coreDirectEvidenceNames =
+                  variableName : variableDependencies.coreDirectEvidenceNames
               }
           else variableDependencies
   GHC.Lit _ ->
@@ -370,7 +327,8 @@ coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys name
           coreDirectTopLevelBinderKeys =
             [ nameKey
             | IntSet.member nameKey topLevelBindingKeys
-            ]
+            ],
+          coreDirectEvidenceNames = []
         }
 
 collectDirectCoreDependenciesInBind ::

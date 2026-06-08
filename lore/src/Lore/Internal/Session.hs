@@ -30,7 +30,7 @@ import Data.Text (Text)
 import Data.Time (getCurrentTime)
 import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
-import Lore.Internal.Definition.Cache.Types (CoreModuleFactsCache (..), DefinitionModuleIndexCache (..), ParsedModuleFactsCache (..), ParsedOccurrenceModuleIndexCache (..), TypedModuleFactsCache (..))
+import Lore.Internal.Definition.Cache.Types (CoreModuleFactsCache, DefinitionModuleIndexCache (..), ModuleCache (..), ParsedModuleFactsCache, ParsedOccurrenceModuleIndexCache (..), TypedModuleFactsCache)
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
 import Lore.Internal.Ghc.PackageEnvironment.Probe (captureGhcEnvironmentSnapshot)
 import Lore.Internal.Ghc.PackageEnvironment.Types
@@ -131,15 +131,15 @@ emptyDefinitionModuleIndexCache =
 
 emptyTypedModuleFactsCache :: TypedModuleFactsCache
 emptyTypedModuleFactsCache =
-  TypedModuleFactsCache Map.empty
+  ModuleCache Map.empty
 
 emptyCoreModuleFactsCache :: CoreModuleFactsCache
 emptyCoreModuleFactsCache =
-  CoreModuleFactsCache Map.empty
+  ModuleCache Map.empty
 
 emptyParsedModuleFactsCache :: ParsedModuleFactsCache
 emptyParsedModuleFactsCache =
-  ParsedModuleFactsCache Map.empty
+  ModuleCache Map.empty
 
 emptyInterpreterContextCache :: InterpreterContextCache
 emptyInterpreterContextCache =

@@ -10,12 +10,12 @@ import Lore
   ( DeadCodeOptions (..),
     DeadCodeResult (..),
     DeadDefinition (..),
-    DefinitionSource (..),
     Diagnostic (..),
     LoadHomeModulesResult (..),
     MonadLore,
     Symbol (..),
     defaultLoadHomeModulesOptions,
+    definitionSourceModule,
     findDeadCode,
     loadHomeModules,
   )
@@ -690,4 +690,4 @@ brokenEntryPackageSuffix =
 
 isDefinitionInModule :: String -> DeadDefinition -> Bool
 isDefinitionInModule moduleName deadDefinition =
-  GHC.moduleNameString (GHC.moduleName deadDefinition.deadDefinitionSource.definitionSourceModule) == moduleName
+  GHC.moduleNameString (GHC.moduleName (definitionSourceModule deadDefinition.deadDefinitionSource)) == moduleName

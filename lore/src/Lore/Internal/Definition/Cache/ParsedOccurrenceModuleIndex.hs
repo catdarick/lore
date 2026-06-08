@@ -14,7 +14,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified GHC.Plugins as GHC
 import Lore.Internal.Definition.Cache.Types
-  ( ParsedModuleFactsCache (..),
+  ( ModuleCache (..),
     ParsedOccurrenceModuleIndexCache (..),
   )
 import Lore.Internal.Definition.Types
@@ -51,7 +51,7 @@ prepareParsedOccurrenceModuleIndex ::
   m ParsedOccurrenceModuleIndex
 prepareParsedOccurrenceModuleIndex modSummaries = do
   parsedFactsCacheVar <- asks parsedModuleFactsCacheVar
-  ParsedModuleFactsCache parsedFactsByModule <- readMVar parsedFactsCacheVar
+  ModuleCache parsedFactsByModule <- readMVar parsedFactsCacheVar
   Log.debug $ "Building reference occurrence index for " <> show (Map.size modSummaries) <> " modules."
   let occurrenceIndex =
         foldl' (insertModuleOccurrences parsedFactsByModule) Map.empty (Map.keys modSummaries)

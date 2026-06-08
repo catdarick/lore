@@ -24,8 +24,8 @@ import Lore
   ( DeadCodeOptions (..),
     DeadCodeResult (..),
     DeadDefinition (..),
-    DefinitionSource (..),
     MonadLore,
+    definitionSourceModule,
   )
 import Lore.Tools.FindDeadCode.Request
   ( FindDeadCodeFailureReason (..),
@@ -133,7 +133,7 @@ renderDeadDefinition :: DeadDefinition -> RenderedDeadDefinition
 renderDeadDefinition deadDefinition =
   RenderedDeadDefinition
     { renderedDeadDefinitionModuleName =
-        renderModuleName deadDefinition.deadDefinitionSource.definitionSourceModule,
+        renderModuleName (definitionSourceModule deadDefinition.deadDefinitionSource),
       renderedDeadDefinitionSymbolNames =
         Set.map renderSymbolName deadDefinition.deadDefinitionNames
     }

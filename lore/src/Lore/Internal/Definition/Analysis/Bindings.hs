@@ -1,5 +1,5 @@
 module Lore.Internal.Definition.Analysis.Bindings
-  ( buildDefinitionBindings,
+  ( buildDefinitionCatalog,
   )
 where
 
@@ -9,20 +9,19 @@ import qualified Data.Set as Set
 import qualified GHC
 import Lore.Internal.Definition.Types
 
-buildDefinitionBindings ::
-  GHC.Module ->
+buildDefinitionCatalog ::
   ParsedModuleFacts ->
   MinimalTypedModuleFacts ->
-  DefinitionBindings
-buildDefinitionBindings definingModule parsedFacts typedModuleFacts =
-  DefinitionBindings
-    { bindingDefinitionsById = definitionsById,
-      bindingDefinitionIdByName = definitionIdByName
+  DefinitionCatalog
+buildDefinitionCatalog parsedFacts typedModuleFacts =
+  DefinitionCatalog
+    { definitionSourcesById = definitionsById,
+      definitionIdsByName = definitionIdByName
     }
   where
     matchedDefinitions =
       [ (definitionId, definitionName)
-      | definitionName <- typedModuleFacts.typedDefinitionNames,
+      | definitionName <- typedModuleFacts.typedNameFacts.typedDefinitionNames,
         Just definitionId <- [matchDefinitionId definitionName]
       ]
 
@@ -46,7 +45,6 @@ buildDefinitionBindings definingModule parsedFacts typedModuleFacts =
       let spans = parsedFacts.parsedDeclarationsById Map.! definitionId
        in DefinitionSource
             { definitionSourceId = definitionId,
-              definitionSourceModule = definingModule,
               definitionSourceNames = names,
               definitionSourceSpans = spans
             }

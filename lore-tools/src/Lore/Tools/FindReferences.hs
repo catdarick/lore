@@ -31,6 +31,7 @@ import Lore
     ReferenceHit (..),
     ReferenceMatch (..),
     Symbol (..),
+    definitionSourceModule,
     parseAndNormalizeName,
     resolvePathToRoot,
     resolveReferenceMatchesForNames,
@@ -234,8 +235,11 @@ groupByModule :: [ReferenceOccurrenceMatch] -> [[ReferenceOccurrenceMatch]]
 groupByModule [] = []
 groupByModule (referenceMatch : rest) =
   let (matchingModule, remaining) =
-        span ((== referenceMatch.occurrenceMatchDefinition.definitionSourceModule) . (.occurrenceMatchDefinition.definitionSourceModule)) rest
+        span ((== referenceMatchModule referenceMatch) . referenceMatchModule) rest
    in (referenceMatch : matchingModule) : groupByModule remaining
+  where
+    referenceMatchModule =
+      definitionSourceModule . (.occurrenceMatchDefinition)
 
 groupByDefinition :: [ReferenceOccurrenceMatch] -> [[ReferenceOccurrenceMatch]]
 groupByDefinition [] = []
@@ -312,13 +316,13 @@ definitionSourceSortKey :: DefinitionSource -> (String, String, Int, Int)
 definitionSourceSortKey definitionSource =
   case definitionSourceRealSrcSpan definitionSource of
     Just realSrcSpan ->
-      ( GHC.moduleNameString (GHC.moduleName definitionSource.definitionSourceModule),
+      ( GHC.moduleNameString (GHC.moduleName (definitionSourceModule definitionSource)),
         Plugins.unpackFS (GHC.srcSpanFile realSrcSpan),
         GHC.srcSpanStartLine realSrcSpan,
         GHC.srcSpanStartCol realSrcSpan
       )
     Nothing ->
-      (GHC.moduleNameString (GHC.moduleName definitionSource.definitionSourceModule), "", maxBound, maxBound)
+      (GHC.moduleNameString (GHC.moduleName (definitionSourceModule definitionSource)), "", maxBound, maxBound)
 
 renderFindReferencesOutput :: FindReferencesOutput -> LoreDoc
 renderFindReferencesOutput = \case

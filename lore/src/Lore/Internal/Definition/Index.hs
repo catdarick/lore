@@ -1,47 +1,30 @@
 module Lore.Internal.Definition.Index
-  ( emptyDefinitionDependencies,
-    lookupDefinitionSourceByName,
+  ( lookupDefinitionSourceByName,
     lookupDefinitionSourceById,
-    lookupDefinitionDependenciesOrEmpty,
-    lookupReferenceHitsForName,
-    lookupReferenceHitsForNames,
     lookupReferenceMatchesForNames,
-    groupReferenceHitsByDefinition,
-    dedupeReferenceHits,
   )
 where
 
-import Data.List (foldl')
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified GHC
 import Lore.Internal.Definition.Types
-  ( DefinitionDependencies (..),
+  ( DefinitionCatalog (..),
     DefinitionId,
     DefinitionModuleIndex (..),
     DefinitionSource,
     ReferenceHit (..),
+    ReferenceIndex (..),
     ReferenceMatch (..),
-    nameOccKey,
-    srcSpanKey,
+    SpanKey,
   )
-
-emptyDefinitionDependencies :: DefinitionDependencies
-emptyDefinitionDependencies =
-  DefinitionDependencies
-    { dependencyDirectReferenceNames = Set.empty,
-      dependencyUsedInstanceNames = Set.empty,
-      dependencyCoreSemanticNames = [],
-      dependencyDirectReferenceNamesByReferenceName = Map.empty,
-      dependencyUsedInstanceNamesByReferenceName = Map.empty
-    }
 
 lookupDefinitionSourceByName ::
   GHC.Name ->
   DefinitionModuleIndex ->
   Maybe DefinitionSource
 lookupDefinitionSourceByName name moduleIndex = do
-  definitionId <- Map.lookup name moduleIndex.definitionIdByName
+  definitionId <- Map.lookup name moduleIndex.definitionCatalog.definitionIdsByName
   lookupDefinitionSourceById definitionId moduleIndex
 
 lookupDefinitionSourceById ::
@@ -49,77 +32,39 @@ lookupDefinitionSourceById ::
   DefinitionModuleIndex ->
   Maybe DefinitionSource
 lookupDefinitionSourceById definitionId moduleIndex =
-  Map.lookup definitionId moduleIndex.definitionsById
-
-lookupDefinitionDependenciesOrEmpty ::
-  DefinitionId ->
-  DefinitionModuleIndex ->
-  DefinitionDependencies
-lookupDefinitionDependenciesOrEmpty definitionId moduleIndex =
-  Map.findWithDefault emptyDefinitionDependencies definitionId moduleIndex.dependenciesById
-
-lookupReferenceHitsForName ::
-  GHC.Name ->
-  DefinitionModuleIndex ->
-  [ReferenceHit]
-lookupReferenceHitsForName targetName moduleIndex =
-  [ hit
-  | hit <- Map.findWithDefault [] (nameOccKey targetName) moduleIndex.referenceHitsByOccKey,
-    -- OccKey is only a candidate index. Exact Name equality is required to avoid
-    -- mixing same-occurrence names from different modules/classes/constructors.
-    hit.referenceHitTargetName == targetName
-  ]
-
-lookupReferenceHitsForNames ::
-  Set.Set GHC.Name ->
-  DefinitionModuleIndex ->
-  [ReferenceHit]
-lookupReferenceHitsForNames targetNames moduleIndex =
-  concatMap (`lookupReferenceHitsForName` moduleIndex) (Set.toList targetNames)
+  Map.lookup definitionId moduleIndex.definitionCatalog.definitionSourcesById
 
 lookupReferenceMatchesForNames ::
   Set.Set GHC.Name ->
   DefinitionModuleIndex ->
   [ReferenceMatch]
 lookupReferenceMatchesForNames targetNames moduleIndex =
-  groupReferenceHitsByDefinition
-    moduleIndex
-    (lookupReferenceHitsForNames targetNames moduleIndex)
-
-groupReferenceHitsByDefinition ::
-  DefinitionModuleIndex ->
-  [ReferenceHit] ->
-  [ReferenceMatch]
-groupReferenceHitsByDefinition moduleIndex hits =
   [ ReferenceMatch
       { referenceMatchDefinition = source,
-        referenceMatchOccurrences = dedupeReferenceHits groupedHits
+        referenceMatchOccurrences = referenceHits
       }
-  | (definitionId, groupedHits) <- Map.toList groupedByDefinitionId,
+  | (definitionId, referenceHits) <- Map.toList referenceHitsByDefinition,
     Just source <- [lookupDefinitionSourceById definitionId moduleIndex]
   ]
   where
-    groupedByDefinitionId =
+    referenceHitsByDefinition =
       Map.fromListWith
-        mergeHits
-        [ (hit.referenceHitDefinitionId, [hit])
-        | hit <- hits
+        (<>)
+        [ (definitionId, [referenceHit])
+        | targetName <- Set.toList targetNames,
+          (definitionId, exactSpans) <- Map.toList (lookupReferenceSpansForName targetName moduleIndex),
+          exactSpan <- Map.elems exactSpans,
+          let referenceHit =
+                ReferenceHit
+                  { referenceHitDefinitionId = definitionId,
+                    referenceHitTargetName = targetName,
+                    referenceHitExactSpan = exactSpan
+                  }
         ]
 
-    mergeHits newHits oldHits =
-      oldHits <> newHits
-
-dedupeReferenceHits :: [ReferenceHit] -> [ReferenceHit]
-dedupeReferenceHits =
-  reverse . snd . foldl' go (Set.empty, [])
-  where
-    go (seen, hits) hit
-      | hitKey `Set.member` seen =
-          (seen, hits)
-      | otherwise =
-          (Set.insert hitKey seen, hit : hits)
-      where
-        hitKey =
-          ( hit.referenceHitTargetName,
-            srcSpanKey hit.referenceHitExactSpan
-          )
+lookupReferenceSpansForName ::
+  GHC.Name ->
+  DefinitionModuleIndex ->
+  Map.Map DefinitionId (Map.Map SpanKey GHC.SrcSpan)
+lookupReferenceSpansForName targetName moduleIndex =
+  Map.findWithDefault Map.empty targetName moduleIndex.referenceIndex.referencesByName

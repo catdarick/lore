@@ -14,13 +14,12 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
-import Lore.Internal.Definition.Graph
+import Lore.Internal.Definition.ProjectIndex
   ( ProjectDefinitionIndex (..),
-    buildDependencyGraph,
     loadProjectDefinitionIndex,
-    reachableDefinitions,
   )
-import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionId, DefinitionSource (..))
+import Lore.Internal.Definition.Reachability (reachableDeclarationIds)
+import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionCatalog (..), DefinitionId, DefinitionSource (..), definitionSourceModule)
 import Lore.Internal.HomeModules.EntryModules
   ( ComponentEntryModule (..),
     collectLoadedComponentModuleInfoWithDiagnostics,
@@ -67,15 +66,16 @@ findDeadCode options = do
   projectIndex <- loadProjectDefinitionIndex
   (moduleKindsByModule, componentEntries, entryModuleDiagnostics) <-
     collectLoadedComponentModuleInfoWithDiagnostics
-  dependencyGraph <- buildDependencyGraph projectIndex
   let (nonTestMainRoots, testMainRoots) =
         collectMainRootsByKind projectIndex componentEntries
+      definitionSourcesById =
+        projectIndex.projectDefinitionCatalog.definitionSourcesById
       aliveOptionRoots =
         aliveModuleRoots options projectIndex <> aliveNameRoots options projectIndex
       reachableFromNonTestRoots =
-        reachableDefinitions dependencyGraph (nonTestMainRoots <> aliveOptionRoots)
+        reachableDeclarationIds projectIndex (nonTestMainRoots <> aliveOptionRoots)
       reachableFromTestRoots =
-        reachableDefinitions dependencyGraph (testMainRoots <> aliveOptionRoots)
+        reachableDeclarationIds projectIndex (testMainRoots <> aliveOptionRoots)
       testOnlyModules =
         Set.fromList
           [ module_
@@ -85,18 +85,20 @@ findDeadCode options = do
       aliveByReachability =
         Set.fromList
           [ definitionId
-          | (definitionId, source) <- Map.toList projectIndex.projectDefinitionsById,
+          | (definitionId, source) <- Map.toList definitionSourcesById,
             definitionIsAlive testOnlyModules source definitionId reachableFromNonTestRoots reachableFromTestRoots
           ]
       aliveInstanceDefinitionIds =
         aliveInstanceDefinitionsByHeadTypes
           projectIndex.projectInstanceHeadTypeDefinitionIdsByInstance
           aliveByReachability
+      instanceDefinitionIds =
+        Map.keysSet projectIndex.projectInstanceHeadTypeDefinitionIdsByInstance
       aliveDefinitionIds =
-        (aliveByReachability `Set.difference` projectIndex.projectInstanceDefinitionIds)
+        (aliveByReachability `Set.difference` instanceDefinitionIds)
           <> aliveInstanceDefinitionIds
       allDefinitionIds =
-        Map.keysSet projectIndex.projectDefinitionsById
+        Map.keysSet definitionSourcesById
       deadDefinitions =
         collectDeadDefinitions options projectIndex aliveDefinitionIds
   let result =
@@ -151,8 +153,8 @@ buildMainDefinitionIdsByModule ::
 buildMainDefinitionIdsByModule projectIndex =
   Map.fromListWith
     Set.union
-    [ (source.definitionSourceModule, Set.singleton definitionId)
-    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionsById,
+    [ (definitionSourceModule source, Set.singleton definitionId)
+    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionCatalog.definitionSourcesById,
       any ((== "main") . GHC.getOccString) (Set.toList source.definitionSourceNames)
     ]
 
@@ -172,7 +174,7 @@ definitionIsAlive ::
 -- - test-only modules are considered alive when reachable from test roots
 -- - non-test modules are considered alive only when reachable from non-test roots
 definitionIsAlive testOnlyModules definitionSource definitionId reachableFromNonTestRoots reachableFromTestRoots =
-  if definitionSource.definitionSourceModule `Set.member` testOnlyModules
+  if definitionSourceModule definitionSource `Set.member` testOnlyModules
     then definitionId `Set.member` reachableFromTestRoots
     else definitionId `Set.member` reachableFromNonTestRoots
 
@@ -183,8 +185,8 @@ aliveModuleRoots ::
 aliveModuleRoots options projectIndex =
   Set.fromList
     [ definitionId
-    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionsById,
-      source.definitionSourceModule `Set.member` options.deadCodeAliveModules
+    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionCatalog.definitionSourcesById,
+      definitionSourceModule source `Set.member` options.deadCodeAliveModules
     ]
 
 aliveNameRoots ::
@@ -195,7 +197,7 @@ aliveNameRoots options projectIndex =
   Set.fromList
     [ definitionId
     | name <- Set.toList options.deadCodeAliveNames,
-      Just definitionId <- [Map.lookup name projectIndex.projectDefinitionIdByName]
+      Just definitionId <- [Map.lookup name projectIndex.projectDefinitionCatalog.definitionIdsByName]
     ]
 
 collectDeadDefinitions ::
@@ -209,7 +211,7 @@ collectDeadDefinitions options projectIndex aliveDefinitionIds =
         { deadDefinitionSource = source,
           deadDefinitionNames = source.definitionSourceNames
         }
-    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionsById,
+    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionCatalog.definitionSourcesById,
       Set.notMember definitionId aliveDefinitionIds,
       isReportableDefinition source
     ]
@@ -219,7 +221,7 @@ collectDeadDefinitions options projectIndex aliveDefinitionIds =
         Nothing ->
           True
         Just targetModules ->
-          source.definitionSourceModule `Set.member` targetModules
+          definitionSourceModule source `Set.member` targetModules
 
 deadDefinitionSortKey ::
   DeadDefinition ->
@@ -235,7 +237,7 @@ deadDefinitionSortKey deadDefinition =
     source =
       deadDefinition.deadDefinitionSource
     moduleNameKey =
-      GHC.moduleNameString (GHC.moduleName source.definitionSourceModule)
+      GHC.moduleNameString (GHC.moduleName (definitionSourceModule source))
     nameKeys =
       map GHC.getOccString (Set.toAscList deadDefinition.deadDefinitionNames)
     (sourceFileKey, sourceLineKey, sourceColumnKey) =

@@ -15,16 +15,15 @@ import qualified GHC.Hs as GHC.Hs
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
 import Lore.Internal.Definition.Analysis
-  ( buildEvidenceDependenciesByBinder,
+  ( buildCoreDependenciesByBinder,
     buildMinimalTypedModuleFacts,
     buildParsedModuleFacts,
-    buildSemanticDependenciesByBinder,
   )
 import Lore.Internal.Definition.Cache.CoreModuleFacts (storeCoreModuleFactsCacheInContext)
 import Lore.Internal.Definition.Cache.DefinitionModuleIndex (invalidateDefinitionModuleIndexCacheForModuleInContext)
 import Lore.Internal.Definition.Cache.ParsedModuleFacts (storeParsedModuleFactsCacheInContext)
 import Lore.Internal.Definition.Cache.TypedModuleFacts (lookupTypedModuleFactsCacheInContext, storeTypedModuleFactsCacheInContext)
-import Lore.Internal.Definition.Types (MinimalCoreModuleFacts (..), MinimalTypedModuleFacts (..))
+import Lore.Internal.Definition.Types (MinimalCoreModuleFacts (..), MinimalTypedModuleFacts (..), TypedNameFacts (..))
 import Lore.Internal.Session (SessionContext (..))
 
 installDefinitionCallbacks :: SessionContext -> GHC.HscEnv -> GHC.HscEnv
@@ -101,27 +100,23 @@ rawArtifactsTcCoreProcessedCorePass sessionContext modGuts = do
   let homeModule = GHC.mg_module modGuts
   GHC.IOEnv.liftIO do
     maybeTypedFacts <- lookupTypedModuleFactsCacheInContext sessionContext homeModule
-    let interestingBinders =
+    let interestingNames =
           case maybeTypedFacts of
             Just typedFacts ->
-              Set.fromList typedFacts.typedDefinitionNames
+              Set.fromList typedFacts.typedNameFacts.typedDefinitionNames
             Nothing ->
               Set.empty
-        interestingDependencyNames =
-          case maybeTypedFacts of
-            Just typedFacts ->
-              Set.fromList typedFacts.typedDefinitionNames
-            Nothing ->
-              Set.empty
+        (evidenceDependenciesByBinder, semanticDependenciesByBinder) =
+          buildCoreDependenciesByBinder interestingNames interestingNames (GHC.mg_binds modGuts)
         coreFacts =
           MinimalCoreModuleFacts
             { coreEvidenceDependenciesByBinder =
-                buildEvidenceDependenciesByBinder interestingBinders (GHC.mg_binds modGuts),
+                evidenceDependenciesByBinder,
               coreSemanticDependenciesByBinder =
-                buildSemanticDependenciesByBinder interestingBinders interestingDependencyNames (GHC.mg_binds modGuts)
+                semanticDependenciesByBinder
             }
     storeCoreModuleFactsCacheInContext sessionContext homeModule coreFacts
     -- Core facts arriving after a previously built definition index would leave
-    -- dependencyUsedInstanceNames stale. Drop that module index so it is rebuilt.
+    -- dependency maps stale. Drop that module index so it is rebuilt.
     invalidateDefinitionModuleIndexCacheForModuleInContext sessionContext homeModule
   pure modGuts

@@ -38,7 +38,7 @@ import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.Name as GHC.Name
 import qualified GHC.Types.SrcLoc as GHC.SrcLoc
 import Lore.Internal.Definition.Cache.TypedModuleFacts (lookupTypedModuleFactsCache)
-import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (typedDefinitionNames, typedDefinitionOccAliases, typedExportedNames, typedExportedOccAliases, typedInstanceNames))
+import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (..), TypedNameFacts (..), typedInstanceNames)
 import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfosNameSet, greNameFieldAliasText)
 import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsIndexCache (..),
@@ -315,7 +315,7 @@ getHomeModuleSymbols homeModules mdl = do
                     getExportedHomeModuleOccAliases mdl homeModules moduleInfo typedModuleFacts
                   definedNameSet =
                     getDefinedHomeModuleNames mdl typedModuleFacts
-                      `Set.difference` Set.fromList (typedInstanceNames typedModuleFacts)
+                      `Set.difference` typedInstanceNames typedModuleFacts
                   definedOccAliases =
                     getDefinedHomeModuleOccAliases mdl typedModuleFacts
                   occAliasesByName =
@@ -386,8 +386,11 @@ getExportedHomeModuleNames :: GHC.Module -> Set.Set GHC.Module -> GHC.ModuleInfo
 getExportedHomeModuleNames homeModule homeModules moduleInfo typedModuleFacts =
   moduleDefinedExports <> reexportedHomeModuleExports
   where
+    nameFacts =
+      typedModuleFacts.typedNameFacts
+
     moduleDefinedExports =
-      Set.fromList (typedExportedNames typedModuleFacts)
+      Set.fromList nameFacts.typedExportedNames
 
     reexportedHomeModuleExports =
       Set.fromList (reexportedHomeModuleNames homeModule homeModules moduleInfo)
@@ -398,9 +401,12 @@ getExportedHomeModuleOccAliases homeModule homeModules moduleInfo typedModuleFac
     Set.union
     (moduleDefinedAliases <> reexportedHomeModuleAliases)
   where
+    nameFacts =
+      typedModuleFacts.typedNameFacts
+
     moduleDefinedAliases =
       [ (name, normalizeOccAliases aliases)
-      | (name, aliases) <- Map.toList (typedExportedOccAliases typedModuleFacts)
+      | (name, aliases) <- Map.toList nameFacts.typedExportedOccAliases
       ]
 
     reexportedHomeModuleAliases =
@@ -422,7 +428,7 @@ reexportedHomeModuleNames homeModule homeModules moduleInfo =
 getDefinedHomeModuleNames :: GHC.Module -> MinimalTypedModuleFacts -> Set.Set GHC.Name
 getDefinedHomeModuleNames homeModule typedModuleFacts =
   Set.fromList
-    (filter isDefinedInCurrentModule (typedDefinitionNames typedModuleFacts))
+    (filter isDefinedInCurrentModule typedModuleFacts.typedNameFacts.typedDefinitionNames)
   where
     isDefinedInCurrentModule name =
       case GHC.nameModule_maybe name of
@@ -437,7 +443,7 @@ getDefinedHomeModuleOccAliases homeModule typedModuleFacts =
       Map.fromListWith
         Set.union
         [ (name, normalizeOccAliases aliases)
-        | (name, aliases) <- Map.toList (typedDefinitionOccAliases typedModuleFacts),
+        | (name, aliases) <- Map.toList typedModuleFacts.typedNameFacts.typedDefinitionOccAliases,
           GHC.nameModule_maybe name == Just homeModule
         ]
 

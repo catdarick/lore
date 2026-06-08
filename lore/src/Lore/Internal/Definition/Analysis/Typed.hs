@@ -32,19 +32,23 @@ buildMinimalTypedModuleFacts ::
   GHC.Tc.TcGblEnv ->
   MinimalTypedModuleFacts
 buildMinimalTypedModuleFacts definingModule tcg =
-  let familyInstanceNames =
-        collectFamilyInstanceNames definingModule tcg
-      instanceNames =
-        collectClassInstanceNames definingModule tcg <> familyInstanceNames
-   in MinimalTypedModuleFacts
-        { typedDefinitionNames = collectDefinitionCandidateNames definingModule tcg,
-          typedInstanceNames = instanceNames,
-          typedInstanceHeadTypeNamesByInstance = collectInstanceHeadTypeNamesByInstance definingModule tcg,
-          typedDefinitionOccAliases = collectDefinitionOccAliases definingModule tcg,
-          typedExportedNames = collectExportedNames definingModule tcg,
-          typedExportedOccAliases = collectExportedOccAliases definingModule tcg,
-          typedOccurrences = collectMinimalTypedOccurrences tcg
-        }
+  MinimalTypedModuleFacts
+    { typedNameFacts =
+        TypedNameFacts
+          { typedDefinitionNames = collectDefinitionCandidateNames definingModule tcg,
+            typedDefinitionOccAliases = collectDefinitionOccAliases definingModule tcg,
+            typedExportedNames = collectExportedNames definingModule tcg,
+            typedExportedOccAliases = collectExportedOccAliases definingModule tcg
+          },
+      typedDefinitionFacts =
+        TypedDefinitionFacts
+          { typedOccurrences = collectMinimalTypedOccurrences tcg
+          },
+      typedInstanceFacts =
+        TypedInstanceFacts
+          { typedInstanceHeadTypeNamesByInstance = collectInstanceHeadTypeNamesByInstance definingModule tcg
+          }
+    }
 
 collectDefinitionCandidateNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
 collectDefinitionCandidateNames homeModule tcg =

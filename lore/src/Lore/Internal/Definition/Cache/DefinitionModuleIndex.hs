@@ -1,9 +1,9 @@
 module Lore.Internal.Definition.Cache.DefinitionModuleIndex
   ( DefinitionModuleIndexCache (..),
-    CachedDefinitionModuleIndex (..),
     emptyDefinitionModuleIndexCache,
     getCachedDefinitionModuleIndex,
     getCachedDefinitionModuleIndexes,
+    getCachedDefinitionModuleIndexesConcurrently,
     lookupDefinitionModuleIndexCache,
     storeDefinitionModuleIndexCache,
     storeDefinitionModuleIndexCacheInContext,
@@ -18,11 +18,10 @@ import Control.Monad.Reader (asks)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
 import qualified GHC.Plugins as GHC
-import Lore.Internal.Cache.Types (CacheLookup (..))
 import Lore.Internal.Definition.Analysis (buildDefinitionModuleIndex)
 import Lore.Internal.Definition.Cache.ModuleArtifacts (DefinitionModuleArtifacts (..), lookupDefinitionModuleArtifacts)
 import Lore.Internal.Definition.Cache.Types
-  ( CachedDefinitionModuleIndex (..),
+  ( DefinitionIndexStatus (..),
     DefinitionModuleIndexCache (..),
   )
 import Lore.Internal.Definition.Types
@@ -31,7 +30,8 @@ import Lore.Internal.Definition.Types
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
-import UnliftIO (modifyMVar, modifyMVar_)
+import UnliftIO (modifyMVar, modifyMVar_, readMVar)
+import qualified UnliftIO.Async as Async
 
 emptyDefinitionModuleIndexCache :: DefinitionModuleIndexCache
 emptyDefinitionModuleIndexCache =
@@ -45,9 +45,11 @@ getCachedDefinitionModuleIndex ::
 getCachedDefinitionModuleIndex modSummaries homeModule = do
   cachedModuleIndex <- lookupDefinitionModuleIndexCache homeModule
   case cachedModuleIndex of
-    CacheHit moduleIndex ->
-      pure moduleIndex
-    CacheMiss -> do
+    Just (DefinitionIndexAvailable moduleIndex) ->
+      pure (Just moduleIndex)
+    Just DefinitionIndexUnavailable ->
+      pure Nothing
+    Nothing -> do
       maybePreparedModuleIndex <- buildDefinitionModuleIndexFromCachedArtifacts modSummaries homeModule
       storeDefinitionModuleIndexCache homeModule maybePreparedModuleIndex
       pure maybePreparedModuleIndex
@@ -60,20 +62,27 @@ getCachedDefinitionModuleIndexes ::
 getCachedDefinitionModuleIndexes modSummaries homeModules =
   catMaybes <$> traverse (getCachedDefinitionModuleIndex modSummaries) homeModules
 
+getCachedDefinitionModuleIndexesConcurrently ::
+  (MonadLore m) =>
+  Int ->
+  Map.Map GHC.Module GHC.ModSummary ->
+  [GHC.Module] ->
+  m [DefinitionModuleIndex]
+getCachedDefinitionModuleIndexesConcurrently workerCount modSummaries homeModules =
+  catMaybes
+    <$> Async.pooledMapConcurrentlyN
+      workerCount
+      (getCachedDefinitionModuleIndex modSummaries)
+      homeModules
+
 lookupDefinitionModuleIndexCache ::
   (MonadLore m) =>
   GHC.Module ->
-  m (CacheLookup (Maybe DefinitionModuleIndex))
+  m (Maybe DefinitionIndexStatus)
 lookupDefinitionModuleIndexCache homeModule = do
   cacheVar <- asks definitionModuleIndexCacheVar
-  modifyMVar cacheVar $ \cacheState@(DefinitionModuleIndexCache moduleIndexes) ->
-    pure
-      ( cacheState,
-        case Map.lookup homeModule moduleIndexes of
-          Nothing -> CacheMiss
-          Just (CachedDefinitionModuleIndexAvailable moduleIndex) -> CacheHit (Just moduleIndex)
-          Just CachedDefinitionModuleIndexUnavailable -> CacheHit Nothing
-      )
+  DefinitionModuleIndexCache moduleIndexes <- readMVar cacheVar
+  pure (Map.lookup homeModule moduleIndexes)
 
 buildDefinitionModuleIndexFromCachedArtifacts ::
   (MonadLore m) =>
@@ -111,12 +120,14 @@ storeDefinitionModuleIndexCacheInContext ::
 storeDefinitionModuleIndexCacheInContext sessionContext homeModule maybeModuleIndex =
   modifyMVar_ (definitionModuleIndexCacheVar sessionContext) \(DefinitionModuleIndexCache moduleIndexes) ->
     evaluate
-      (DefinitionModuleIndexCache (Map.insert homeModule cachedIndex moduleIndexes))
+      (DefinitionModuleIndexCache (Map.insert homeModule status moduleIndexes))
   where
-    cachedIndex =
+    status =
       case maybeModuleIndex of
-        Just moduleIndex -> CachedDefinitionModuleIndexAvailable moduleIndex
-        Nothing -> CachedDefinitionModuleIndexUnavailable
+        Just moduleIndex ->
+          DefinitionIndexAvailable moduleIndex
+        Nothing ->
+          DefinitionIndexUnavailable
 
 invalidateDefinitionModuleIndexCacheForModuleInContext :: SessionContext -> GHC.Module -> IO ()
 invalidateDefinitionModuleIndexCacheForModuleInContext sessionContext homeModule =

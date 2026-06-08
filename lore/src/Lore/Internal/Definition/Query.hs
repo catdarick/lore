@@ -1,7 +1,6 @@
 module Lore.Internal.Definition.Query
   ( resolveDefinitionSourceWithSummaries,
-    resolveDefinitionDependencyNames,
-    resolveDefinitionClosureSourcesWithSummaries,
+    resolveDefinitionClosureSources,
     resolveReferenceMatchesForNamesWithSummaries,
     matchingReferenceMatches,
     forceReferenceMatchesForRendering,
@@ -17,8 +16,16 @@ import qualified GHC.Plugins as GHC
 import Lore.Internal.Definition.Cache.DefinitionModuleIndex (getCachedDefinitionModuleIndex, getCachedDefinitionModuleIndexes)
 import Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex (getCachedParsedOccurrenceModuleIndex, lookupModulesForOccurrenceKeys)
 import qualified Lore.Internal.Definition.Index as DefinitionIndex
+import Lore.Internal.Definition.ProjectIndex
+  ( DefinitionTarget (..),
+    ProjectDefinitionIndex,
+    loadProjectDefinitionIndex,
+    lookupDefinitionSource,
+    lookupDefinitionTarget,
+  )
+import Lore.Internal.Definition.Reachability (reachableNamedTargets)
 import Lore.Internal.Definition.Timing (withTimedSection)
-import Lore.Internal.Definition.Types (DefinitionDependencies (..), DefinitionId, DefinitionModuleIndex, DefinitionSource (..), NamedDefinitionSource (..), ParsedOccurrenceModuleIndex (..), ReferenceMatch (..), nameOccKey)
+import Lore.Internal.Definition.Types (DefinitionModuleIndex, DefinitionSource (..), NamedDefinitionSource (..), ParsedOccurrenceModuleIndex (..), ReferenceMatch (..), definitionSourceModule, nameOccKey)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import UnliftIO (pooledForConcurrently)
@@ -37,97 +44,42 @@ resolveDefinitionSourceWithSummaries modSummaries inputName =
       pure $
         maybeModuleIndex >>= DefinitionIndex.lookupDefinitionSourceByName inputName
 
-resolveDefinitionDependencyNames ::
+resolveDefinitionClosureSources ::
   (MonadLore m) =>
-  Map.Map GHC.Module GHC.ModSummary ->
-  GHC.Name ->
-  DefinitionSource ->
-  m [GHC.Name]
-resolveDefinitionDependencyNames modSummaries referenceName source = do
-  maybeModuleIndex <- getCachedDefinitionModuleIndex modSummaries source.definitionSourceModule
-  pure $
-    maybe
-      []
-      ( \moduleIndex ->
-          let dependencies =
-                DefinitionIndex.lookupDefinitionDependenciesOrEmpty source.definitionSourceId moduleIndex
-              directReferenceNames =
-                selectDependencyNames
-                  referenceName
-                  dependencies.dependencyDirectReferenceNamesByReferenceName
-              usedInstanceNames =
-                selectDependencyNames
-                  referenceName
-                  dependencies.dependencyUsedInstanceNamesByReferenceName
-           in Set.toList (directReferenceNames <> usedInstanceNames)
-      )
-      maybeModuleIndex
-  where
-    selectDependencyNames queriedName dependencyNamesByReferenceName =
-      Map.findWithDefault Set.empty queriedName dependencyNamesByReferenceName
-
-resolveDefinitionClosureSourcesWithSummaries ::
-  (MonadLore m) =>
-  Map.Map GHC.Module GHC.ModSummary ->
   Int ->
   GHC.Name ->
   m [NamedDefinitionSource]
-resolveDefinitionClosureSourcesWithSummaries modSummaries maxDepth inputName = do
-  let depth = max 0 maxDepth
-  (_, sourceBuilder) <- go depth inputName Set.empty
-  pure (sourceBuilder [])
+resolveDefinitionClosureSources maxDepth inputName = do
+  projectIndex <- loadProjectDefinitionIndex
+  pure $
+    case lookupDefinitionTarget projectIndex inputName of
+      Nothing ->
+        []
+      Just root ->
+        mapMaybeTargetSource projectIndex $
+          dependencyFirstTargets $
+            reachableNamedTargets maxDepth projectIndex [root]
   where
-    -- Closure output is dependency-first: nested dependencies come before dependents,
-    -- and the queried root comes last when depth allows recursion.
-    go ::
-      (MonadLore m) =>
-      Int ->
-      GHC.Name ->
-      Set.Set DefinitionId ->
-      m (Set.Set DefinitionId, [NamedDefinitionSource] -> [NamedDefinitionSource])
-    go depth name seen = do
-      maybeSource <- resolveDefinitionSourceWithSummaries modSummaries name
-      case maybeSource of
-        Nothing ->
-          pure (seen, id)
-        Just source ->
-          let definitionId = source.definitionSourceId
-           in if Set.member definitionId seen
-                then pure (seen, id)
-                else
-                  if depth == 0
-                    then pure (Set.insert definitionId seen, (namedSource name source :))
-                    else do
-                      let seen' = Set.insert definitionId seen
-                      dependencyNames <- resolveDefinitionDependencyNames modSummaries name source
-                      (seenAfterDependencies, dependencySourceBuilder) <-
-                        collectDependencies (go (depth - 1)) seen' dependencyNames
-                      pure
-                        ( seenAfterDependencies,
-                          dependencySourceBuilder . (namedSource name source :)
-                        )
+    dependencyFirstTargets =
+      reverse
 
-    namedSource name source =
+    mapMaybeTargetSource :: ProjectDefinitionIndex -> [DefinitionTarget] -> [NamedDefinitionSource]
+    mapMaybeTargetSource projectIndex =
+      foldr collectSource []
+      where
+        collectSource :: DefinitionTarget -> [NamedDefinitionSource] -> [NamedDefinitionSource]
+        collectSource target sources =
+          case lookupDefinitionSource projectIndex target.definitionTargetId of
+            Nothing ->
+              sources
+            Just source ->
+              namedSource target source : sources
+
+    namedSource target source =
       NamedDefinitionSource
-        { definitionName = name,
+        { definitionName = target.definitionTargetName,
           definitionSource = source
         }
-
-    collectDependencies ::
-      (MonadLore m) =>
-      (GHC.Name -> Set.Set DefinitionId -> m (Set.Set DefinitionId, [NamedDefinitionSource] -> [NamedDefinitionSource])) ->
-      Set.Set DefinitionId ->
-      [GHC.Name] ->
-      m (Set.Set DefinitionId, [NamedDefinitionSource] -> [NamedDefinitionSource])
-    collectDependencies _ seen [] =
-      pure (seen, id)
-    collectDependencies resolve seen (dependencyName : remainingNames) = do
-      (seenAfterDependency, dependencySourceBuilder) <- resolve dependencyName seen
-      (seenAfterRemaining, remainingSourceBuilder) <- collectDependencies resolve seenAfterDependency remainingNames
-      pure
-        ( seenAfterRemaining,
-          dependencySourceBuilder . remainingSourceBuilder
-        )
 
 resolveReferenceMatchesForNamesWithSummaries ::
   (MonadLore m) =>
@@ -161,7 +113,7 @@ forceReferenceMatchesForRendering matches =
   where
     forceMatches [] = ()
     forceMatches (referenceMatch : restMatches) =
-      referenceMatch.referenceMatchDefinition.definitionSourceModule `deepseq`
+      definitionSourceModule referenceMatch.referenceMatchDefinition `deepseq`
         referenceMatch.referenceMatchDefinition.definitionSourceSpans `deepseq`
           referenceMatch.referenceMatchOccurrences `deepseq`
             forceMatches restMatches

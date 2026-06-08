@@ -4,15 +4,18 @@ import Control.Applicative ((<|>))
 import Control.Monad (void)
 import Data.List (find, intercalate, isInfixOf, nub, sort, sortOn)
 import Data.Maybe (mapMaybe, maybeToList)
+import qualified Data.Set as Set
 import Data.Text (pack)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC
 import qualified GHC.Plugins
-import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), DefinitionSource (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..), declarationSpans, mergeDefinitionSlices, resolveDefinitionClosureSourcesNamed, resolveDefinitionSourceNamed, resolveReferenceMatchesForNames)
+import Lore.Definition (DeclarationSpans (..), DefinitionSlice (..), DefinitionSource (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..), declarationSpans, definitionSourceModule, mergeDefinitionSlices, resolveDefinitionClosureSourcesNamed, resolveDefinitionSourceNamed, resolveReferenceMatchesForNames)
 import Lore.Definition.RenderSlice (definitionSourceToRenderSlice)
 import Lore.HomeModules (defaultLoadHomeModulesOptions)
 import qualified Lore.HomeModules as HomeModules
+import Lore.Internal.Definition.ProjectIndex (DefinitionTarget (..), dependenciesForNamedTarget, loadProjectDefinitionIndex, lookupDefinitionSource, lookupDefinitionTarget)
+import Lore.Internal.Definition.Reachability (walkReachable)
 import Lore.List (maximumMaybe, minimumMaybe)
 import Lore.Lookup (Symbol (..))
 import Lore.Monad (MonadLore)
@@ -26,6 +29,19 @@ loadHomeModules options = void (HomeModules.loadHomeModules options)
 
 spec :: Spec
 spec = withFixtureSpec do
+  describe "walkReachable" do
+    it "deduplicates roots while preserving first root ordering" \_fixture -> do
+      walkReachable (Just 0) (const []) (["a", "b", "a", "c", "b"] :: [String])
+        `shouldBe` ["a", "b", "c"]
+
+    it "preserves breadth-first queue ordering for broad dependencies" \_fixture -> do
+      let neighbours :: String -> [String]
+          neighbours "root" = map show [1 :: Int .. 5]
+          neighbours _ = []
+
+      walkReachable (Just 1) neighbours (["root"] :: [String])
+        `shouldBe` ["root", "1", "2", "3", "4", "5"]
+
   describe "resolveDefinitionSourceNamed + renderDefinitionSourceSlice" do
     it "resolves declaration spans for a symbol" \fixture -> do
       slice <- fixtureDefinition fixture "lookupOrZero"
@@ -208,6 +224,25 @@ spec = withFixtureSpec do
                                           ]
                                         )
                                       ]
+
+    it "resolves cross-module dependency targets from the merged project catalog" \fixture -> do
+      (dependencyNames, allSourcesResolved) <-
+        fixtureLore fixture do
+          loadHomeModules defaultLoadHomeModulesOptions
+          exportedSymbols <- findSymbols "crossModuleRecord"
+          targetName <- maybe (error "symbol not found: crossModuleRecord") pure (findFixtureSymbol "crossModuleRecord" exportedSymbols)
+          projectIndex <- loadProjectDefinitionIndex
+          target <- maybe (error "project target not found: crossModuleRecord") pure (lookupDefinitionTarget projectIndex targetName)
+          let dependencies = Set.toList (dependenciesForNamedTarget projectIndex target)
+          pure
+            ( map dependencyOccName dependencies,
+              all (\dependency -> lookupDefinitionSource projectIndex (definitionTargetId dependency) /= Nothing) dependencies
+            )
+
+      dependencyNames `shouldContain` ["SupportRecord"]
+      dependencyNames `shouldContain` ["mkSupportRecord"]
+      dependencyNames `shouldContain` ["supportStep"]
+      allSourcesResolved `shouldBe` True
 
     it "recurses through dependencies of the directly referenced constructor, not all constructors on the root declaration" \fixture -> do
       withFixtureCopy fixture \fixtureRoot -> do
@@ -526,7 +561,7 @@ spec = withFixtureSpec do
           exportedSymbols <- findSymbols "crossModuleRecord"
           targetName <- maybe (error "symbol not found: crossModuleRecord") pure (findFixtureSymbol "crossModuleRecord" exportedSymbols)
           namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
-          pure (map (GHC.moduleNameString . GHC.moduleName . (.definitionSource.definitionSourceModule)) namedSources)
+          pure (map (GHC.moduleNameString . GHC.moduleName . definitionSourceModule . (.definitionSource)) namedSources)
 
       last moduleOrder `shouldBe` "Demo"
       "Demo.Support" `shouldSatisfy` (`elem` moduleOrder)
@@ -632,6 +667,56 @@ spec = withFixtureSpec do
                                         )
                                       ]
 
+    it "traverses two reached names on the same declaration independently" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "SharedReachedBinders.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile sharedReachedBindersFixtureModuleSource
+
+        (occNames, closure) <-
+          fixtureLoreAt fixture fixtureRoot do
+            loadHomeModules defaultLoadHomeModulesOptions
+            exportedSymbols <- findSymbols "TestClosure.SharedReachedBinders.root"
+            targetName <-
+              maybe
+                (error "symbol not found: TestClosure.SharedReachedBinders.root")
+                pure
+                (findFixtureSymbolInModule "TestClosure.SharedReachedBinders" "root" exportedSymbols)
+            namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+            rendered <- renderDefinitionClosureSlices namedSources
+            pure (map (GHC.Plugins.getOccString . definitionName) namedSources, rendered)
+
+        occNames `shouldContain` ["memberA"]
+        occNames `shouldContain` ["memberB"]
+        closure
+          `shouldHaveModuleDefinitions` [ ( "TestClosure.SharedReachedBinders",
+                                            [ "data TypeA = TypeA",
+                                              "data TypeB = TypeB",
+                                              "data Box\n  = BoxA TypeA\n  | BoxB TypeB",
+                                              "memberA, memberB :: Box\n(memberA, memberB) = (BoxA TypeA, BoxB TypeB)",
+                                              "root :: (Box, Box)\nroot = (memberA, memberB)"
+                                            ]
+                                          )
+                                        ]
+
+    it "applies depth boundaries while keeping shorter-path expansion available" \fixture -> do
+      withFixtureCopy fixture \fixtureRoot -> do
+        let moduleDir = fixtureRoot </> "src" </> "TestClosure"
+            moduleFile = moduleDir </> "DepthBoundaries.hs"
+        createDirectoryIfMissing True moduleDir
+        TIO.writeFile moduleFile depthBoundaryFixtureModuleSource
+
+        depthZero <- fixtureClosureOccNamesInModule fixture fixtureRoot "TestClosure.DepthBoundaries" "root" 0
+        depthOne <- fixtureClosureOccNamesInModule fixture fixtureRoot "TestClosure.DepthBoundaries" "root" 1
+        depthTwo <- fixtureClosureOccNamesInModule fixture fixtureRoot "TestClosure.DepthBoundaries" "root" 2
+        depthThree <- fixtureClosureOccNamesInModule fixture fixtureRoot "TestClosure.DepthBoundaries" "root" 3
+
+        depthZero `shouldBe` ["root"]
+        depthOne `shouldMatchList` ["direct", "root"]
+        depthTwo `shouldMatchList` ["direct", "leaf", "root"]
+        depthThree `shouldMatchList` ["direct", "leaf", "root"]
+
   describe "resolveReferenceDefinitions" do
     it "finds top-level definitions and instance definitions that reference the target" \fixture -> do
       withFixtureCopy fixture \fixtureRoot -> do
@@ -715,7 +800,7 @@ spec = withFixtureSpec do
 
         case referenceMatches of
           [referenceMatch] -> do
-            GHC.moduleNameString (GHC.moduleName referenceMatch.referenceMatchDefinition.definitionSourceModule) `shouldBe` "TestRefs.Snippet"
+            GHC.moduleNameString (GHC.moduleName (definitionSourceModule referenceMatch.referenceMatchDefinition)) `shouldBe` "TestRefs.Snippet"
             sort (mapMaybe matchedSpanStartLine (referenceMatchExactSpans referenceMatch)) `shouldBe` [11, 12, 13]
           other ->
             expectationFailure ("expected a single definition-level reference match, got: " <> show (length other))
@@ -825,7 +910,7 @@ renderedModuleDefinitionSource :: DefinitionSource -> IO (String, [String])
 renderedModuleDefinitionSource source = do
   text <- definitionTextFromSpans source.definitionSourceSpans
   pure
-    ( GHC.moduleNameString (GHC.moduleName source.definitionSourceModule),
+    ( GHC.moduleNameString (GHC.moduleName (definitionSourceModule source)),
       [text]
     )
 
@@ -891,6 +976,23 @@ fixtureDefinitionClosure fixture depth symbol =
     targetName <- maybe (error ("symbol not found: " <> symbol)) pure (findFixtureSymbol symbol exportedSymbols)
     namedSources <- resolveDefinitionClosureSourcesNamed depth targetName
     renderDefinitionClosureSlices namedSources
+
+fixtureClosureOccNamesInModule :: FixtureContext -> FilePath -> String -> String -> Int -> IO [String]
+fixtureClosureOccNamesInModule fixture fixtureRoot moduleName symbol depth =
+  fixtureLoreAt fixture fixtureRoot do
+    loadHomeModules defaultLoadHomeModulesOptions
+    exportedSymbols <- findSymbols (pack (moduleName <> "." <> symbol))
+    targetName <-
+      maybe
+        (error ("symbol not found: " <> moduleName <> "." <> symbol))
+        pure
+        (findFixtureSymbolInModule moduleName symbol exportedSymbols)
+    namedSources <- resolveDefinitionClosureSourcesNamed depth targetName
+    pure (map (GHC.Plugins.getOccString . definitionName) namedSources)
+
+dependencyOccName :: DefinitionTarget -> String
+dependencyOccName =
+  GHC.Plugins.getOccString . definitionTargetName
 
 renderDefinitionSourceSlice :: (MonadLore m) => DefinitionSource -> m DefinitionSlice
 renderDefinitionSourceSlice source =
@@ -1177,6 +1279,45 @@ sharedGadtConstructorDependencyFixtureModuleSource =
       "",
       "useB :: T",
       "useB = B Foo"
+    ]
+
+sharedReachedBindersFixtureModuleSource :: T.Text
+sharedReachedBindersFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.SharedReachedBinders",
+      "  ( root",
+      "  ) where",
+      "",
+      "data TypeA = TypeA",
+      "",
+      "data TypeB = TypeB",
+      "",
+      "data Box",
+      "  = BoxA TypeA",
+      "  | BoxB TypeB",
+      "",
+      "memberA, memberB :: Box",
+      "(memberA, memberB) = (BoxA TypeA, BoxB TypeB)",
+      "",
+      "root :: (Box, Box)",
+      "root = (memberA, memberB)"
+    ]
+
+depthBoundaryFixtureModuleSource :: T.Text
+depthBoundaryFixtureModuleSource =
+  T.unlines
+    [ "module TestClosure.DepthBoundaries",
+      "  ( root",
+      "  ) where",
+      "",
+      "root :: Int",
+      "root = direct",
+      "",
+      "direct :: Int",
+      "direct = leaf",
+      "",
+      "leaf :: Int",
+      "leaf = direct"
     ]
 
 directGadtConstructorDependencyFixtureModuleSource :: T.Text

@@ -11,12 +11,13 @@ import Lore.Internal.Definition.Types
   ( DefinitionSource (..),
     DefinitionSourceTree (..),
     ParsedModuleFacts (..),
+    definitionSourceModule,
   )
 import Lore.Monad (MonadLore)
 
 getDefinitionSourceTree :: (MonadLore m) => DefinitionSource -> m (Maybe DefinitionSourceTree)
 getDefinitionSourceTree source = do
-  maybeParsedFacts <- lookupParsedModuleFactsCache source.definitionSourceModule
+  maybeParsedFacts <- lookupParsedModuleFactsCache (definitionSourceModule source)
   pure do
     parsedFacts <- maybeParsedFacts
     spans <- Map.lookup source.definitionSourceId parsedFacts.parsedDeclarationsById

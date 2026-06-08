@@ -12,7 +12,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Fingerprint (Fingerprint (..), fingerprintString)
 import qualified GHC.Plugins as GHC
-import Lore (DeclarationSpans (..), DefinitionId, DefinitionSource (..), MonadLore, NamedDefinitionSource (..))
+import Lore (DeclarationSpans (..), DefinitionId, DefinitionSource (..), MonadLore, NamedDefinitionSource (..), definitionSourceModule)
 import Lore.Mcp.Internal.Annotated (FieldType (..))
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Monad (MonadLoreMcp (..), sentDefinitionHashes)
@@ -154,7 +154,7 @@ definitionFingerprintIdentity definitionEntry declarationSpans =
 
 renderModuleName :: NamedDefinitionSource -> Text
 renderModuleName definitionEntry =
-  renderModuleNameFromModule definitionEntry.definitionSource.definitionSourceModule
+  renderModuleNameFromModule (definitionSourceModule definitionEntry.definitionSource)
 
 renderModuleNameFromModule :: GHC.Module -> Text
 renderModuleNameFromModule definitionModule =

@@ -61,6 +61,7 @@ module Lore
     DeadCodeResult (..),
     DefinitionId (..),
     DefinitionSource (..),
+    definitionSourceModule,
     -- Rendering DTO used by existing renderers.
     DefinitionSlice (..),
     ReferenceHit (..),

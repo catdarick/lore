@@ -2,33 +2,27 @@ module Lore.Internal.Definition.Analysis
   ( collectParsedOccurrenceNames,
     buildParsedModuleFacts,
     buildMinimalTypedModuleFacts,
-    buildDefinitionBindings,
+    buildDefinitionCatalog,
     buildDefinitionMemberIndexes,
     buildDefinitionOccurrences,
-    buildReferenceHitsByOccKey,
+    buildReferenceIndex,
     buildDependencies,
     buildDefinitionModuleIndex,
-    buildEvidenceDependenciesByBinder,
-    buildSemanticDependenciesByBinder,
+    buildCoreDependenciesByBinder,
   )
 where
 
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified GHC
-import Lore.Internal.Definition.Analysis.Bindings (buildDefinitionBindings)
-import Lore.Internal.Definition.Analysis.Core (buildEvidenceDependenciesByBinder, buildSemanticDependenciesByBinder)
+import Lore.Internal.Definition.Analysis.Bindings (buildDefinitionCatalog)
+import Lore.Internal.Definition.Analysis.Core (buildCoreDependenciesByBinder)
 import Lore.Internal.Definition.Analysis.Dependencies (buildDependencies)
 import Lore.Internal.Definition.Analysis.Members (buildDefinitionMemberIndexes)
-import Lore.Internal.Definition.Analysis.Occurrences (buildDefinitionOccurrences, buildReferenceHitsByOccKey)
+import Lore.Internal.Definition.Analysis.Occurrences (buildDefinitionOccurrences, buildReferenceIndex)
 import Lore.Internal.Definition.Analysis.Parsed (buildParsedModuleFacts, collectParsedOccurrenceNames)
 import Lore.Internal.Definition.Analysis.Typed (buildMinimalTypedModuleFacts)
 import Lore.Internal.Definition.Types
-
-data DefinitionAssembly = DefinitionAssembly
-  { assemblyBindings :: !DefinitionBindings,
-    assemblyMemberIndexes :: !(Map.Map DefinitionId DefinitionMemberIndex),
-    assemblyOccurrences :: !(Map.Map DefinitionId [DefinitionOccurrenceFact])
-  }
 
 buildDefinitionModuleIndex ::
   GHC.Module ->
@@ -38,37 +32,42 @@ buildDefinitionModuleIndex ::
   DefinitionModuleIndex
 buildDefinitionModuleIndex definingModule parsedFacts typedModuleFacts maybeCoreFacts =
   DefinitionModuleIndex
-    { definitionsById = assembly.assemblyBindings.bindingDefinitionsById,
-      definitionIdByName = assembly.assemblyBindings.bindingDefinitionIdByName,
-      referenceHitsByOccKey = buildReferenceHitsByOccKey assembly.assemblyOccurrences,
+    { definitionCatalog = catalog,
+      referenceIndex = buildReferenceIndex occurrencesById,
       dependenciesById =
         buildDependencies
-          assembly.assemblyBindings
-          assembly.assemblyMemberIndexes
-          assembly.assemblyOccurrences
-          maybeCoreFacts
+          catalog
+          memberIndexesById
+          occurrencesById
+          maybeCoreFacts,
+      instanceHeadTypeDefinitionIdsByInstance =
+        collectInstanceHeadTypeDefinitionIdsByInstance
+          catalog.definitionIdsByName
+          typedModuleFacts
     }
   where
-    assembly =
-      buildDefinitionAssembly definingModule parsedFacts typedModuleFacts
-
-buildDefinitionAssembly ::
-  GHC.Module ->
-  ParsedModuleFacts ->
-  MinimalTypedModuleFacts ->
-  DefinitionAssembly
-buildDefinitionAssembly definingModule parsedFacts typedModuleFacts =
-  DefinitionAssembly
-    { assemblyBindings = bindings,
-      assemblyMemberIndexes = memberIndexesById,
-      assemblyOccurrences = occurrencesById
-    }
-  where
-    bindings =
-      buildDefinitionBindings definingModule parsedFacts typedModuleFacts
+    catalog =
+      buildDefinitionCatalog parsedFacts typedModuleFacts
 
     memberIndexesById =
-      buildDefinitionMemberIndexes parsedFacts typedModuleFacts bindings
+      buildDefinitionMemberIndexes parsedFacts typedModuleFacts catalog
 
     occurrencesById =
-      buildDefinitionOccurrences definingModule typedModuleFacts bindings memberIndexesById
+      buildDefinitionOccurrences definingModule typedModuleFacts catalog memberIndexesById
+
+collectInstanceHeadTypeDefinitionIdsByInstance ::
+  Map.Map GHC.Name DefinitionId ->
+  MinimalTypedModuleFacts ->
+  Map.Map DefinitionId (Set.Set DefinitionId)
+collectInstanceHeadTypeDefinitionIdsByInstance definitionIdByName typedFacts =
+  Map.fromList
+    [ (instanceDefinitionId, headTypeDefinitionIds)
+    | (instanceName, headTypeNames) <- Map.toList typedFacts.typedInstanceFacts.typedInstanceHeadTypeNamesByInstance,
+      Just instanceDefinitionId <- [Map.lookup instanceName definitionIdByName],
+      let headTypeDefinitionIds =
+            Set.fromList
+              [ definitionId
+              | headTypeName <- Set.toList headTypeNames,
+                Just definitionId <- [Map.lookup headTypeName definitionIdByName]
+              ]
+    ]

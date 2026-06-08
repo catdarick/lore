@@ -52,7 +52,6 @@ library
       Lore.Internal.Lookup.TypeQuery
   other-modules:
       Lore.Internal.BuildTool.Environment
-      Lore.Internal.Cache.Types
       Lore.Internal.DeadCode
       Lore.Internal.Definition.Analysis
       Lore.Internal.Definition.Analysis.Bindings
@@ -66,14 +65,16 @@ library
       Lore.Internal.Definition.Cache.CoreModuleFacts
       Lore.Internal.Definition.Cache.DefinitionModuleIndex
       Lore.Internal.Definition.Cache.ModuleArtifacts
+      Lore.Internal.Definition.Cache.ModuleCache
       Lore.Internal.Definition.Cache.ParsedModuleFacts
       Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex
       Lore.Internal.Definition.Cache.TypedModuleFacts
       Lore.Internal.Definition.Cache.Types
       Lore.Internal.Definition.Callbacks
-      Lore.Internal.Definition.Graph
       Lore.Internal.Definition.Index
+      Lore.Internal.Definition.ProjectIndex
       Lore.Internal.Definition.Query
+      Lore.Internal.Definition.Reachability
       Lore.Internal.Definition.SourceTree
       Lore.Internal.Definition.Timing
       Lore.Internal.Definition.Types

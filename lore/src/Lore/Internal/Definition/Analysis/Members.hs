@@ -17,17 +17,17 @@ import Lore.Internal.List (minimumMaybe)
 buildDefinitionMemberIndexes ::
   ParsedModuleFacts ->
   MinimalTypedModuleFacts ->
-  DefinitionBindings ->
+  DefinitionCatalog ->
   Map.Map DefinitionId DefinitionMemberIndex
-buildDefinitionMemberIndexes parsedFacts typedModuleFacts bindings =
+buildDefinitionMemberIndexes parsedFacts typedModuleFacts catalog =
   Map.map
     ( \source ->
         resolveDefinitionMemberIndex
           source
           parsedFacts.parsedDefinitionMembersById
-          typedModuleFacts.typedDefinitionOccAliases
+          typedModuleFacts.typedNameFacts.typedDefinitionOccAliases
     )
-    bindings.bindingDefinitionsById
+    catalog.definitionSourcesById
 
 resolveDefinitionMemberIndex ::
   DefinitionSource ->

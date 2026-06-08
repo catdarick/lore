@@ -15,6 +15,10 @@ module Lore.Internal.Definition.Types
     DeclarationSpans (..),
     MinimalTypedOccurrence (..),
     MinimalTypedModuleFacts (..),
+    TypedNameFacts (..),
+    TypedDefinitionFacts (..),
+    TypedInstanceFacts (..),
+    typedInstanceNames,
     MinimalCoreModuleFacts (..),
     ParsedModuleFacts (..),
     ParsedDefinitionMember (..),
@@ -25,9 +29,11 @@ module Lore.Internal.Definition.Types
     SourceRegion (..),
     SourceRegionKind (..),
     DefinitionSource (..),
+    definitionSourceModule,
     DefinitionDependencies (..),
-    DefinitionBindings (..),
+    DefinitionCatalog (..),
     ReferenceHit (..),
+    ReferenceIndex (..),
     DefinitionOccurrenceFact (..),
     ReferenceMatch (..),
     ParsedOccurrenceModuleIndex (..),
@@ -158,21 +164,44 @@ data MinimalTypedOccurrence = MinimalTypedOccurrence
   deriving stock (Generic)
   deriving anyclass (NFData)
 
-data MinimalTypedModuleFacts = MinimalTypedModuleFacts
+data TypedNameFacts = TypedNameFacts
   { typedDefinitionNames :: ![GHC.Name],
-    typedInstanceNames :: ![GHC.Name],
-    -- | For each local instance binder, names of type constructors that appear
-    -- in instance-head argument types.
-    -- Dead-code policy: instance definitions are alive iff any of these head
-    -- type definitions is alive.
-    typedInstanceHeadTypeNamesByInstance :: !(Map.Map GHC.Name (Set.Set GHC.Name)),
     typedDefinitionOccAliases :: !(Map.Map GHC.Name (Set.Set Text)),
     typedExportedNames :: ![GHC.Name],
-    typedExportedOccAliases :: !(Map.Map GHC.Name (Set.Set Text)),
+    typedExportedOccAliases :: !(Map.Map GHC.Name (Set.Set Text))
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data TypedDefinitionFacts = TypedDefinitionFacts
+  { -- | Exact typed occurrences used by definition reference and dependency
+    -- producers.
     typedOccurrences :: ![MinimalTypedOccurrence]
   }
   deriving stock (Generic)
   deriving anyclass (NFData)
+
+data TypedInstanceFacts = TypedInstanceFacts
+  { -- | For each local instance binder, names of type constructors that appear
+    -- in instance-head argument types.
+    -- Dead-code policy: instance definitions are alive iff any of these head
+    -- type definitions is alive.
+    typedInstanceHeadTypeNamesByInstance :: !(Map.Map GHC.Name (Set.Set GHC.Name))
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+data MinimalTypedModuleFacts = MinimalTypedModuleFacts
+  { typedNameFacts :: !TypedNameFacts,
+    typedDefinitionFacts :: !TypedDefinitionFacts,
+    typedInstanceFacts :: !TypedInstanceFacts
+  }
+  deriving stock (Generic)
+  deriving anyclass (NFData)
+
+typedInstanceNames :: MinimalTypedModuleFacts -> Set.Set GHC.Name
+typedInstanceNames =
+  Map.keysSet . typedInstanceHeadTypeNamesByInstance . typedInstanceFacts
 
 data MinimalCoreModuleFacts = MinimalCoreModuleFacts
   { -- Used by definition-closure/query dependency expansion.
@@ -220,36 +249,31 @@ data SourceRegionCandidate = SourceRegionCandidate
 
 data DefinitionSource = DefinitionSource
   { definitionSourceId :: !DefinitionId,
-    definitionSourceModule :: !GHC.Module,
     definitionSourceNames :: !(Set.Set GHC.Name),
     definitionSourceSpans :: !DeclarationSpans
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
 
+definitionSourceModule :: DefinitionSource -> GHC.Module
+definitionSourceModule =
+  definitionIdModule . definitionSourceId
+
 data DefinitionDependencies = DefinitionDependencies
-  { -- | Compatibility aggregate derived from scoped map values.
-    -- Query-time recursion should use scoped maps directly.
-    dependencyDirectReferenceNames :: !(Set.Set GHC.Name),
-    -- | Compatibility aggregate derived from scoped map values.
-    -- Includes directly used instance dictionaries needed by definition-closure
-    -- expansion.
-    -- Query-time recursion should use scoped maps directly.
-    dependencyUsedInstanceNames :: !(Set.Set GHC.Name),
-    -- | Core-derived reachability dependencies for project-wide dead-code
-    -- analysis. These may be transitive across local top-level binders and are
-    -- intentionally separate from the direct evidence dependencies used by
-    -- definition-closure queries.
-    dependencyCoreSemanticNames :: ![GHC.Name],
-    dependencyDirectReferenceNamesByReferenceName :: !(Map.Map GHC.Name (Set.Set GHC.Name)),
-    dependencyUsedInstanceNamesByReferenceName :: !(Map.Map GHC.Name (Set.Set GHC.Name))
+  { -- | Member-sensitive closure dependencies keyed by the queried binder,
+    -- constructor, field, or method name.
+    dependencyClosureNamesByReferenceName :: !(Map.Map GHC.Name (Set.Set GHC.Name)),
+    -- | Definition-level reachability dependencies for project-wide dead-code
+    -- analysis. This intentionally excludes direct evidence dependencies so
+    -- graph reachability keeps the existing root-level semantics.
+    dependencyReachabilityNames :: !(Set.Set GHC.Name)
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
 
-data DefinitionBindings = DefinitionBindings
-  { bindingDefinitionsById :: !(Map.Map DefinitionId DefinitionSource),
-    bindingDefinitionIdByName :: !(Map.Map GHC.Name DefinitionId)
+data DefinitionCatalog = DefinitionCatalog
+  { definitionSourcesById :: !(Map.Map DefinitionId DefinitionSource),
+    definitionIdsByName :: !(Map.Map GHC.Name DefinitionId)
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
@@ -262,11 +286,16 @@ data ReferenceHit = ReferenceHit
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
 
+newtype ReferenceIndex = ReferenceIndex
+  { referencesByName :: Map.Map GHC.Name (Map.Map DefinitionId (Map.Map SpanKey GHC.SrcSpan))
+  }
+  deriving stock (Eq, Generic)
+  deriving anyclass (NFData)
+
 data DefinitionOccurrenceFact = DefinitionOccurrenceFact
   { occurrenceFactName :: !GHC.Name,
     occurrenceFactSpan :: !GHC.SrcSpan,
-    occurrenceFactOwners :: !(Set.Set GHC.Name),
-    occurrenceFactParent :: !(Maybe GHC.Name)
+    occurrenceFactOwners :: !(Set.Set GHC.Name)
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)
@@ -285,15 +314,14 @@ newtype ParsedOccurrenceModuleIndex = ParsedOccurrenceModuleIndex
   deriving anyclass (NFData)
 
 data DefinitionModuleIndex = DefinitionModuleIndex
-  { -- | Canonical source set for this module index.
-    definitionsById :: !(Map.Map DefinitionId DefinitionSource),
-    -- | Maps every known top-level definition name to an id in 'definitionsById'.
-    definitionIdByName :: !(Map.Map GHC.Name DefinitionId),
-    -- | Candidate reference index grouped by occurrence key.
-    -- Exact 'GHC.Name' filtering is still required at query time.
-    referenceHitsByOccKey :: !(Map.Map OccKey [ReferenceHit]),
-    -- | Definition dependencies keyed by ids from 'definitionsById'.
-    dependenciesById :: !(Map.Map DefinitionId DefinitionDependencies)
+  { -- | Canonical source catalog for this module index.
+    definitionCatalog :: !DefinitionCatalog,
+    -- | Exact-name reference index for this typed module.
+    referenceIndex :: !ReferenceIndex,
+    -- | Definition dependencies keyed by ids from 'definitionCatalog'.
+    dependenciesById :: !(Map.Map DefinitionId DefinitionDependencies),
+    -- | Instance-head type dependencies keyed by local instance definition ids.
+    instanceHeadTypeDefinitionIdsByInstance :: !(Map.Map DefinitionId (Set.Set DefinitionId))
   }
   deriving stock (Eq, Generic)
   deriving anyclass (NFData)

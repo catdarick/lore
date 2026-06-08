@@ -1,11 +1,12 @@
 {-# LANGUAGE DeriveAnyClass #-}
 
 module Lore.Internal.Definition.Cache.Types
-  ( ParsedModuleFactsCache (..),
-    TypedModuleFactsCache (..),
-    CoreModuleFactsCache (..),
+  ( ModuleCache (..),
+    ParsedModuleFactsCache,
+    TypedModuleFactsCache,
+    CoreModuleFactsCache,
     ParsedOccurrenceModuleIndexCache (..),
-    CachedDefinitionModuleIndex (..),
+    DefinitionIndexStatus (..),
     DefinitionModuleIndexCache (..),
   )
 where
@@ -16,23 +17,17 @@ import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
 import Lore.Internal.Definition.Types (DefinitionModuleIndex, MinimalCoreModuleFacts, MinimalTypedModuleFacts, ParsedModuleFacts, ParsedOccurrenceModuleIndex)
 
-newtype ParsedModuleFactsCache = ParsedModuleFactsCache
-  { cachedParsedModuleFactsByModule :: Map.Map GHC.Module ParsedModuleFacts
+newtype ModuleCache a = ModuleCache
+  { moduleCacheEntries :: Map.Map GHC.Module a
   }
   deriving stock (Generic)
   deriving anyclass (NFData)
 
-newtype TypedModuleFactsCache = TypedModuleFactsCache
-  { cachedTypedModuleFactsByModule :: Map.Map GHC.Module MinimalTypedModuleFacts
-  }
-  deriving stock (Generic)
-  deriving anyclass (NFData)
+type ParsedModuleFactsCache = ModuleCache ParsedModuleFacts
 
-newtype CoreModuleFactsCache = CoreModuleFactsCache
-  { cachedCoreModuleFactsByModule :: Map.Map GHC.Module MinimalCoreModuleFacts
-  }
-  deriving stock (Generic)
-  deriving anyclass (NFData)
+type TypedModuleFactsCache = ModuleCache MinimalTypedModuleFacts
+
+type CoreModuleFactsCache = ModuleCache MinimalCoreModuleFacts
 
 newtype ParsedOccurrenceModuleIndexCache = ParsedOccurrenceModuleIndexCache
   { cachedParsedOccurrenceModuleIndex :: Maybe ParsedOccurrenceModuleIndex
@@ -40,12 +35,12 @@ newtype ParsedOccurrenceModuleIndexCache = ParsedOccurrenceModuleIndexCache
   deriving stock (Generic)
   deriving anyclass (NFData)
 
-data CachedDefinitionModuleIndex
-  = CachedDefinitionModuleIndexAvailable DefinitionModuleIndex
-  | CachedDefinitionModuleIndexUnavailable
-  deriving stock (Eq, Generic)
+data DefinitionIndexStatus
+  = DefinitionIndexUnavailable
+  | DefinitionIndexAvailable DefinitionModuleIndex
+  deriving stock (Generic)
 
 newtype DefinitionModuleIndexCache = DefinitionModuleIndexCache
-  { cachedDefinitionModuleIndexes :: Map.Map GHC.Module CachedDefinitionModuleIndex
+  { cachedDefinitionModuleIndexes :: Map.Map GHC.Module DefinitionIndexStatus
   }
   deriving stock (Generic)

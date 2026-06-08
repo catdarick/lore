@@ -7,6 +7,7 @@ module Lore.Definition
     mergeDefinitionSlices,
     DefinitionId (..),
     DefinitionSource (..),
+    definitionSourceModule,
     -- Rendering DTO used by existing renderers.
     DefinitionSlice (..),
     NamedDefinitionSource (..),
@@ -22,7 +23,7 @@ import qualified GHC.Plugins as GHC
 import Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex (lookupModulesForOccurrenceKeys)
 import qualified Lore.Internal.Definition.Query as DefinitionQuery
 import Lore.Internal.Definition.Timing (withTimedSection)
-import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionId (..), DefinitionSlice (..), DefinitionSource (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..))
+import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionId (..), DefinitionSlice (..), DefinitionSource (..), NamedDefinitionSource (..), ReferenceHit (..), ReferenceMatch (..), definitionSourceModule)
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import qualified Lore.Logger as Log
@@ -46,9 +47,8 @@ resolveReferenceMatchesForNames targetNames = do
   pure forcedMatches
 
 resolveDefinitionClosureSourcesNamed :: (MonadLore m) => Int -> GHC.Name -> m [NamedDefinitionSource]
-resolveDefinitionClosureSourcesNamed maxDepth inputName = do
-  ModSummaries modSummaries <- getCachedModSummaries
-  DefinitionQuery.resolveDefinitionClosureSourcesWithSummaries modSummaries maxDepth inputName
+resolveDefinitionClosureSourcesNamed maxDepth inputName =
+  DefinitionQuery.resolveDefinitionClosureSources maxDepth inputName
 
 mergeDefinitionSlices :: [DefinitionSlice] -> Maybe DefinitionSlice
 mergeDefinitionSlices [] = Nothing

@@ -20,6 +20,7 @@ import Lore
     DefinitionId (..),
     DefinitionSource (..),
     NamedDefinitionSource (..),
+    definitionSourceModule,
   )
 import Lore.Definition.RenderSlice (definitionSourceToRenderSlice)
 import Lore.Tools.Render.Doc (SourceFile)
@@ -130,7 +131,7 @@ definitionSourceSortKey definitionEntry =
       )
   where
     moduleName =
-      GHC.moduleNameString (GHC.moduleName definitionEntry.definitionSource.definitionSourceModule)
+      GHC.moduleNameString (GHC.moduleName (definitionSourceModule definitionEntry.definitionSource))
 
 definitionIdSortKey :: DefinitionId -> Text
 definitionIdSortKey definitionId =

@@ -7,13 +7,13 @@ module Lore.Internal.Definition.SourceTree
   )
 where
 
-import Data.Data (Data, Typeable, cast, gmapQ)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List (minimumBy, sortOn)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (mapMaybe, maybeToList)
+import Data.Maybe (mapMaybe)
 import qualified GHC
 import qualified GHC.Plugins as GHC
+import Lore.Internal.Definition.Analysis.Common (collectTyped)
 import Lore.Internal.Definition.Types
   ( DeclarationSpans (..),
     DefinitionSourceTree (..),
@@ -222,10 +222,3 @@ locatedASpan = GHC.getLocA
 
 grhsSpan :: GHC.LGRHS GHC.GhcPs (GHC.LHsExpr GHC.GhcPs) -> GHC.SrcSpan
 grhsSpan = GHC.locA . GHC.getLoc
-
-collectTyped :: forall b a. (Typeable b, Data a) => a -> [b]
-collectTyped = go
-  where
-    go :: forall x. (Data x) => x -> [b]
-    go value =
-      maybeToList (cast value) <> concat (gmapQ go value)

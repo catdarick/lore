@@ -1,11 +1,11 @@
 module Lore.Internal.Definition.Analysis.Occurrences
   ( buildDefinitionOccurrences,
-    buildReferenceHitsByOccKey,
+    buildReferenceIndex,
     isFollowableReference,
   )
 where
 
-import qualified Data.List as List
+import Data.List (foldl')
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe, maybeToList)
 import qualified Data.Set as Set
@@ -17,11 +17,11 @@ import Lore.Internal.Definition.Types
 buildDefinitionOccurrences ::
   GHC.Module ->
   MinimalTypedModuleFacts ->
-  DefinitionBindings ->
+  DefinitionCatalog ->
   Map.Map DefinitionId DefinitionMemberIndex ->
   Map.Map DefinitionId [DefinitionOccurrenceFact]
-buildDefinitionOccurrences definingModule typedModuleFacts bindings memberIndexesById =
-  Map.map mkOccurrences bindings.bindingDefinitionsById
+buildDefinitionOccurrences definingModule typedModuleFacts catalog memberIndexesById =
+  Map.map mkOccurrences catalog.definitionSourcesById
   where
     mkOccurrences source =
       let memberIndex =
@@ -30,24 +30,23 @@ buildDefinitionOccurrences definingModule typedModuleFacts bindings memberIndexe
             definingModule
             source.definitionSourceSpans
             memberIndex
-            typedModuleFacts.typedOccurrences
+            typedModuleFacts.typedDefinitionFacts.typedOccurrences
 
-buildReferenceHitsByOccKey ::
+buildReferenceIndex ::
   Map.Map DefinitionId [DefinitionOccurrenceFact] ->
-  Map.Map OccKey [ReferenceHit]
-buildReferenceHitsByOccKey occurrencesById =
-  Map.fromListWith
-    (<>)
-    [ (nameOccKey referenceHit.referenceHitTargetName, [referenceHit])
-    | (definitionId, occurrences) <- Map.toList occurrencesById,
-      occurrence <- occurrences,
-      let referenceHit =
-            ReferenceHit
-              { referenceHitDefinitionId = definitionId,
-                referenceHitTargetName = occurrence.occurrenceFactName,
-                referenceHitExactSpan = occurrence.occurrenceFactSpan
-              }
-    ]
+  ReferenceIndex
+buildReferenceIndex occurrencesById =
+  ReferenceIndex $
+    Map.fromListWith
+      (Map.unionWith Map.union)
+      [ ( occurrence.occurrenceFactName,
+          Map.singleton
+            definitionId
+            (Map.singleton (srcSpanKey occurrence.occurrenceFactSpan) occurrence.occurrenceFactSpan)
+        )
+      | (definitionId, occurrences) <- Map.toList occurrencesById,
+        occurrence <- occurrences
+      ]
 
 collectDefinitionOccurrenceFacts ::
   GHC.Module ->
@@ -79,8 +78,7 @@ collectDefinitionOccurrenceFacts definingModule spans memberIndex typedOccurrenc
               chooseOccurrenceOwners
                 memberIndex
                 occurrence.typedOccurrenceParent
-                occurrence.typedOccurrenceSpan,
-            occurrenceFactParent = occurrence.typedOccurrenceParent
+                occurrence.typedOccurrenceSpan
           }
 
 isFollowableReference :: Set.Set GHC.Name -> DeclarationSpans -> GHC.Name -> Bool
@@ -108,13 +106,21 @@ definesName declarationSpan definingModule name =
 
 dedupeOccurrences :: [DefinitionOccurrenceFact] -> [DefinitionOccurrenceFact]
 dedupeOccurrences =
-  List.nubBy sameOccurrence
+  dedupeOn \occurrence ->
+    ( occurrence.occurrenceFactName,
+      srcSpanKey occurrence.occurrenceFactSpan,
+      occurrence.occurrenceFactOwners
+    )
+
+dedupeOn :: (Ord key) => (value -> key) -> [value] -> [value]
+dedupeOn keyOf =
+  reverse . snd . foldl' step (Set.empty, [])
   where
-    sameOccurrence left right =
-      left.occurrenceFactName == right.occurrenceFactName
-        && left.occurrenceFactSpan == right.occurrenceFactSpan
-        && left.occurrenceFactOwners == right.occurrenceFactOwners
-        && left.occurrenceFactParent == right.occurrenceFactParent
+    step (seen, values) value
+      | key `Set.member` seen = (seen, values)
+      | otherwise = (Set.insert key seen, value : values)
+      where
+        key = keyOf value
 
 spanWithin :: [GHC.SrcSpan] -> GHC.SrcSpan -> Bool
 spanWithin targetSpans span' =
