@@ -20,6 +20,8 @@ module Lore.Internal.Lookup.SymbolsMap
     invalidateExternalSymbolsIndexCache,
     findMatchingSymbolsInMap,
     findSimilarSymbolsInMap,
+    findSimilarSymbolsCandidatesInMap,
+    buildSimilarSymbolsSearchIndex,
   )
 where
 
@@ -44,18 +46,19 @@ import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
     HomeSymbolsIndexCache (..),
+    SimilarSymbolSearchKey (..),
     SimilarSymbolsSearchIndex (..),
     SimilarSymbolsSearchIndexCache (..),
     SymbolsDependencySetCache (..),
   )
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
-import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, extractAndNormalizeOccName, normalizeName, parseAndNormalizeName, unNormalizedOccName)
+import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, extractAndNormalizeOccName, normalizeName, parseAndNormalizeName, unNormalizedModuleName, unNormalizedOccName)
 import Lore.Internal.Lookup.Search.Score (buildSearchIndex, searchOccurrences)
-import Lore.Internal.Lookup.Search.Types (SearchResult (..), TokenSearchIndex)
+import Lore.Internal.Lookup.Search.Types (SearchDocument (..), SearchResult (..), TokenSearchIndex)
 import Lore.Internal.Lookup.Types
   ( ModSummaries (..),
     Symbol (..),
-    SymbolSuggestionCandidate (..),
+    SymbolSuggestion (..),
     SymbolVisibility (..),
     SymbolsIndex (..),
     SymbolsMap (..),
@@ -96,32 +99,29 @@ findMatchingSymbolsInMap targetName SymbolsMap {homeSymbolsMap, externalSymbolsM
     moduleMatchingSymbols =
       Set.filter (isModuleMatching targetName) (homeMatchingSymbols <> externalMatchingSymbols)
 
-findSimilarSymbolsInMap :: (MonadLore m) => Int -> NormalizedName -> SymbolsMap -> m [SymbolSuggestionCandidate]
-findSimilarSymbolsInMap suggestionLimit targetName symbolsMap = do
+findSimilarSymbolsInMap :: (MonadLore m) => NormalizedName -> SymbolsMap -> m [SymbolSuggestion]
+findSimilarSymbolsInMap targetName symbolsMap = do
   SimilarSymbolsSearchIndex cachedSearchIndex <- getCachedSimilarSymbolsSearchIndex symbolsMap
-  pure $ findSimilarSymbolsCandidatesInMap suggestionLimit targetName cachedSearchIndex
+  pure $ findSimilarSymbolsCandidatesInMap targetName cachedSearchIndex
 
 findSimilarSymbolsCandidatesInMap ::
-  Int ->
   NormalizedName ->
-  TokenSearchIndex NormalizedOccName (Set.Set Symbol) ->
-  [SymbolSuggestionCandidate]
-findSimilarSymbolsCandidatesInMap suggestionLimit targetName searchIndex =
-  mapMaybe mkSymbolSuggestionCandidate $
-    searchOccurrences suggestionLimit (unNormalizedOccName targetName.occName) searchIndex
+  TokenSearchIndex SimilarSymbolSearchKey Symbol ->
+  [SymbolSuggestion]
+findSimilarSymbolsCandidatesInMap targetName searchIndex =
+  mapMaybe mkSymbolSuggestion $
+    searchOccurrences (unNormalizedOccName targetName.occName) searchIndex
   where
-    mkSymbolSuggestionCandidate result =
-      let moduleMatchingSymbols =
-            Set.filter (isModuleMatching targetName) result.searchResultValue
-       in if Set.null moduleMatchingSymbols
-            then Nothing
-            else
-              Just
-                SymbolSuggestionCandidate
-                  { suggestionCandidateSymbols = moduleMatchingSymbols,
-                    suggestionCandidateLookupName = result.searchResultText,
-                    suggestionCandidateScore = result.searchResultScore
-                  }
+    mkSymbolSuggestion result
+      | isModuleMatching targetName result.searchResultValue =
+          Just
+            SymbolSuggestion
+              { suggestedSymbol = result.searchResultValue,
+                suggestedLookupName = result.searchResultText,
+                suggestionScore = result.searchResultScore
+              }
+      | otherwise =
+          Nothing
 
 combineSymbolsIndexes :: SymbolsMap -> SymbolsIndex
 combineSymbolsIndexes SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
@@ -130,11 +130,18 @@ combineSymbolsIndexes SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
     SymbolsIndex homeSymbols = homeSymbolsMap
     SymbolsIndex externalSymbols = externalSymbolsMap
 
-buildSimilarSymbolsSearchIndex :: SymbolsMap -> TokenSearchIndex NormalizedOccName (Set.Set Symbol)
+buildSimilarSymbolsSearchIndex :: SymbolsMap -> TokenSearchIndex SimilarSymbolSearchKey Symbol
 buildSimilarSymbolsSearchIndex symbolsMap =
   buildSearchIndex
-    [ (occName, unNormalizedOccName occName, symbols)
-    | (occName, symbols) <- Map.toList combinedSymbolsIndex
+    [ ( SimilarSymbolSearchKey {searchLookupName = occName, searchSymbolName = symbol.name},
+        SearchDocument
+          { primaryText = unNormalizedOccName occName,
+            secondaryTexts = maybe [] ((: []) . unNormalizedModuleName) (symbolDefiningModuleName symbol)
+          },
+        symbol
+      )
+    | (occName, symbols) <- Map.toList combinedSymbolsIndex,
+      symbol <- Set.toList symbols
     ]
   where
     SymbolsIndex combinedSymbolsIndex = combineSymbolsIndexes symbolsMap
@@ -147,10 +154,16 @@ isModuleMatching targetName symbol =
     Just hintedModule ->
       hintedModule `Set.member` symbolAssociatedModules
   where
-    symbolName = normalizeName symbol.name
-    definingModuleName = maybe Set.empty Set.singleton symbolName.moduleName
-    exportingModuleNames = Set.map extractAndNormalizeModuleName (symbolExportedFrom symbol)
-    symbolAssociatedModules = definingModuleName <> exportingModuleNames
+    symbolAssociatedModules = symbolAssociatedModuleNames symbol
+
+symbolAssociatedModuleNames :: Symbol -> Set.Set NormalizedModuleName
+symbolAssociatedModuleNames symbol =
+  maybe Set.empty Set.singleton (symbolDefiningModuleName symbol)
+    <> Set.map extractAndNormalizeModuleName (symbolExportedFrom symbol)
+
+symbolDefiningModuleName :: Symbol -> Maybe NormalizedModuleName
+symbolDefiningModuleName symbol =
+  (normalizeName symbol.name).moduleName
 
 invalidateHomeSymbolsIndexCache :: (MonadLore m) => m ()
 invalidateHomeSymbolsIndexCache = do

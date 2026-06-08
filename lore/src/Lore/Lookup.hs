@@ -54,7 +54,7 @@ import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), Nor
 import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap, findSimilarSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
-import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolSuggestion (..), SymbolSuggestionCandidate (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
+import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolSuggestion (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
 import qualified Lore.Internal.Package as Package
 import Lore.Monad (MonadLore)
 
@@ -124,27 +124,18 @@ isLookupNameMatchingPrefix prefix lookupName =
 findSimilarSymbols :: (MonadLore m) => Int -> NormalizedName -> m [SymbolSuggestion]
 findSimilarSymbols suggestionLimit targetName = do
   symbolsMap <- SymbolsMap.getCachedSymbolsMap
-  candidates <- findSimilarSymbolsInMap suggestionLimit targetName symbolsMap
+  suggestions <- findSimilarSymbolsInMap targetName symbolsMap
   pure $
     take suggestionLimit $
       sortOn suggestionSortKey $
         Map.elems $
-          foldl' collectBestSuggestion Map.empty (concatMap candidateSuggestions candidates)
+          foldl' collectBestSuggestion Map.empty suggestions
   where
     suggestionSortKey suggestion =
       ( Down suggestion.suggestionScore,
         suggestion.suggestedLookupName,
         suggestion.suggestedSymbol.name
       )
-
-    candidateSuggestions candidate =
-      [ SymbolSuggestion
-          { suggestedSymbol = symbol,
-            suggestedLookupName = candidate.suggestionCandidateLookupName,
-            suggestionScore = candidate.suggestionCandidateScore
-          }
-      | symbol <- Set.toList candidate.suggestionCandidateSymbols
-      ]
 
     collectBestSuggestion suggestionsByName suggestion =
       Map.insertWith

@@ -2,6 +2,7 @@
 
 module Lore.Internal.Lookup.Search.Types
   ( SearchToken (..),
+    SearchDocument (..),
     IndexedOccurrence (..),
     TokenSearchIndex (..),
     QueryTokenMatch (..),
@@ -19,10 +20,17 @@ newtype SearchToken = SearchToken
   }
   deriving newtype (Eq, Ord, Show)
 
+data SearchDocument = SearchDocument
+  { primaryText :: Text,
+    secondaryTexts :: [Text]
+  }
+  deriving stock (Eq, Show)
+
 data IndexedOccurrence key value = IndexedOccurrence
   { indexedOccurrenceKey :: key,
-    indexedOccurrenceText :: Text,
-    indexedOccurrenceTokens :: [SearchToken],
+    indexedOccurrencePrimaryText :: Text,
+    indexedOccurrencePrimaryTokens :: [SearchToken],
+    indexedOccurrenceSecondaryTokens :: [SearchToken],
     indexedOccurrenceValue :: value
   }
   deriving stock (Eq, Show)
@@ -30,8 +38,10 @@ data IndexedOccurrence key value = IndexedOccurrence
 data TokenSearchIndex key value = TokenSearchIndex
   { indexedOccurrences :: Map key (IndexedOccurrence key value),
     occurrencesByToken :: Map SearchToken (Set key),
-    tokenFrequency :: Map SearchToken Int,
-    totalOccurrences :: Int
+    primaryTokenFrequency :: Map SearchToken Int,
+    secondaryTokenFrequency :: Map SearchToken Int,
+    totalPrimaryOccurrences :: Int,
+    totalSecondaryOccurrences :: Int
   }
   deriving stock (Eq, Show)
 
@@ -40,7 +50,7 @@ data QueryTokenMatch = QueryTokenMatch
     matchedToken :: SearchToken,
     tokenMatchKind :: TokenMatchKind,
     tokenDistance :: Int,
-    tokenWeight :: Double
+    tokenSimilarityWeight :: Double
   }
   deriving stock (Eq, Show)
 

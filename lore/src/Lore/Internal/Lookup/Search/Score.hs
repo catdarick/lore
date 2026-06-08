@@ -21,6 +21,7 @@ import Lore.Internal.Lookup.Search.Tokenize
 import Lore.Internal.Lookup.Search.Types
   ( IndexedOccurrence (..),
     QueryTokenMatch (..),
+    SearchDocument (..),
     SearchResult (..),
     SearchToken (..),
     TokenMatchKind (..),
@@ -28,36 +29,61 @@ import Lore.Internal.Lookup.Search.Types
   )
 import qualified Text.EditDistance as EditDistance
 
-buildSearchIndex :: (Ord key) => [(key, Text, value)] -> TokenSearchIndex key value
+buildSearchIndex :: (Ord key) => [(key, SearchDocument, value)] -> TokenSearchIndex key value
 buildSearchIndex occurrences =
   TokenSearchIndex
     { indexedOccurrences = Map.fromList indexedOccurrencePairs,
       occurrencesByToken,
-      tokenFrequency,
-      totalOccurrences = length indexedOccurrencePairs
+      primaryTokenFrequency,
+      secondaryTokenFrequency,
+      totalPrimaryOccurrences,
+      totalSecondaryOccurrences = length indexedOccurrencePairs
     }
   where
     indexedOccurrencePairs =
-      [ (key, IndexedOccurrence key text (tokenizeSearchText text) value)
-      | (key, text, value) <- occurrences
+      [ (key, IndexedOccurrence key document.primaryText primaryTokens secondaryTokens value)
+      | (key, document, value) <- occurrences,
+        let primaryTokens = tokenizeSearchText document.primaryText,
+        let secondaryTokens = concatMap tokenizeSearchText document.secondaryTexts
       ]
 
     occurrencesByToken =
       Map.fromListWith
         Set.union
         [ (token, Set.singleton key)
-        | (key, IndexedOccurrence {indexedOccurrenceTokens}) <- indexedOccurrencePairs,
-          token <- Set.toList (Set.fromList indexedOccurrenceTokens)
+        | (key, IndexedOccurrence {indexedOccurrencePrimaryTokens}) <- indexedOccurrencePairs,
+          token <- Set.toList (Set.fromList indexedOccurrencePrimaryTokens)
         ]
 
-    tokenFrequency =
-      length <$> occurrencesByToken
+    primaryDocumentsByText =
+      Map.fromList
+        [ (occurrence.indexedOccurrencePrimaryText, occurrence.indexedOccurrencePrimaryTokens)
+        | (_, occurrence) <- indexedOccurrencePairs
+        ]
 
-searchOccurrences :: (Ord key) => Int -> Text -> TokenSearchIndex key value -> [SearchResult key value]
-searchOccurrences resultLimit query index =
-  take resultLimit $
-    List.sortOn resultSortKey $
-      map (scoreOccurrence query loweredQuery queryTokens index queryTokenMatches) candidateOccurrences
+    primaryTokenFrequency =
+      Map.fromListWith
+        (+)
+        [ (token, 1)
+        | primaryTokens <- Map.elems primaryDocumentsByText,
+          token <- Set.toList (Set.fromList primaryTokens)
+        ]
+
+    totalPrimaryOccurrences =
+      Map.size primaryDocumentsByText
+
+    secondaryTokenFrequency =
+      Map.fromListWith
+        (+)
+        [ (token, 1)
+        | (_, occurrence) <- indexedOccurrencePairs,
+          token <- Set.toList (Set.fromList occurrence.indexedOccurrenceSecondaryTokens)
+        ]
+
+searchOccurrences :: (Ord key) => Text -> TokenSearchIndex key value -> [SearchResult key value]
+searchOccurrences query index =
+  List.sortOn resultSortKey $
+    map (scoreOccurrence query loweredQuery queryTokens index queryTokenMatches) candidateOccurrences
   where
     loweredQuery = T.toLower query
     queryTokens = tokenizeSearchText query
@@ -74,7 +100,7 @@ matchQueryTokens :: TokenSearchIndex key value -> [SearchToken] -> [QueryTokenMa
 matchQueryTokens index queryTokens =
   concatMap matchQueryToken queryTokens
   where
-    storedTokens = Map.keys index.occurrencesByToken
+    storedTokens = Set.toList (Map.keysSet index.primaryTokenFrequency <> Map.keysSet index.secondaryTokenFrequency)
 
     matchQueryToken queryToken =
       mapMaybe (mkTokenMatch queryToken) storedTokens
@@ -88,9 +114,8 @@ matchQueryTokens index queryTokens =
                 matchedToken = storedToken,
                 tokenMatchKind = matchKind,
                 tokenDistance = matchDistance,
-                tokenWeight =
-                  matchTokenIdf index queryToken storedToken matchKind
-                    * tokenMatchSimilarity matchKind matchDistance
+                tokenSimilarityWeight =
+                  tokenMatchSimilarity matchKind matchDistance
               }
         Nothing ->
           mkFuzzyTokenMatch
@@ -106,9 +131,8 @@ matchQueryTokens index queryTokens =
                         matchedToken = storedToken,
                         tokenMatchKind = TokenMatchFuzzy,
                         tokenDistance = distance,
-                        tokenWeight =
-                          matchTokenIdf index queryToken storedToken TokenMatchFuzzy
-                            * tokenMatchSimilarity TokenMatchFuzzy distance
+                        tokenSimilarityWeight =
+                          tokenMatchSimilarity TokenMatchFuzzy distance
                       }
                 else Nothing
 
@@ -123,7 +147,7 @@ scoreOccurrence ::
 scoreOccurrence query loweredQuery queryTokens index queryTokenMatches occurrence =
   SearchResult
     { searchResultKey = occurrence.indexedOccurrenceKey,
-      searchResultText = occurrence.indexedOccurrenceText,
+      searchResultText = occurrence.indexedOccurrencePrimaryText,
       searchResultValue = occurrence.indexedOccurrenceValue,
       searchResultScore = scoreBreakdownTotal breakdown,
       searchResultWholeDistance = wholeDistance
@@ -132,7 +156,7 @@ scoreOccurrence query loweredQuery queryTokens index queryTokenMatches occurrenc
     breakdown =
       scoreOccurrenceBreakdown defaultSearchWeights query loweredQuery queryTokens index queryTokenMatches occurrence wholeDistance
     loweredOccurrenceText =
-      T.toLower occurrence.indexedOccurrenceText
+      T.toLower occurrence.indexedOccurrencePrimaryText
     wholeDistance =
       EditDistance.restrictedDamerauLevenshteinDistance
         EditDistance.defaultEditCosts
@@ -149,7 +173,8 @@ data SearchWeights = SearchWeights
     extraTokenPenaltyWeight :: !Double,
     wholeDistancePenaltyWeight :: !Double,
     exactTextMatchBonusWeight :: !Double,
-    capitalizationMismatchPenaltyWeight :: !Double
+    capitalizationMismatchPenaltyWeight :: !Double,
+    secondaryTokenWeight :: !Double
   }
 
 defaultSearchWeights :: SearchWeights
@@ -164,8 +189,21 @@ defaultSearchWeights =
       extraTokenPenaltyWeight = 0.15,
       wholeDistancePenaltyWeight = 0.02,
       exactTextMatchBonusWeight = 100.0,
-      capitalizationMismatchPenaltyWeight = 0.6
+      capitalizationMismatchPenaltyWeight = 0.6,
+      secondaryTokenWeight = 0.25
     }
+
+data SelectedTokenMatch = SelectedTokenMatch
+  { selectedQueryMatch :: QueryTokenMatch,
+    selectedMatchField :: !SearchField,
+    selectedMatchIdf :: !Double,
+    selectedMatchStrength :: !Double
+  }
+
+data SearchField
+  = SearchFieldPrimary
+  | SearchFieldSecondary
+  deriving stock (Eq)
 
 data ScoreBreakdown = ScoreBreakdown
   { scoreBreakdownMatchedTokenScore :: !Double,
@@ -220,44 +258,56 @@ scoreOccurrenceBreakdown weights query loweredQuery queryTokens index queryToken
       scoreBreakdownCapitalizedCandidatePenalty = capitalizedCandidatePenalty
     }
   where
-    candidateTokenSet = Set.fromList occurrence.indexedOccurrenceTokens
+    primaryTokenSet = Set.fromList occurrence.indexedOccurrencePrimaryTokens
+    secondaryTokenSet = Set.fromList occurrence.indexedOccurrenceSecondaryTokens
     bestMatches =
       [ bestMatch
       | queryToken <- queryTokens,
-        Just bestMatch <- [bestCandidateMatch candidateTokenSet queryTokenMatches queryToken]
+        Just bestMatch <- [bestCandidateMatch weights index primaryTokenSet secondaryTokenSet queryTokenMatches queryToken]
       ]
-    matchedQueryTokens =
-      Set.fromList (map (.queryToken) bestMatches)
-    missingQueryTokens =
-      filter (`Set.notMember` matchedQueryTokens) queryTokens
+    coverageByQueryToken =
+      Map.fromListWith
+        max
+        [ (selectedMatch.selectedQueryMatch.queryToken, selectedMatch.selectedMatchStrength)
+        | selectedMatch <- bestMatches
+        ]
     matchedCandidateTokens =
-      Set.fromList (map (.matchedToken) bestMatches)
+      Set.fromList (map (.selectedQueryMatch.matchedToken) (filter isPrimarySelectedMatch bestMatches))
     extraTokenCount =
-      Set.size (candidateTokenSet `Set.difference` matchedCandidateTokens)
+      Set.size (primaryTokenSet `Set.difference` matchedCandidateTokens)
     matchedTokenScore =
-      sum (map (.tokenWeight) bestMatches)
+      sum (map selectedWeightedTokenScore bestMatches)
     exactTokenBonus =
-      weights.exactTokenBonusWeight * fromIntegral (length (filter ((== TokenMatchExact) . (.tokenMatchKind)) bestMatches))
+      weights.exactTokenBonusWeight
+        * sum
+          [ selectedMatch.selectedMatchStrength
+          | selectedMatch <- bestMatches,
+            selectedMatch.selectedQueryMatch.tokenMatchKind == TokenMatchExact
+          ]
     coverageBonus =
       if null queryTokens
         then 0
-        else weights.coverageBonusWeight * fromIntegral (Set.size matchedQueryTokens) / fromIntegral (length queryTokens)
+        else weights.coverageBonusWeight * sum (Map.elems coverageByQueryToken) / fromIntegral (length queryTokens)
     fullCoverageNoExtraBonus =
-      if Set.size matchedQueryTokens == length queryTokens && extraTokenCount == 0
+      if Map.size coverageByQueryToken == length queryTokens && all (>= 1.0) (Map.elems coverageByQueryToken) && extraTokenCount == 0
         then weights.fullCoverageNoExtraBonusWeight
         else 0
     orderedBonus =
-      if tokensMatchInOrder occurrence.indexedOccurrenceTokens (map (.matchedToken) bestMatches)
-        then weights.orderedTokenBonusWeight * fromIntegral (length bestMatches)
+      if tokensMatchInOrder occurrence.indexedOccurrencePrimaryTokens (map (.selectedQueryMatch.matchedToken) (filter isPrimarySelectedMatch bestMatches))
+        then weights.orderedTokenBonusWeight * fromIntegral (length (filter isPrimarySelectedMatch bestMatches))
         else 0
     tokenDistancePenalty =
-      weights.tokenDistancePenaltyWeight * fromIntegral (sum (map (.tokenDistance) bestMatches))
+      weights.tokenDistancePenaltyWeight
+        * sum
+          [ fromIntegral selectedMatch.selectedQueryMatch.tokenDistance * selectedMatch.selectedMatchStrength
+          | selectedMatch <- bestMatches
+          ]
     missingImportantTokenPenalty =
-      sum (map (missingTokenPenalty weights index) missingQueryTokens)
+      sum [missingTokenPenalty weights index queryToken * missingTokenStrength queryToken | queryToken <- queryTokens]
     extraTokenPenalty =
       weights.extraTokenPenaltyWeight * fromIntegral extraTokenCount
     loweredOccurrenceText =
-      T.toLower occurrence.indexedOccurrenceText
+      T.toLower occurrence.indexedOccurrencePrimaryText
     wholeDistancePenalty =
       weights.wholeDistancePenaltyWeight * fromIntegral wholeDistance
     exactTextMatchBonus =
@@ -265,7 +315,9 @@ scoreOccurrenceBreakdown weights query loweredQuery queryTokens index queryToken
         then weights.exactTextMatchBonusWeight
         else 0
     capitalizedCandidatePenalty =
-      capitalizationMismatchPenalty weights query occurrence.indexedOccurrenceText
+      capitalizationMismatchPenalty weights query occurrence.indexedOccurrencePrimaryText
+    missingTokenStrength queryToken =
+      1.0 - Map.findWithDefault 0 queryToken coverageByQueryToken
 
 capitalizationMismatchPenalty :: SearchWeights -> Text -> Text -> Double
 capitalizationMismatchPenalty weights query candidate =
@@ -282,22 +334,41 @@ firstAlphabeticChar :: Text -> Maybe Char
 firstAlphabeticChar text =
   T.find isLetter text
 
-bestCandidateMatch :: Set.Set SearchToken -> [QueryTokenMatch] -> SearchToken -> Maybe QueryTokenMatch
-bestCandidateMatch candidateTokens queryTokenMatches queryToken =
+bestCandidateMatch :: SearchWeights -> TokenSearchIndex key value -> Set.Set SearchToken -> Set.Set SearchToken -> [QueryTokenMatch] -> SearchToken -> Maybe SelectedTokenMatch
+bestCandidateMatch weights index primaryTokens secondaryTokens queryTokenMatches queryToken =
   case matches of
     [] -> Nothing
-    _ -> Just $ List.maximumBy (compare `on` tokenMatchSortKey) matches
+    _ -> Just $ List.maximumBy (compare `on` selectedTokenMatchSortKey) matches
   where
     matches =
-      [ match
+      [ SelectedTokenMatch match field (matchTokenIdf index field match.queryToken match.matchedToken match.tokenMatchKind) strength
       | match <- queryTokenMatches,
         match.queryToken == queryToken,
-        match.matchedToken `Set.member` candidateTokens
+        (field, strength) <- tokenMatchFieldStrength match.matchedToken
       ]
+    tokenMatchFieldStrength matchedToken
+      | matchedToken `Set.member` primaryTokens = [(SearchFieldPrimary, 1.0)]
+      | matchedToken `Set.member` secondaryTokens = [(SearchFieldSecondary, weights.secondaryTokenWeight)]
+      | otherwise = []
 
-tokenMatchSortKey :: QueryTokenMatch -> (Double, Down Int, Down Int, SearchToken)
-tokenMatchSortKey match =
-  (match.tokenWeight, Down (tokenMatchKindPriority match.tokenMatchKind), Down match.tokenDistance, match.matchedToken)
+selectedTokenMatchSortKey :: SelectedTokenMatch -> (Double, Double, Down Int, Down Int, SearchToken)
+selectedTokenMatchSortKey selectedMatch =
+  ( selectedWeightedTokenScore selectedMatch,
+    selectedMatch.selectedMatchStrength,
+    Down (tokenMatchKindPriority selectedMatch.selectedQueryMatch.tokenMatchKind),
+    Down selectedMatch.selectedQueryMatch.tokenDistance,
+    selectedMatch.selectedQueryMatch.matchedToken
+  )
+
+selectedWeightedTokenScore :: SelectedTokenMatch -> Double
+selectedWeightedTokenScore selectedMatch =
+  selectedMatch.selectedQueryMatch.tokenSimilarityWeight
+    * selectedMatch.selectedMatchIdf
+    * selectedMatch.selectedMatchStrength
+
+isPrimarySelectedMatch :: SelectedTokenMatch -> Bool
+isPrimarySelectedMatch selectedMatch =
+  selectedMatch.selectedMatchField == SearchFieldPrimary
 
 tokensMatchInOrder :: [SearchToken] -> [SearchToken] -> Bool
 tokensMatchInOrder candidateTokens matchedTokens =
@@ -309,34 +380,45 @@ tokensMatchInOrder candidateTokens matchedTokens =
       | candidateToken == matchedToken = go remainingCandidates remainingMatched
       | otherwise = go remainingCandidates tokens
 
-tokenIdf :: TokenSearchIndex key value -> SearchToken -> Double
-tokenIdf index token =
-  logBase 2 ((fromIntegral index.totalOccurrences + 1) / (fromIntegral tokenCount + 1)) + 1
+tokenIdf :: SearchField -> TokenSearchIndex key value -> SearchToken -> Double
+tokenIdf field index token =
+  logBase 2 ((fromIntegral totalOccurrences + 1) / (fromIntegral tokenCount + 1)) + 1
   where
+    (tokenFrequency, totalOccurrences) = tokenFrequencyStats field index
     tokenCount =
-      Map.findWithDefault 0 token index.tokenFrequency
+      Map.findWithDefault 0 token tokenFrequency
 
-tokenIdfIfPresent :: TokenSearchIndex key value -> SearchToken -> Maybe Double
-tokenIdfIfPresent index token =
-  case Map.lookup token index.tokenFrequency of
+tokenIdfIfPresent :: SearchField -> TokenSearchIndex key value -> SearchToken -> Maybe Double
+tokenIdfIfPresent field index token =
+  case Map.lookup token tokenFrequency of
     Nothing -> Nothing
     Just tokenCount ->
       Just $
-        logBase 2 ((fromIntegral index.totalOccurrences + 1) / (fromIntegral tokenCount + 1))
+        logBase 2 ((fromIntegral totalOccurrences + 1) / (fromIntegral tokenCount + 1))
           + 1
+  where
+    (tokenFrequency, totalOccurrences) = tokenFrequencyStats field index
 
-matchTokenIdf :: TokenSearchIndex key value -> SearchToken -> SearchToken -> TokenMatchKind -> Double
-matchTokenIdf index queryToken storedToken matchKind =
+matchTokenIdf :: TokenSearchIndex key value -> SearchField -> SearchToken -> SearchToken -> TokenMatchKind -> Double
+matchTokenIdf index field queryToken storedToken matchKind =
   case matchKind of
     TokenMatchSynonym ->
-      let storedTokenIdf = tokenIdf index storedToken
-       in maybe storedTokenIdf (`min` storedTokenIdf) (tokenIdfIfPresent index queryToken)
+      let storedTokenIdf = tokenIdf field index storedToken
+       in maybe storedTokenIdf (`min` storedTokenIdf) (tokenIdfIfPresent field index queryToken)
     _ ->
-      tokenIdf index storedToken
+      tokenIdf field index storedToken
 
 missingTokenPenalty :: SearchWeights -> TokenSearchIndex key value -> SearchToken -> Double
 missingTokenPenalty weights index token =
-  weights.missingTokenPenaltyWeight * tokenIdf index token
+  weights.missingTokenPenaltyWeight * tokenIdf SearchFieldPrimary index token
+
+tokenFrequencyStats :: SearchField -> TokenSearchIndex key value -> (Map.Map SearchToken Int, Int)
+tokenFrequencyStats field index =
+  case field of
+    SearchFieldPrimary ->
+      (index.primaryTokenFrequency, index.totalPrimaryOccurrences)
+    SearchFieldSecondary ->
+      (index.secondaryTokenFrequency, index.totalSecondaryOccurrences)
 
 tokenSimilarity :: Int -> Double
 tokenSimilarity distance =

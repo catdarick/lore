@@ -6,7 +6,6 @@ module Lore.Internal.Lookup.Types
     ModSummaries (..),
     NameToInstancesIndex (..),
     Symbol (..),
-    SymbolSuggestionCandidate (..),
     SymbolSuggestion (..),
     SymbolVisibility (..),
     symbolExportedFrom,
@@ -50,13 +49,6 @@ data SymbolSuggestion = SymbolSuggestion
   { suggestedSymbol :: Symbol,
     suggestedLookupName :: Text,
     suggestionScore :: Double
-  }
-  deriving (Generic, NFData, Eq, Ord)
-
-data SymbolSuggestionCandidate = SymbolSuggestionCandidate
-  { suggestionCandidateSymbols :: Set.Set Symbol,
-    suggestionCandidateLookupName :: Text,
-    suggestionCandidateScore :: Double
   }
   deriving (Generic, NFData, Eq, Ord)
 

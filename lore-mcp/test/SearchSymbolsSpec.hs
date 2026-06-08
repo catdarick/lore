@@ -7,7 +7,8 @@ import qualified Data.Aeson as J
 import Data.Text (Text)
 import qualified Data.Text as T
 import Lore.Mcp.Tools.SearchSymbols (searchSymbolsTool)
-import McpTestSupport (callToolWithArgs, fixtureLoreMcp, loadFixtureHomeModules)
+import McpTestSupport (callToolWithArgs, fixtureLoreMcp, fixtureLoreMcpAtWithCache, loadFixtureHomeModules, withFixtureCopy)
+import System.FilePath ((</>))
 import Test.Hspec
 
 spec :: Spec
@@ -58,6 +59,21 @@ spec =
 
       searchResult `shouldContainText` "Found 10 similar symbols for \"map\":"
       searchResult `shouldContainText` "map (defined in: "
+
+    it "renders module-assisted symbol ordering from core search" do
+      searchResult <-
+        withFixtureCopy \fixtureRoot -> do
+          appendFile
+            (fixtureRoot </> "src" </> "Demo.hs")
+            "\ncreate :: Int -> Int\ncreate value = value + 1\n"
+          appendFile
+            (fixtureRoot </> "src" </> "Demo" </> "Support.hs")
+            "\ncreate :: Int -> Int\ncreate value = value + supportSeed\n"
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureHomeModules
+            callToolWithArgs searchSymbolsTool (searchSymbolsArgs "createSupport")
+
+      searchResult `shouldContainText` "create (defined in: Demo.Support, Demo)"
 
 searchSymbolsArgs :: Text -> J.Value
 searchSymbolsArgs query =
