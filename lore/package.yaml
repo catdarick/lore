@@ -84,6 +84,7 @@ library:
   - Lore.Internal.Lookup.ModulePreference
   - Lore.Internal.Lookup.SymbolResolutionCore
   - Lore.Internal.Lookup.TypeQuery
+  - Lore.Internal.Lookup.Types
 
 
 tests:
@@ -187,10 +188,12 @@ tests:
     - Lore.Internal.Lookup.Name
     - Lore.Internal.Lookup.NameToInstances
     - Lore.Internal.Lookup.Orphans
-    - Lore.Internal.Lookup.Search.Score
-    - Lore.Internal.Lookup.Search.Synonyms
-    - Lore.Internal.Lookup.Search.Tokenize
-    - Lore.Internal.Lookup.Search.Types
+    - Lore.Internal.Lookup.SymbolSearch.Base
+    - Lore.Internal.Lookup.SymbolSearch.Index
+    - Lore.Internal.Lookup.SymbolSearch.Rank
+    - Lore.Internal.Lookup.SymbolSearch.Synonyms
+    - Lore.Internal.Lookup.SymbolSearch.Tokenize
+    - Lore.Internal.Lookup.SymbolSearch.Types
     - Lore.Internal.Lookup.SymbolResolutionCore
     - Lore.Internal.Lookup.SymbolsMap
     - Lore.Internal.Lookup.TypeQuery

@@ -4,11 +4,11 @@ module Lore.Internal.Lookup.SymbolsMap
   ( HomeSymbolsIndexCache (..),
     ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
-    SimilarSymbolsSearchIndexCache (..),
+    SymbolSearchIndexCache (..),
     SymbolsDependencySetCache (..),
     emptyHomeSymbolsIndexCache,
     emptyExternalSymbolsIndexCache,
-    emptySimilarSymbolsSearchIndexCache,
+    emptySymbolSearchIndexCache,
     getCachedSymbolsMap,
     getCachedHomeSymbolsIndex,
     getCachedExternalSymbolsIndex,
@@ -21,7 +21,7 @@ module Lore.Internal.Lookup.SymbolsMap
     findMatchingSymbolsInMap,
     findSimilarSymbolsInMap,
     findSimilarSymbolsCandidatesInMap,
-    buildSimilarSymbolsSearchIndex,
+    buildSymbolSearchIndex,
   )
 where
 
@@ -32,6 +32,7 @@ import Data.List (foldl')
 import qualified Data.Map as Map
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified GHC
 import qualified GHC.Driver.Main as GHC
 import GHC.Generics (Generic)
@@ -48,16 +49,15 @@ import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
     HomeSymbolsIndexCache (..),
-    SimilarSymbolSearchKey (..),
-    SimilarSymbolsSearchIndex (..),
-    SimilarSymbolsSearchIndexCache (..),
+    SymbolSearchIndexCache (..),
     SymbolsDependencySetCache (..),
   )
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
-import Lore.Internal.Lookup.ModulePattern (ModulePattern, matchesModulePattern)
-import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, extractAndNormalizeOccName, normalizeName, parseAndNormalizeName, unNormalizedModuleName, unNormalizedOccName)
-import Lore.Internal.Lookup.Search.Score (buildSearchIndex, searchOccurrences)
-import Lore.Internal.Lookup.Search.Types (SearchContextField (..), SearchDocument (..), SearchResult (..), TokenSearchIndex)
+import Lore.Internal.Lookup.ModulePattern (ModulePattern)
+import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, extractAndNormalizeOccName, parseAndNormalizeName)
+import Lore.Internal.Lookup.SymbolSearch.Index (buildSymbolSearchIndex, symbolAssociatedModuleNames)
+import Lore.Internal.Lookup.SymbolSearch.Rank (findSymbolSearchSuggestions)
+import Lore.Internal.Lookup.SymbolSearch.Types (SymbolSearchIndex)
 import Lore.Internal.Lookup.Types
   ( ModSummaries (..),
     Symbol (..),
@@ -65,7 +65,6 @@ import Lore.Internal.Lookup.Types
     SymbolVisibility (..),
     SymbolsIndex (..),
     SymbolsMap (..),
-    symbolExportedFrom,
   )
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Lib.Force (evaluateNFM)
@@ -81,9 +80,9 @@ emptyExternalSymbolsIndexCache :: ExternalSymbolsIndexCache
 emptyExternalSymbolsIndexCache =
   ExternalSymbolsIndexCache Nothing
 
-emptySimilarSymbolsSearchIndexCache :: SimilarSymbolsSearchIndexCache
-emptySimilarSymbolsSearchIndexCache =
-  SimilarSymbolsSearchIndexCache Nothing
+emptySymbolSearchIndexCache :: SymbolSearchIndexCache
+emptySymbolSearchIndexCache =
+  SymbolSearchIndexCache Nothing
 
 getCachedSymbolsMap :: (MonadLore m) => m SymbolsMap
 getCachedSymbolsMap = do
@@ -102,63 +101,18 @@ findMatchingSymbolsInMap targetName SymbolsMap {homeSymbolsMap, externalSymbolsM
     moduleMatchingSymbols =
       Set.filter (isModuleMatching targetName) (homeMatchingSymbols <> externalMatchingSymbols)
 
-findSimilarSymbolsInMap :: (MonadLore m) => [ModulePattern] -> NormalizedName -> SymbolsMap -> m [SymbolSuggestion]
-findSimilarSymbolsInMap modulePatterns targetName symbolsMap = do
-  SimilarSymbolsSearchIndex cachedSearchIndex <- getCachedSimilarSymbolsSearchIndex symbolsMap
-  pure $ findSimilarSymbolsCandidatesInMap modulePatterns targetName cachedSearchIndex
+findSimilarSymbolsInMap :: (MonadLore m) => [ModulePattern] -> Text -> SymbolsMap -> m [SymbolSuggestion]
+findSimilarSymbolsInMap modulePatterns query symbolsMap = do
+  cachedSearchIndex <- getCachedSymbolSearchIndex symbolsMap
+  pure $ findSimilarSymbolsCandidatesInMap modulePatterns query cachedSearchIndex
 
 findSimilarSymbolsCandidatesInMap ::
   [ModulePattern] ->
-  NormalizedName ->
-  TokenSearchIndex SimilarSymbolSearchKey Symbol ->
+  Text ->
+  SymbolSearchIndex ->
   [SymbolSuggestion]
-findSimilarSymbolsCandidatesInMap modulePatterns targetName searchIndex =
-  mapMaybe mkSymbolSuggestion $
-    searchOccurrences (unNormalizedOccName targetName.occName) searchIndex
-  where
-    mkSymbolSuggestion result
-      | symbolMatchesSearchScope targetName modulePatterns result.searchResultValue =
-          Just
-            SymbolSuggestion
-              { suggestedSymbol = result.searchResultValue,
-                suggestedLookupName = result.searchResultText,
-                suggestionScore = result.searchResultScore
-              }
-      | otherwise =
-          Nothing
-
-combineSymbolsIndexes :: SymbolsMap -> SymbolsIndex
-combineSymbolsIndexes SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
-  SymbolsIndex
-    { symbolsByLookupName = Map.unionWith Set.union homeSymbolsMap.symbolsByLookupName externalSymbolsMap.symbolsByLookupName,
-      valueTypeHeadNamesBySymbol =
-        Map.unionWith
-          mergeValueTypeHeadNames
-          homeSymbolsMap.valueTypeHeadNamesBySymbol
-          externalSymbolsMap.valueTypeHeadNamesBySymbol
-    }
-
-buildSimilarSymbolsSearchIndex :: SymbolsMap -> TokenSearchIndex SimilarSymbolSearchKey Symbol
-buildSimilarSymbolsSearchIndex symbolsMap =
-  buildSearchIndex
-    [ ( SimilarSymbolSearchKey {searchLookupName = occName, searchSymbolName = symbol.name},
-        SearchDocument
-          { primaryText = unNormalizedOccName occName,
-            contextTexts =
-              Map.fromList
-                [ (SearchContextModule, maybe [] ((: []) . unNormalizedModuleName) (symbolDefiningModuleName symbol)),
-                  (SearchContextResultType, Set.toList typeHeads.resultTypeHeadNames),
-                  (SearchContextArgumentType, Set.toList typeHeads.argumentTypeHeadNames)
-                ]
-          },
-        symbol
-      )
-    | (occName, symbols) <- Map.toList combinedSymbolsIndex.symbolsByLookupName,
-      symbol <- Set.toList symbols,
-      let typeHeads = Map.findWithDefault emptyValueTypeHeadNames symbol.name combinedSymbolsIndex.valueTypeHeadNamesBySymbol
-    ]
-  where
-    combinedSymbolsIndex = combineSymbolsIndexes symbolsMap
+findSimilarSymbolsCandidatesInMap modulePatterns query searchIndex =
+  findSymbolSearchSuggestions modulePatterns query searchIndex
 
 isModuleMatching :: NormalizedName -> Symbol -> Bool
 isModuleMatching targetName symbol =
@@ -170,51 +124,22 @@ isModuleMatching targetName symbol =
   where
     symbolAssociatedModules = symbolAssociatedModuleNames symbol
 
-symbolMatchesSearchScope :: NormalizedName -> [ModulePattern] -> Symbol -> Bool
-symbolMatchesSearchScope targetName modulePatterns symbol =
-  isModuleMatching targetName symbol && matchesModulePatterns modulePatterns symbol
-
-matchesModulePatterns :: [ModulePattern] -> Symbol -> Bool
-matchesModulePatterns [] _ =
-  True
-matchesModulePatterns modulePatterns symbol =
-  any moduleMatchesAnyPattern (symbolAssociatedModuleNames symbol)
-  where
-    moduleMatchesAnyPattern moduleName =
-      any (`matchesModulePattern` moduleName) modulePatterns
-
-symbolAssociatedModuleNames :: Symbol -> Set.Set NormalizedModuleName
-symbolAssociatedModuleNames symbol =
-  maybe Set.empty Set.singleton (symbolDefiningModuleName symbol)
-    <> Set.map extractAndNormalizeModuleName (symbolExportedFrom symbol)
-
-symbolDefiningModuleName :: Symbol -> Maybe NormalizedModuleName
-symbolDefiningModuleName symbol =
-  (normalizeName symbol.name).moduleName
-
-emptyValueTypeHeadNames :: ValueTypeHeadNames
-emptyValueTypeHeadNames =
-  ValueTypeHeadNames
-    { argumentTypeHeadNames = Set.empty,
-      resultTypeHeadNames = Set.empty
-    }
-
 invalidateHomeSymbolsIndexCache :: (MonadLore m) => m ()
 invalidateHomeSymbolsIndexCache = do
   cacheVar <- asks homeSymbolsIndexCacheVar
   modifyMVar cacheVar $ \_ -> pure (emptyHomeSymbolsIndexCache, ())
-  invalidateSimilarSymbolsSearchIndexCache
+  invalidateSymbolSearchIndexCache
 
 invalidateExternalSymbolsIndexCache :: (MonadLore m) => m ()
 invalidateExternalSymbolsIndexCache = do
   cacheVar <- asks externalSymbolsIndexCacheVar
   modifyMVar cacheVar $ \_ -> pure (emptyExternalSymbolsIndexCache, ())
-  invalidateSimilarSymbolsSearchIndexCache
+  invalidateSymbolSearchIndexCache
 
-invalidateSimilarSymbolsSearchIndexCache :: (MonadLore m) => m ()
-invalidateSimilarSymbolsSearchIndexCache = do
-  cacheVar <- asks similarSymbolsSearchIndexCacheVar
-  modifyMVar cacheVar $ \_ -> pure (emptySimilarSymbolsSearchIndexCache, ())
+invalidateSymbolSearchIndexCache :: (MonadLore m) => m ()
+invalidateSymbolSearchIndexCache = do
+  cacheVar <- asks symbolSearchIndexCacheVar
+  modifyMVar cacheVar $ \_ -> pure (emptySymbolSearchIndexCache, ())
 
 setSymbolsDependencySetCache :: (MonadLore m) => Set.Set String -> m ()
 setSymbolsDependencySetCache dependencies = do
@@ -259,17 +184,16 @@ getCachedExternalSymbolsIndex = do
                 }
         pure (ExternalSymbolsIndexCache (Just snapshot), symbolsMap)
 
-getCachedSimilarSymbolsSearchIndex :: (MonadLore m) => SymbolsMap -> m SimilarSymbolsSearchIndex
-getCachedSimilarSymbolsSearchIndex symbolsMap = do
-  cacheVar <- asks similarSymbolsSearchIndexCacheVar
+getCachedSymbolSearchIndex :: (MonadLore m) => SymbolsMap -> m SymbolSearchIndex
+getCachedSymbolSearchIndex symbolsMap = do
+  cacheVar <- asks symbolSearchIndexCacheVar
   modifyMVar cacheVar $ \cacheState ->
-    case cacheState.cachedSimilarSymbolsSearchIndex of
+    case cacheState.cachedSymbolSearchIndex of
       Just cachedSearchIndex ->
         pure (cacheState, cachedSearchIndex)
       Nothing -> do
-        let builtSearchIndex = buildSimilarSymbolsSearchIndex symbolsMap
-            snapshot = SimilarSymbolsSearchIndex builtSearchIndex
-        pure (SimilarSymbolsSearchIndexCache (Just snapshot), snapshot)
+        let builtSearchIndex = buildSymbolSearchIndex symbolsMap
+        pure (SymbolSearchIndexCache (Just builtSearchIndex), builtSearchIndex)
 
 prepareHomeSymbolsIndex :: (MonadLore m) => m SymbolsIndex
 prepareHomeSymbolsIndex = do

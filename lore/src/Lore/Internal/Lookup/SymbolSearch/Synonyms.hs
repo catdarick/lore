@@ -1,6 +1,9 @@
-module Lore.Internal.Lookup.Search.Synonyms
+module Lore.Internal.Lookup.SymbolSearch.Synonyms
   ( synonymGroups,
-    synonymRepresentatives,
+    SynonymLexicon (..),
+    synonymLexicon,
+    directSynonyms,
+    areDirectSynonyms,
   )
 where
 
@@ -8,6 +11,12 @@ import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
+import Lore.Internal.Lookup.SymbolSearch.Types (SearchToken (..))
+
+newtype SynonymLexicon = SynonymLexicon
+  { unSynonymLexicon :: Map.Map SearchToken (Set.Set SearchToken)
+  }
+  deriving stock (Eq, Show)
 
 synonymGroups :: [[Text]]
 synonymGroups =
@@ -592,74 +601,35 @@ synonymGroups =
     ["priority", "severity"]
   ]
 
-synonymRepresentatives :: Map.Map Text Text
-synonymRepresentatives =
-  Map.fromList
-    [ (term, representative)
-    | component <- connectedComponents adjacencyByTerm,
-      let representative = componentRepresentative firstSeenOrder component,
-      term <- Set.toList component
-    ]
-  where
-    adjacencyByTerm = buildAdjacency synonymGroups
-    firstSeenOrder = buildFirstSeenOrder synonymGroups
+synonymLexicon :: SynonymLexicon
+synonymLexicon =
+  SynonymLexicon (buildAdjacency synonymGroups)
 
-buildAdjacency :: [[Text]] -> Map.Map Text (Set.Set Text)
+directSynonyms :: SearchToken -> Set.Set SearchToken
+directSynonyms token =
+  case synonymLexicon of
+    SynonymLexicon adjacency ->
+      Map.findWithDefault Set.empty token adjacency
+
+areDirectSynonyms :: SearchToken -> SearchToken -> Bool
+areDirectSynonyms left right =
+  right `Set.member` directSynonyms left
+
+buildAdjacency :: [[Text]] -> Map.Map SearchToken (Set.Set SearchToken)
 buildAdjacency =
   foldl' insertGroup Map.empty
   where
     insertGroup acc groupTerms =
-      case Set.toList (Set.fromList groupTerms) of
+      case Set.toList (Set.fromList (map SearchToken groupTerms)) of
         [] ->
           acc
         uniqueTerms ->
-          let neighbors = Set.fromList uniqueTerms
-           in foldl' (\mapAcc term -> Map.insertWith Set.union term neighbors mapAcc) acc uniqueTerms
-
-buildFirstSeenOrder :: [[Text]] -> Map.Map Text Int
-buildFirstSeenOrder groups =
-  snd $
-    foldl'
-      ( \(idx, acc) term ->
-          (idx + 1, Map.insertWith (\_ old -> old) term idx acc)
-      )
-      (0, Map.empty)
-      (concat groups)
-
-connectedComponents :: Map.Map Text (Set.Set Text) -> [Set.Set Text]
-connectedComponents adjacencyByTerm =
-  go (Map.keysSet adjacencyByTerm) []
-  where
-    go remaining components
-      | Set.null remaining =
-          reverse components
-      | otherwise =
-          let seed = Set.findMin remaining
-              component = connectedComponent seed adjacencyByTerm
-           in go (remaining `Set.difference` component) (component : components)
-
-connectedComponent :: Text -> Map.Map Text (Set.Set Text) -> Set.Set Text
-connectedComponent seed adjacencyByTerm =
-  walk Set.empty [seed]
-  where
-    walk visited = \case
-      [] ->
-        visited
-      term : rest
-        | term `Set.member` visited ->
-            walk visited rest
-        | otherwise ->
-            let neighbors = Set.toList (Map.findWithDefault Set.empty term adjacencyByTerm)
-             in walk (Set.insert term visited) (neighbors <> rest)
-
-componentRepresentative :: Map.Map Text Int -> Set.Set Text -> Text
-componentRepresentative firstSeenOrder component =
-  fst $
-    List.minimumBy
-      (\(_, leftRank) (_, rightRank) -> compare leftRank rightRank)
-      [ (term, (Map.findWithDefault maxBound term firstSeenOrder, term))
-      | term <- Set.toList component
-      ]
+          foldl'
+            ( \mapAcc term ->
+                Map.insertWith Set.union term (Set.delete term (Set.fromList uniqueTerms)) mapAcc
+            )
+            acc
+            uniqueTerms
 
 foldl' :: (b -> a -> b) -> b -> [a] -> b
 foldl' = List.foldl'

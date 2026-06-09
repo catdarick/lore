@@ -12,7 +12,7 @@ where
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Lore (FindSimilarSymbolsOptions (..), ModulePattern, ModulePatternError, MonadLore, compileModulePattern, findSimilarSymbols, parseAndNormalizeName)
+import Lore (FindSimilarSymbolsOptions (..), ModulePattern, ModulePatternError, MonadLore, compileModulePattern, findSimilarSymbols)
 import Lore.Tools.Internal.SymbolSuggestions
   ( GroupedSymbolSuggestion,
     groupSymbolSuggestions,
@@ -69,10 +69,9 @@ searchSymbols options = do
     suggestions <-
       findSimilarSymbols
         FindSimilarSymbolsOptions
-          { similarSymbolsLimit = suggestionFetchLimit options.searchSymbolsSuggestionLimit,
+          { similarSymbolsQuery = options.searchSymbolsQuery,
             similarSymbolsModulePatterns = map (.searchSymbolsCompiledModulePattern) options.searchSymbolsModulePatterns
           }
-        (parseAndNormalizeName options.searchSymbolsQuery)
     let renderedSuggestions =
           maybe [] paginatedItems
             (paginateItemsWithPageRequest
@@ -88,18 +87,6 @@ searchSymbols options = do
           searchSymbolsSuggestions = renderedSuggestions,
           searchSymbolsPartialLoadWarning = loadedSessionPartialWarning session "Search results may be incomplete."
         }
-
-suggestionFetchLimit :: ResultLimit -> Int
-suggestionFetchLimit = \case
-  Unlimited ->
-    maxBound
-  Limit limit ->
-    max 1 (safeMultiply 20 (max 1 limit))
-  where
-    safeMultiply left right
-      | left == 0 || right == 0 = 0
-      | left > maxBound `div` right = maxBound
-      | otherwise = left * right
 
 renderSearchSymbolsReady :: SearchSymbolsReady -> LoreDoc
 renderSearchSymbolsReady ready =

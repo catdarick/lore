@@ -3,6 +3,8 @@ module LookupSearchSpec
   )
 where
 
+import qualified Data.List as List
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -10,202 +12,222 @@ import qualified Data.Text as T
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Unique as GHC.Unique
 import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames (..))
-import Lore.Internal.Lookup.Cache.Types (SimilarSymbolSearchKey (..))
 import Lore.Internal.Lookup.ModulePattern (ModulePattern, compileModulePattern)
-import Lore.Internal.Lookup.Name (NormalizedName (occName), NormalizedOccName, parseAndNormalizeName, unNormalizedOccName)
-import Lore.Internal.Lookup.Search.Score (buildSearchIndex, searchOccurrences)
-import Lore.Internal.Lookup.Search.Types (SearchDocument (..), SearchResult (..), TokenSearchIndex)
-import Lore.Internal.Lookup.SymbolsMap (buildSimilarSymbolsSearchIndex, findSimilarSymbolsCandidatesInMap)
+import Lore.Internal.Lookup.Name (NormalizedName (occName), NormalizedOccName, parseAndNormalizeName, unNormalizedModuleName)
+import Lore.Internal.Lookup.SymbolSearch.Index (buildSymbolSearchIndex)
+import Lore.Internal.Lookup.SymbolSearch.Rank (parseSymbolSearchQuery, tokenIdf)
+import Lore.Internal.Lookup.SymbolSearch.Synonyms (areDirectSynonyms)
+import Lore.Internal.Lookup.SymbolSearch.Types
+  ( IndexedNameVariant (..),
+    SearchToken (..),
+    SymbolSearchDocument (..),
+    SymbolSearchField (..),
+    SymbolSearchIndex (..),
+    SymbolSearchQuery (symbolSearchExactModule, symbolSearchTokens),
+    TokenMatchEvidence (..),
+    TokenMatchKind (..),
+  )
+import Lore.Internal.Lookup.SymbolsMap (findSimilarSymbolsCandidatesInMap)
 import Lore.Internal.Lookup.Types (Symbol (..), SymbolSuggestion (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
 import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe, shouldMatchList, shouldSatisfy)
 
 spec :: Spec
 spec =
-  describe "similar symbol search" do
-    it "uses defining module context to break same-name ties" do
-      suggestionNames (search "createSubscriptionAccount" [subscriptionsCreate, usersCreate])
-        `shouldBe` ["Subscriptions.Database.Account.create", "Users.Database.Account.create"]
+  describe "symbol search" do
+    it "retrieves a symbol by an argument type token with no name token match" do
+      suggestionNames (searchWithTypeFacts "ByteString" [decodePayload] (typeFacts [(decodePayload, ["ByteString"], ["Payload"])]))
+        `shouldBe` ["Payload.Codec.decodePayload"]
 
-    it "scores same-named symbols independently without module leakage" do
-      (subscriptionsResult, usersResult) <- expectTwoResults (searchResults "createSubscriptionAccount" [subscriptionsCreate, usersCreate])
+    it "retrieves a symbol by a result type token with no name token match" do
+      suggestionNames (searchWithTypeFacts "ValidationResult" [decodePayload] (typeFacts [(decodePayload, ["Input"], ["ValidationResult"])]))
+        `shouldBe` ["Payload.Codec.decodePayload"]
 
-      (subscriptionsResult.searchResultKey.searchSymbolName == subscriptionsCreate.name) `shouldBe` True
-      (usersResult.searchResultKey.searchSymbolName == usersCreate.name) `shouldBe` True
-      subscriptionsResult.searchResultScore `shouldSatisfy` (> usersResult.searchResultScore)
+    it "retrieves a symbol by an associated module token with no name or type token match" do
+      suggestionNames (search "Argyle" [argyleRequest])
+        `shouldBe` ["ExternalProviders.Argyle.Client.request"]
 
-    it "does not let unrelated secondary tokens change primary-name scoring statistics" do
-      scoreWithUnrelatedOtherModule <- expectScoreFor listMap "mapThing" [listMap, unrelatedOtherModuleThing]
-      scoreWithUnrelatedDataMap <- expectScoreFor listMap "mapThing" [listMap, unrelatedDataMapThing]
-
-      scoreWithUnrelatedDataMap `shouldBe` scoreWithUnrelatedOtherModule
-
-    it "counts primary token frequency by lookup name, not same-named symbol count" do
-      baselineScore <- expectScoreFor listMap "mapThing" [listMap]
-      scoreWithSameLookupName <- expectScoreFor listMap "mapThing" [listMap, otherMap]
-
-      scoreWithSameLookupName `shouldBe` baselineScore
-
-    it "keeps exact primary names stronger than module-assisted short names" do
-      suggestionNames (search "createSubscriptionAccount" [subscriptionsCreate, exactCreateSubscriptionAccount])
-        `shouldBe` ["Other.Module.createSubscriptionAccount", "Subscriptions.Database.Account.create"]
-
-    it "keeps closer primary names meaningful against weak module context" do
-      suggestionNames (search "createSubscriptionAccount" [subscriptionsCreate, usersCreateAccount])
-        `shouldBe` ["Users.Database.Account.createAccount", "Subscriptions.Database.Account.create"]
-
-    it "reuses camel-case and plural normalization for secondary module tokens" do
-      suggestionNames (search "createSubscriptionAccount" [subscriptionsCreate, usersCreate])
-        `shouldBe` ["Subscriptions.Database.Account.create", "Users.Database.Account.create"]
-
-    it "does not penalize long modules with name-extra-token or whole-distance heuristics" do
-      shortResult <- expectOneResult (searchResults "createSubscriptionAccount" [subscriptionsCreate])
-      longResult <- expectOneResult (searchResults "createSubscriptionAccount" [longSubscriptionsCreate])
-
-      longResult.searchResultScore `shouldBe` shortResult.searchResultScore
-
-    it "does not discover candidates from module tokens only" do
-      suggestionNames (search "SubscriptionAccount" [subscriptionsCreate, usersCreate]) `shouldBe` []
-
-    it "preserves defining-module qualified filtering" do
-      suggestionNames (search "Subscriptions.Database.Account.create" [subscriptionsCreate, usersCreate])
-        `shouldBe` ["Subscriptions.Database.Account.create"]
-
-    it "preserves re-export-module qualified filtering" do
-      suggestionNames (search "Public.Api.create" [reexportedCreate, usersCreate])
-        `shouldBe` ["Internal.Database.Account.create"]
-
-    it "lets any module pattern qualify a symbol" do
-      suggestionNames (searchWithPatterns ["Missing.*", "Users.*"] "create" [subscriptionsCreate, usersCreate])
-        `shouldBe` ["Users.Database.Account.create"]
-
-    it "lets any associated module qualify a symbol" do
-      suggestionNames (searchWithPatterns ["Public.*"] "create" [reexportedCreate, usersCreate])
-        `shouldBe` ["Internal.Database.Account.create"]
-
-    it "combines qualified query modules and module patterns with AND semantics" do
-      suggestionNames (searchWithPatterns ["Public.*"] "Public.Api.create" [reexportedCreate, usersCreate])
-        `shouldBe` ["Internal.Database.Account.create"]
-
-      suggestionNames (searchWithPatterns ["Users.*", "Missing.*"] "Public.Api.create" [reexportedCreate, usersCreate])
+    it "keeps exact qualified modules as hard scope filters" do
+      suggestionNames (search "Other.Module.Argyle.request" [argyleRequest])
         `shouldBe` []
 
-      suggestionNames (searchWithPatterns ["Missing.*", "Public.*"] "Public.Api.create" [reexportedCreate, usersCreate])
-        `shouldBe` ["Internal.Database.Account.create"]
+      suggestionNames (search "ExternalProviders.Argyle.Client.Argyle" [argyleRequest])
+        `shouldBe` ["ExternalProviders.Argyle.Client.request"]
 
-    it "keeps empty module patterns unrestricted" do
-      suggestionNames (searchWithPatterns [] "create" [subscriptionsCreate, usersCreate])
-        `shouldBe` suggestionNames (search "create" [subscriptionsCreate, usersCreate])
+    it "keeps module patterns as OR hard scope filters" do
+      suggestionNames (searchWithPatterns ["Missing.*", "ExternalProviders.*"] "Argyle" [argyleRequest])
+        `shouldBe` ["ExternalProviders.Argyle.Client.request"]
 
-    it "keeps out-of-scope high-ranked results from consuming the requested result budget" do
-      take 2 (suggestionNames (searchWithPatterns ["Public.*"] "createUser" [exactPrivateCreateUser, exactOtherCreateUser, publicCreateUserRecord, publicCreateTestUser]))
-        `shouldMatchList` ["Public.Api.createUserRecord", "Public.Api.createTestUser"]
+      suggestionNames (searchWithPatterns ["Missing.*", "Other.*"] "Argyle" [argyleRequest])
+        `shouldBe` []
 
-    it "keeps alias entries independent so the best lookup name can survive deduplication" do
+    it "uses direct synonyms without transitive synonym expansion" do
+      SearchToken "query" `areDirectSynonyms` SearchToken "select" `shouldBe` True
+      SearchToken "select" `areDirectSynonyms` SearchToken "filter" `shouldBe` True
+      SearchToken "query" `areDirectSynonyms` SearchToken "filter" `shouldBe` False
+
+    it "applies direct synonyms in full search only for direct neighbors" do
+      suggestionNames (search "db" [databaseConnect])
+        `shouldBe` ["Storage.Database.connect"]
+
+      suggestionNames (search "query" [filterRows])
+        `shouldBe` []
+
+    it "indexes one document per actual symbol including all aliases" do
       let alias = lookupOcc "createSubscriptionAccount"
           aliased = subscriptionsCreate {aliases = Set.singleton alias}
-          suggestions = search "createSubscriptionAccount" [aliased]
+          index = testSearchIndex [aliased]
+          document = expectDocument aliased index
 
-      map (.suggestedLookupName) suggestions `shouldBe` ["createSubscriptionAccount", "create"]
-      map ((== aliased.name) . (.suggestedSymbol.name)) suggestions `shouldBe` [True, True]
+      Map.size index.searchDocuments `shouldBe` 1
+      map (.indexedName) (NE.toList document.symbolSearchNames) `shouldMatchList` [lookupOcc "create", alias]
+      suggestionLookupNames (search "createSubscriptionAccount" [aliased]) `shouldBe` ["createSubscriptionAccount"]
 
-    it "orders deterministic ties by lookup name" do
-      suggestionNames (search "create" [usersCreate, subscriptionsCreate])
-        `shouldBe` ["Subscriptions.Database.Account.create", "Users.Database.Account.create"]
+    it "merges symbol metadata across aliases for one document" do
+      let exportedFromA = sharedLookup {visibility = Symbol'ExportedFrom (Set.singleton (testModule "Public.A")), aliases = Set.singleton (lookupOcc "lookupA")}
+          exportedFromB = sharedLookup {visibility = Symbol'ExportedFrom (Set.singleton (testModule "Public.B")), aliases = Set.singleton (lookupOcc "lookupB")}
+          index = testSearchIndex [exportedFromA, exportedFromB]
+          document = expectDocument sharedLookup index
 
-    it "uses result type context without module assistance" do
-      suggestionNames (searchWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, usersCreateShort] discountResultFacts)
+      moduleTexts document `shouldMatchList` ["Internal.Lookup", "Public.A", "Public.B"]
+      suggestionNames (searchWithPatterns ["Public.B"] "lookup" [exportedFromA, exportedFromB])
+        `shouldBe` ["Internal.Lookup.lookup"]
+
+    it "counts field document frequency once per symbol despite aliases" do
+      let aliasA = lookupOcc "createAccount"
+          aliasB = lookupOcc "createUserAccount"
+          aliased = subscriptionsCreate {aliases = Set.fromList [aliasA, aliasB]}
+          index = testSearchIndexWithTypeFacts [aliased] (typeFacts [(aliased, ["ByteString"], ["ValidationResult"])])
+
+      Map.size index.searchDocuments `shouldBe` 1
+      fieldFrequency SearchName (SearchToken "create") index `shouldBe` 1
+      fieldFrequency SearchModule (SearchToken "subscriptions") index `shouldBe` 1
+      fieldFrequency SearchArgumentType (SearchToken "byte") index `shouldBe` 1
+      fieldFrequency SearchResultType (SearchToken "validation") index `shouldBe` 1
+
+    it "populates postings for every field" do
+      let index = testSearchIndexWithTypeFacts [decodePayload] (typeFacts [(decodePayload, ["ByteString"], ["ValidationResult"])])
+
+      postingNames SearchName (SearchToken "decode") index `shouldBe` ["Payload.Codec.decodePayload"]
+      postingNames SearchArgumentType (SearchToken "byte") index `shouldBe` ["Payload.Codec.decodePayload"]
+      postingNames SearchResultType (SearchToken "validation") index `shouldBe` ["Payload.Codec.decodePayload"]
+      postingNames SearchModule (SearchToken "payload") index `shouldBe` ["Payload.Codec.decodePayload"]
+
+    it "ranks exact lookup-name equality before semantic non-exact results" do
+      let suggestions =
+            searchWithTypeFacts
+              "createUser"
+              [createUsers, createUserRequest, highIdfContext, exactCreateUser]
+              (typeFacts [(highIdfContext, [], ["createUser"])])
+
+      suggestionLookupNames suggestions `shouldBe` ["createUser", "createUsers", "createUserRequest", "load"]
+      (head suggestions).suggestionExactLookupNameMatch `shouldBe` True
+
+    it "lets rare secondary evidence materially influence ranking" do
+      suggestionNames (searchWithTypeFacts "create DiscountAccount" [commonCreate, createOtherAccount] (typeFacts [(commonCreate, [], ["DiscountAccount"]), (createOtherAccount, [], ["Account"])]))
         `shouldBe` ["Subscriptions.create", "Users.create"]
 
-    it "keeps exact primary names stronger than result type context" do
-      suggestionNames (searchWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, exactCreateDiscountAccount] discountResultFacts)
-        `shouldBe` ["Other.Module.createDiscountAccount", "Subscriptions.create"]
+    it "keeps exact name evidence stronger than the same token in type context by default" do
+      suggestionNames (searchWithTypeFacts "payload" [payloadName, decodePayload] (typeFacts [(decodePayload, ["Payload"], ["Result"])]))
+        `shouldBe` ["Payload.Codec.payload", "Payload.Codec.decodePayload"]
 
-    it "uses argument type context when result type context is absent" do
-      suggestionNames (searchWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, usersCreateShort] discountArgumentFacts)
-        `shouldBe` ["Subscriptions.create", "Users.create"]
+    it "caps approximate IDF at query-token IDF instead of rare stored-token IDF" do
+      let index = testSearchIndex [commonUser, rarePrincipal]
+          queryToken = SearchToken "user"
+      evidence <- expectJust "Expected synonym evidence for rare principal." (selectedEvidenceFor queryToken rarePrincipal index)
 
-    it "weights result type context above argument type context when they conflict" do
-      suggestionNames (searchWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, usersCreateShort] conflictingDiscountFacts)
-        `shouldBe` ["Subscriptions.create", "Users.create"]
+      evidence.evidenceMatchKind `shouldBe` TokenMatchSynonym
+      evidence.evidenceIdf `shouldBe` tokenIdf index SearchName queryToken
 
-    it "does not discover candidates from type tokens only" do
-      suggestionNames (searchWithTypeFacts "DiscountAccount" [subscriptionsCreateShort, usersCreateShort] discountResultFacts)
-        `shouldBe` []
+    it "uses name specificity ratio for otherwise equal name matches" do
+      suggestionLookupNames (search "create user" [threeTokenCreateUser, fiveTokenCreateUser])
+        `shouldBe` ["createUserRecord", "createUserBankAccountRecord"]
 
-    it "keeps same-named symbols on independent type contexts" do
-      (firstResult, secondResult) <- expectTwoResults (searchResultsWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, usersCreateShort] discountResultFacts)
+    it "deduplicates repeated query tokens" do
+      parseSymbolSearchQuery "user user lookup"
+        `shouldSatisfy` ((== [SearchToken "user", SearchToken "lookup"]) . (.symbolSearchTokens))
 
-      (firstResult.searchResultValue.name == subscriptionsCreateShort.name) `shouldBe` True
-      (secondResult.searchResultValue.name == usersCreateShort.name) `shouldBe` True
-      firstResult.searchResultScore `shouldSatisfy` (> secondResult.searchResultScore)
+    it "strips owner hints before tokenizing symbol-search queries" do
+      let unqualified = parseSymbolSearchQuery "lookup@Map"
+          qualified = parseSymbolSearchQuery "Data.Map.lookup@Map"
 
-    it "keeps exact common tokens above rare canonical approximations" do
-      let results =
-            documentSearchResults
-              "createUser"
-              ( [ "createUserRecord",
-                  "createsUserRecord"
-                ]
-                  <> createFrequencyFixtures
-              )
+      unqualified.symbolSearchTokens `shouldBe` [SearchToken "lookup"]
+      fmap (.unNormalizedModuleName) unqualified.symbolSearchExactModule `shouldBe` Nothing
+      qualified.symbolSearchTokens `shouldBe` [SearchToken "lookup"]
+      fmap (.unNormalizedModuleName) qualified.symbolSearchExactModule `shouldBe` Just "Data.Map"
 
-      scoreOfDocument "createUserRecord" results
-        `shouldSatisfy` (> scoreOfDocument "createsUserRecord" results)
+    it "does not combine name evidence across mutually exclusive aliases" do
+      let splitAliases =
+            splitAliasSymbol
+              { aliases = Set.fromList [lookupOcc "fooBar", lookupOcc "bazQux"]
+              }
 
-    it "keeps reported create-user candidates below closer exact-token names" do
-      let results =
-            documentSearchResults
-              "createUser"
-              [ "createUser",
-                "createUserRecord",
-                "interruptCreatesUserInterruptHitlSpec",
-                "createTestUsers",
-                "manuallyCreateUsersEndpoint",
-                "createFromUser",
-                "createUserName"
-              ]
+      suggestionNames (search "fooQux" [splitAliases, genuineFooQux])
+        `shouldBe` ["Alias.Real.fooQux", "Alias.Split.placeholder"]
 
-      rankOfDocument "createUser" results `shouldBe` 1
-      rankOfDocument "createUserRecord" results
-        `shouldSatisfy` (< rankOfDocument "interruptCreatesUserInterruptHitlSpec" results)
-      rankOfDocument "createUserRecord" results
-        `shouldSatisfy` (< rankOfDocument "manuallyCreateUsersEndpoint" results)
+    it "preserves capitalization bias for otherwise comparable candidates" do
+      suggestionLookupNames (search "User" [lowerUser, upperUser])
+        `shouldBe` ["User", "user"]
 
-    it "keeps exact common tokens above rare fuzzy approximations" do
-      let results =
-            documentSearchResults
-              "createUser"
-              ( [ "createUserRecord",
-                  "cretaeUserRecord"
-                ]
-                  <> createFrequencyFixtures
-              )
-
-      scoreOfDocument "createUserRecord" results
-        `shouldSatisfy` (> scoreOfDocument "cretaeUserRecord" results)
-
-    it "keeps generic extra-token penalties stronger for narrower names" do
-      let results =
-            documentSearchResults
-              "createUser"
-              [ "createUserRecord",
-                "createUserBankAccountRecord"
-              ]
-
-      rankOfDocument "createUserRecord" results
-        `shouldSatisfy` (< rankOfDocument "createUserBankAccountRecord" results)
+    it "orders equal-score candidates deterministically by lookup name" do
+      suggestionLookupNames (search "create" [usersCreate, subscriptionsCreate])
+        `shouldBe` ["create", "create"]
 
 search :: Text -> [Symbol] -> [SymbolSuggestion]
 search query symbols =
-  findSimilarSymbolsCandidatesInMap [] (parseAndNormalizeName query) (testSearchIndex symbols)
+  findSimilarSymbolsCandidatesInMap [] query (testSearchIndex symbols)
 
 searchWithPatterns :: [Text] -> Text -> [Symbol] -> [SymbolSuggestion]
 searchWithPatterns rawPatterns query symbols =
-  findSimilarSymbolsCandidatesInMap (map compilePattern rawPatterns) (parseAndNormalizeName query) (testSearchIndex symbols)
+  findSimilarSymbolsCandidatesInMap (map compilePattern rawPatterns) query (testSearchIndex symbols)
 
 searchWithTypeFacts :: Text -> [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> [SymbolSuggestion]
-searchWithTypeFacts query symbols typeFacts =
-  findSimilarSymbolsCandidatesInMap [] (parseAndNormalizeName query) (testSearchIndexWithTypeFacts symbols typeFacts)
+searchWithTypeFacts query symbols facts =
+  findSimilarSymbolsCandidatesInMap [] query (testSearchIndexWithTypeFacts symbols facts)
+
+testSearchIndex :: [Symbol] -> SymbolSearchIndex
+testSearchIndex symbols =
+  buildSymbolSearchIndex (symbolsMap symbols)
+
+testSearchIndexWithTypeFacts :: [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> SymbolSearchIndex
+testSearchIndexWithTypeFacts symbols facts =
+  buildSymbolSearchIndex (symbolsMapWithTypeFacts symbols facts)
+
+expectDocument :: Symbol -> SymbolSearchIndex -> SymbolSearchDocument
+expectDocument symbol index =
+  case Map.lookup symbol.name index.searchDocuments of
+    Just document -> document
+    Nothing -> error "Expected indexed document"
+
+expectJust :: String -> Maybe a -> IO a
+expectJust _ (Just value) =
+  pure value
+expectJust message Nothing =
+  expectationFailure message *> fail "unreachable"
+
+fieldFrequency :: SymbolSearchField -> SearchToken -> SymbolSearchIndex -> Int
+fieldFrequency field token index =
+  Map.findWithDefault 0 token (Map.findWithDefault Map.empty field index.searchDocumentFrequencies)
+
+postingsFor :: SymbolSearchField -> SearchToken -> SymbolSearchIndex -> Set.Set GHC.Name
+postingsFor field token index =
+  Map.findWithDefault Set.empty token (Map.findWithDefault Map.empty field index.searchPostings)
+
+postingNames :: SymbolSearchField -> SearchToken -> SymbolSearchIndex -> [Text]
+postingNames field token index =
+  map renderName (Set.toList (postingsFor field token index))
+
+renderName :: GHC.Name -> Text
+renderName name =
+  T.pack (GHC.moduleNameString (GHC.moduleName (GHC.nameModule name)) <> "." <> GHC.occNameString (GHC.nameOccName name))
+
+moduleTexts :: SymbolSearchDocument -> [Text]
+moduleTexts document =
+  map (.unNormalizedModuleName) (Set.toList document.symbolSearchModules)
+
+selectedEvidenceFor :: SearchToken -> Symbol -> SymbolSearchIndex -> Maybe TokenMatchEvidence
+selectedEvidenceFor queryToken symbol index = do
+  suggestion <- List.find ((== symbol.name) . (.name) . (.suggestedSymbol)) (findSimilarSymbolsCandidatesInMap [] queryToken.unSearchToken index)
+  List.find ((== queryToken) . (.evidenceQueryToken)) suggestion.suggestionEvidence
 
 compilePattern :: Text -> ModulePattern
 compilePattern rawPattern =
@@ -213,81 +235,17 @@ compilePattern rawPattern =
     Right pattern' -> pattern'
     Left _ -> error ("Expected valid module pattern " <> T.unpack rawPattern)
 
-searchResults :: Text -> [Symbol] -> [SearchResult SimilarSymbolSearchKey Symbol]
-searchResults query symbols =
-  searchOccurrences (queryOccText query) (testSearchIndex symbols)
-
-searchResultsWithTypeFacts :: Text -> [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> [SearchResult SimilarSymbolSearchKey Symbol]
-searchResultsWithTypeFacts query symbols typeFacts =
-  searchOccurrences (queryOccText query) (testSearchIndexWithTypeFacts symbols typeFacts)
-
-expectOneResult :: [result] -> IO result
-expectOneResult results =
-  case results of
-    [result] -> pure result
-    _ -> expectationFailure "Expected exactly one result." *> fail "unreachable"
-
-expectTwoResults :: [result] -> IO (result, result)
-expectTwoResults results =
-  case results of
-    [firstResult, secondResult] -> pure (firstResult, secondResult)
-    _ -> expectationFailure "Expected exactly two results." *> fail "unreachable"
-
-expectScoreFor :: Symbol -> Text -> [Symbol] -> IO Double
-expectScoreFor target query symbols =
-  case [result.searchResultScore | result <- searchResults query symbols, result.searchResultValue.name == target.name] of
-    [score] -> pure score
-    _ -> expectationFailure "Expected exactly one result for target symbol." *> fail "unreachable"
-
-documentSearchResults :: Text -> [Text] -> [SearchResult Text Text]
-documentSearchResults query documents =
-  searchOccurrences query $
-    buildSearchIndex
-      [ (document, SearchDocument {primaryText = document, contextTexts = Map.empty}, document)
-      | document <- documents
-      ]
-
-scoreOfDocument :: Text -> [SearchResult Text Text] -> Double
-scoreOfDocument document results =
-  case [result.searchResultScore | result <- results, result.searchResultValue == document] of
-    [score] -> score
-    _ -> error ("Expected exactly one score for document " <> T.unpack document)
-
-rankOfDocument :: Text -> [SearchResult Text Text] -> Int
-rankOfDocument document results =
-  case [rank | (rank, result) <- zip [1 ..] results, result.searchResultValue == document] of
-    [rank] -> rank
-    _ -> error ("Expected exactly one rank for document " <> T.unpack document)
-
-createFrequencyFixtures :: [Text]
-createFrequencyFixtures =
-  [ "createAccount",
-    "createProject",
-    "createSession",
-    "createInvoice",
-    "createReport",
-    "createToken"
-  ]
-
-testSearchIndex :: [Symbol] -> TokenSearchIndex SimilarSymbolSearchKey Symbol
-testSearchIndex symbols =
-  buildSimilarSymbolsSearchIndex (symbolsMap symbols)
-
-testSearchIndexWithTypeFacts :: [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> TokenSearchIndex SimilarSymbolSearchKey Symbol
-testSearchIndexWithTypeFacts symbols typeFacts =
-  buildSimilarSymbolsSearchIndex (symbolsMapWithTypeFacts symbols typeFacts)
-
 symbolsMap :: [Symbol] -> SymbolsMap
 symbolsMap symbols =
   symbolsMapWithTypeFacts symbols Map.empty
 
 symbolsMapWithTypeFacts :: [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> SymbolsMap
-symbolsMapWithTypeFacts symbols typeFacts =
+symbolsMapWithTypeFacts symbols facts =
   SymbolsMap
     { homeSymbolsMap =
         SymbolsIndex
           { symbolsByLookupName = Map.fromListWith Set.union symbolEntries,
-            valueTypeHeadNamesBySymbol = typeFacts
+            valueTypeHeadNamesBySymbol = facts
           },
       externalSymbolsMap =
         SymbolsIndex
@@ -303,9 +261,16 @@ symbolsMapWithTypeFacts symbols typeFacts =
           let lookupName = lookupOcc (GHC.occNameString (GHC.nameOccName symbol.name))
         ]
 
-queryOccText :: Text -> Text
-queryOccText query =
-  unNormalizedOccName (parseAndNormalizeName query).occName
+typeFacts :: [(Symbol, [Text], [Text])] -> Map.Map GHC.Name ValueTypeHeadNames
+typeFacts facts =
+  Map.fromList [(symbol.name, valueTypeHeads arguments results) | (symbol, arguments, results) <- facts]
+
+valueTypeHeads :: [Text] -> [Text] -> ValueTypeHeadNames
+valueTypeHeads argumentNames resultNames =
+  ValueTypeHeadNames
+    { argumentTypeHeadNames = Set.fromList argumentNames,
+      resultTypeHeadNames = Set.fromList resultNames
+    }
 
 lookupOcc :: String -> NormalizedOccName
 lookupOcc text =
@@ -315,107 +280,13 @@ suggestionNames :: [SymbolSuggestion] -> [Text]
 suggestionNames =
   map (qualifiedSymbolName . (.suggestedSymbol))
 
+suggestionLookupNames :: [SymbolSuggestion] -> [Text]
+suggestionLookupNames =
+  map (.suggestedLookupName)
+
 qualifiedSymbolName :: Symbol -> Text
 qualifiedSymbolName symbol =
-  T.pack (GHC.moduleNameString (GHC.moduleName (GHC.nameModule symbol.name)) <> "." <> GHC.occNameString (GHC.nameOccName symbol.name))
-
-subscriptionsCreate :: Symbol
-subscriptionsCreate =
-  testSymbol 1 "Subscriptions.Database.Account" "create"
-
-longSubscriptionsCreate :: Symbol
-longSubscriptionsCreate =
-  testSymbol 2 "Subscriptions.Database.Internal.Persistence.Account" "create"
-
-usersCreate :: Symbol
-usersCreate =
-  testSymbol 3 "Users.Database.Account" "create"
-
-usersCreateAccount :: Symbol
-usersCreateAccount =
-  testSymbol 4 "Users.Database.Account" "createAccount"
-
-exactCreateSubscriptionAccount :: Symbol
-exactCreateSubscriptionAccount =
-  testSymbol 5 "Other.Module" "createSubscriptionAccount"
-
-reexportedCreate :: Symbol
-reexportedCreate =
-  (testSymbol 6 "Internal.Database.Account" "create")
-    { visibility = Symbol'ExportedFrom (Set.singleton (testModule "Public.Api"))
-    }
-
-listMap :: Symbol
-listMap =
-  testSymbol 7 "Data.List" "map"
-
-unrelatedOtherModuleThing :: Symbol
-unrelatedOtherModuleThing =
-  testSymbol 8 "Other.Module" "unrelated"
-
-unrelatedDataMapThing :: Symbol
-unrelatedDataMapThing =
-  testSymbol 9 "Data.Map" "unrelated"
-
-otherMap :: Symbol
-otherMap =
-  testSymbol 10 "Other.Module" "map"
-
-subscriptionsCreateShort :: Symbol
-subscriptionsCreateShort =
-  testSymbol 11 "Subscriptions" "create"
-
-usersCreateShort :: Symbol
-usersCreateShort =
-  testSymbol 12 "Users" "create"
-
-exactCreateDiscountAccount :: Symbol
-exactCreateDiscountAccount =
-  testSymbol 13 "Other.Module" "createDiscountAccount"
-
-exactPrivateCreateUser :: Symbol
-exactPrivateCreateUser =
-  testSymbol 14 "Private.Internal" "createUser"
-
-exactOtherCreateUser :: Symbol
-exactOtherCreateUser =
-  testSymbol 15 "Other.Internal" "createUser"
-
-publicCreateUserRecord :: Symbol
-publicCreateUserRecord =
-  testSymbol 16 "Public.Api" "createUserRecord"
-
-publicCreateTestUser :: Symbol
-publicCreateTestUser =
-  testSymbol 17 "Public.Api" "createTestUser"
-
-discountResultFacts :: Map.Map GHC.Name ValueTypeHeadNames
-discountResultFacts =
-  Map.fromList
-    [ (subscriptionsCreateShort.name, valueTypeHeads [] ["DiscountAccount"]),
-      (usersCreateShort.name, valueTypeHeads [] ["UserAccount"])
-    ]
-
-discountArgumentFacts :: Map.Map GHC.Name ValueTypeHeadNames
-discountArgumentFacts =
-  Map.fromList
-    [ (subscriptionsCreateShort.name, valueTypeHeads ["DiscountAccount"] ["Result"]),
-      (usersCreateShort.name, valueTypeHeads ["UserAccount"] ["Result"])
-    ]
-
-conflictingDiscountFacts :: Map.Map GHC.Name ValueTypeHeadNames
-conflictingDiscountFacts =
-  Map.fromList
-    [ (subscriptionsCreateShort.name, valueTypeHeads ["UserAccount"] ["DiscountAccount"]),
-      (usersCreateShort.name, valueTypeHeads ["DiscountAccount"] ["UserAccount"])
-    ]
-
-valueTypeHeads :: [Text] -> [Text] -> ValueTypeHeadNames
-valueTypeHeads argumentNames resultNames =
-  ValueTypeHeadNames
-    { argumentTypeHeadNames = Set.fromList argumentNames,
-      resultTypeHeadNames = Set.fromList resultNames
-    }
+  renderName symbol.name
 
 testSymbol :: Int -> String -> String -> Symbol
 testSymbol unique moduleName occName =
@@ -428,3 +299,69 @@ testSymbol unique moduleName occName =
 testModule :: String -> GHC.Module
 testModule moduleName =
   GHC.mkModule GHC.mainUnit (GHC.mkModuleName moduleName)
+
+decodePayload :: Symbol
+decodePayload = testSymbol 1 "Payload.Codec" "decodePayload"
+
+argyleRequest :: Symbol
+argyleRequest = testSymbol 2 "ExternalProviders.Argyle.Client" "request"
+
+databaseConnect :: Symbol
+databaseConnect = testSymbol 3 "Storage.Database" "connect"
+
+filterRows :: Symbol
+filterRows = testSymbol 4 "Rows" "filterRows"
+
+subscriptionsCreate :: Symbol
+subscriptionsCreate = testSymbol 5 "Subscriptions" "create"
+
+usersCreate :: Symbol
+usersCreate = testSymbol 6 "Users" "create"
+
+createUsers :: Symbol
+createUsers = testSymbol 7 "Users" "createUsers"
+
+createUserRequest :: Symbol
+createUserRequest = testSymbol 8 "Users" "createUserRequest"
+
+highIdfContext :: Symbol
+highIdfContext = testSymbol 9 "Users" "load"
+
+exactCreateUser :: Symbol
+exactCreateUser = testSymbol 10 "Users" "createUser"
+
+commonCreate :: Symbol
+commonCreate = testSymbol 11 "Subscriptions" "create"
+
+createOtherAccount :: Symbol
+createOtherAccount = testSymbol 12 "Users" "create"
+
+payloadName :: Symbol
+payloadName = testSymbol 13 "Payload.Codec" "payload"
+
+commonUser :: Symbol
+commonUser = testSymbol 14 "Common" "user"
+
+rarePrincipal :: Symbol
+rarePrincipal = testSymbol 15 "Rare" "principal"
+
+threeTokenCreateUser :: Symbol
+threeTokenCreateUser = testSymbol 16 "Users" "createUserRecord"
+
+fiveTokenCreateUser :: Symbol
+fiveTokenCreateUser = testSymbol 17 "Users" "createUserBankAccountRecord"
+
+lowerUser :: Symbol
+lowerUser = testSymbol 18 "Users" "user"
+
+upperUser :: Symbol
+upperUser = testSymbol 19 "Users" "User"
+
+sharedLookup :: Symbol
+sharedLookup = testSymbol 20 "Internal.Lookup" "lookup"
+
+splitAliasSymbol :: Symbol
+splitAliasSymbol = testSymbol 21 "Alias.Split" "placeholder"
+
+genuineFooQux :: Symbol
+genuineFooQux = testSymbol 22 "Alias.Real" "fooQux"

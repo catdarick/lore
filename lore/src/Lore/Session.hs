@@ -53,7 +53,7 @@ import Lore.Internal.Session
     emptyNameToInstancesIndexCache,
     emptyParsedModuleFactsCache,
     emptyParsedOccurrenceModuleIndexCache,
-    emptySimilarSymbolsSearchIndexCache,
+    emptySymbolSearchIndexCache,
     emptySymbolsDependencySetCache,
     emptyTemporalModulesRegistry,
     emptyTypedModuleFactsCache,
@@ -197,9 +197,9 @@ sessionCacheResetActions =
           setCacheVarStrict sessionContext.externalSymbolsIndexCacheVar emptyExternalSymbolsIndexCache
       },
     SessionCacheResetAction
-      { sessionCacheResetActionName = "similarSymbolsSearchIndexCacheVar",
+      { sessionCacheResetActionName = "symbolSearchIndexCacheVar",
         sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.similarSymbolsSearchIndexCacheVar emptySimilarSymbolsSearchIndexCache
+          setCacheVarStrict sessionContext.symbolSearchIndexCacheVar emptySymbolSearchIndexCache
       },
     SessionCacheResetAction
       { sessionCacheResetActionName = "symbolsDependencySetCacheVar",

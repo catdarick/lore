@@ -2,9 +2,7 @@ module Lore.Internal.Lookup.Cache.Types
   ( HomeSymbolsIndexCache (..),
     ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
-    SimilarSymbolsSearchIndexCache (..),
-    SimilarSymbolsSearchIndex (..),
-    SimilarSymbolSearchKey (..),
+    SymbolSearchIndexCache (..),
     SymbolsDependencySetCache (..),
     ModSummariesCache (..),
     NameToInstancesIndexCache (..),
@@ -12,16 +10,8 @@ module Lore.Internal.Lookup.Cache.Types
 where
 
 import qualified Data.Set as Set
-import qualified GHC
-import Lore.Internal.Lookup.Name (NormalizedOccName)
-import Lore.Internal.Lookup.Search.Types (TokenSearchIndex)
-import Lore.Internal.Lookup.Types (ModSummaries, NameToInstancesIndex, Symbol, SymbolsIndex)
-
-data SimilarSymbolSearchKey = SimilarSymbolSearchKey
-  { searchLookupName :: NormalizedOccName,
-    searchSymbolName :: GHC.Name
-  }
-  deriving stock (Eq, Ord)
+import Lore.Internal.Lookup.SymbolSearch.Types (SymbolSearchIndex)
+import Lore.Internal.Lookup.Types (ModSummaries, NameToInstancesIndex, SymbolsIndex)
 
 newtype HomeSymbolsIndexCache = HomeSymbolsIndexCache
   { cachedHomeSymbolsIndex :: Maybe SymbolsIndex
@@ -36,12 +26,8 @@ data ExternalSymbolsSnapshot = ExternalSymbolsSnapshot
     externalSymbolsSnapshotIndex :: SymbolsIndex
   }
 
-newtype SimilarSymbolsSearchIndexCache = SimilarSymbolsSearchIndexCache
-  { cachedSimilarSymbolsSearchIndex :: Maybe SimilarSymbolsSearchIndex
-  }
-
-newtype SimilarSymbolsSearchIndex = SimilarSymbolsSearchIndex
-  { unSimilarSymbolsSearchIndex :: TokenSearchIndex SimilarSymbolSearchKey Symbol
+newtype SymbolSearchIndexCache = SymbolSearchIndexCache
+  { cachedSymbolSearchIndex :: Maybe SymbolSearchIndex
   }
 
 newtype SymbolsDependencySetCache = SymbolsDependencySetCache

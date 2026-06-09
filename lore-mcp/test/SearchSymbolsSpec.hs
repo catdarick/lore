@@ -6,11 +6,16 @@ where
 import qualified Data.Aeson as J
 import qualified Data.Aeson.Key as JK
 import qualified Data.Aeson.KeyMap as JKM
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GHC.Plugins as GHC
+import qualified GHC.Types.Unique as GHC.Unique
+import Lore.Internal.Lookup.Types (Symbol (..), SymbolSuggestion (..), SymbolVisibility (..))
 import Lore.Mcp.Internal.Tool (SomeTool, getSomeToolSpec)
 import Lore.Mcp.Monad (LoreMcpMonad)
 import Lore.Mcp.Tools.SearchSymbols (searchSymbolsTool)
+import Lore.Tools.Internal.SymbolSuggestions (GroupedSymbolSuggestion (..), groupSymbolSuggestions)
 import McpTestSupport (callToolWithArgs, fixtureLoreMcp, fixtureLoreMcpAtWithCache, loadFixtureHomeModules, withFixtureCopy)
 import System.FilePath ((</>))
 import Test.Hspec
@@ -156,6 +161,29 @@ spec =
       toolSpecHasProperty "modulePatterns" toolSpec `shouldBe` True
       toolSpecHasProperty "modulePattern" toolSpec `shouldBe` False
 
+    it "groups ranked suggestions before applying a rendered limit" do
+      let grouped =
+            take 2 $
+              groupSymbolSuggestions
+                [ suggestion 1 "Module.A" "foo",
+                  suggestion 2 "Module.B" "foo",
+                  suggestion 3 "Module.C" "bar",
+                  suggestion 4 "Module.D" "baz"
+                ]
+
+      map (.groupedLookupName) grouped `shouldBe` ["foo", "bar"]
+      map (.groupedDefiningModules) grouped `shouldBe` [["Module.A", "Module.B"], ["Module.C"]]
+
+    it "does not rely on overfetching when many symbols share one lookup name" do
+      let grouped =
+            take 2 $
+              groupSymbolSuggestions $
+                [suggestion unique ("Module.Foo" <> show unique) "foo" | unique <- [1 .. 25]]
+                  <> [suggestion 100 "Module.Bar" "bar"]
+                  <> [suggestion 101 "Module.Baz" "baz"]
+
+      map (.groupedLookupName) grouped `shouldBe` ["foo", "bar"]
+
 searchSymbolsArgs :: Text -> J.Value
 searchSymbolsArgs query =
   J.object
@@ -196,21 +224,24 @@ toolSpecHasProperty propertyName = \case
       _ -> False
   _ -> False
 
-toolSpecArrayItemHasMinLength :: Text -> Integer -> J.Value -> Bool
-toolSpecArrayItemHasMinLength propertyName expectedMinLength = \case
-  J.Object toolSpec ->
-    case JKM.lookup "inputSchema" toolSpec >>= valueObjectField "properties" >>= objectField propertyName >>= objectField "items" >>= JKM.lookup "minLength" of
-      Just actualMinLength -> actualMinLength == J.Number (fromInteger expectedMinLength)
-      Nothing -> False
-  _ -> False
+suggestion :: Int -> String -> String -> SymbolSuggestion
+suggestion unique moduleName occName =
+  SymbolSuggestion
+    { suggestedSymbol = testSymbol unique moduleName occName,
+      suggestedLookupName = T.pack occName,
+      suggestionExactLookupNameMatch = False,
+      suggestionScore = 1.0,
+      suggestionEvidence = []
+    }
 
-valueObjectField :: Text -> J.Value -> Maybe J.Object
-valueObjectField fieldName = \case
-  J.Object object -> objectField fieldName object
-  _ -> Nothing
+testSymbol :: Int -> String -> String -> Symbol
+testSymbol unique moduleName occName =
+  Symbol
+    { name = GHC.mkExternalName (GHC.Unique.mkUniqueGrimily unique) (testModule moduleName) (GHC.mkVarOcc occName) GHC.noSrcSpan,
+      visibility = Symbol'ExportedFrom (Set.singleton (testModule moduleName)),
+      aliases = Set.empty
+    }
 
-objectField :: Text -> J.Object -> Maybe J.Object
-objectField fieldName object =
-  case JKM.lookup (JK.fromText fieldName) object of
-    Just (J.Object child) -> Just child
-    _ -> Nothing
+testModule :: String -> GHC.Module
+testModule moduleName =
+  GHC.mkModule GHC.mainUnit (GHC.mkModuleName moduleName)

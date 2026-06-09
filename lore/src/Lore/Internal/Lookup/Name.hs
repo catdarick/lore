@@ -9,6 +9,8 @@ module Lore.Internal.Lookup.Name
     NormalizedName (occName, moduleName, ownerHint),
     normalizeName,
     parseAndNormalizeName,
+    parseNormalizedNameQuery,
+    parseQualifiedNormalizedOccName,
     unNormalizedOccName,
     unNormalizedModuleName,
     normalizeModuleName,
@@ -94,25 +96,34 @@ extractAndNormalizeModuleName mdl = do
 
 parseAndNormalizeName :: Text -> NormalizedName
 parseAndNormalizeName queryText =
+  case parseNormalizedNameQuery queryText of
+    (moduleName, occName, ownerHint) ->
+      NormalizedName
+        { moduleName,
+          occName,
+          ownerHint
+        }
+
+parseNormalizedNameQuery :: Text -> (Maybe NormalizedModuleName, NormalizedOccName, Maybe NormalizedOccName)
+parseNormalizedNameQuery queryText =
   case splitOwnerHint queryText of
     (queryTextWithoutOwnerHint, maybeOwnerHintText) ->
-      parseQualifiedName queryTextWithoutOwnerHint maybeOwnerHintText
+      case parseQualifiedNormalizedOccNameText queryTextWithoutOwnerHint of
+        (moduleName, occName) ->
+          (moduleName, occName, normalizeOwnerHint maybeOwnerHintText)
 
-parseQualifiedName :: Text -> Maybe Text -> NormalizedName
-parseQualifiedName queryText maybeOwnerHintText =
+parseQualifiedNormalizedOccName :: Text -> (Maybe NormalizedModuleName, NormalizedOccName)
+parseQualifiedNormalizedOccName queryText =
+  case parseNormalizedNameQuery queryText of
+    (moduleName, occName, _) -> (moduleName, occName)
+
+parseQualifiedNormalizedOccNameText :: Text -> (Maybe NormalizedModuleName, NormalizedOccName)
+parseQualifiedNormalizedOccNameText queryText =
   case qualifiedCandidates of
     (moduleHint, occName) : _ ->
-      NormalizedName
-        { moduleName = Just (NormalizedModuleName moduleHint),
-          occName = normalizeOccName occName,
-          ownerHint = normalizeOwnerHint maybeOwnerHintText
-        }
+      (Just (NormalizedModuleName moduleHint), normalizeOccName occName)
     [] ->
-      NormalizedName
-        { moduleName = Nothing,
-          occName = normalizeOccName queryText,
-          ownerHint = normalizeOwnerHint maybeOwnerHintText
-        }
+      (Nothing, normalizeOccName queryText)
   where
     segments = T.splitOn "." queryText
     qualifiedCandidates =

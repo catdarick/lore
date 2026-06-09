@@ -64,10 +64,9 @@ lookupSymbolInfo options = do
         suggestions <-
           findSimilarSymbols
             FindSimilarSymbolsOptions
-              { similarSymbolsLimit = suggestionFetchLimit options.lookupSymbolInfoSuggestionLimit,
+              { similarSymbolsQuery = options.lookupSymbolInfoQuery,
                 similarSymbolsModulePatterns = []
               }
-            (parseAndNormalizeName options.lookupSymbolInfoQuery)
         let renderedSuggestions =
               maybe [] paginatedItems
                 (paginateItemsWithPageRequest
@@ -122,18 +121,6 @@ renderLookupSymbolInfoReady ready =
 paginateDetailedSymbolInfos :: PageRequest -> [DetailedSymbolInfo] -> Maybe (Paginated DetailedSymbolInfo)
 paginateDetailedSymbolInfos pageRequest =
   paginateItemsWithPageRequest pageRequest
-
-suggestionFetchLimit :: ResultLimit -> Int
-suggestionFetchLimit = \case
-  Unlimited ->
-    maxBound
-  Limit limit ->
-    max 1 (safeMultiply 20 (max 1 limit))
-  where
-    safeMultiply left right
-      | left == 0 || right == 0 = 0
-      | left > maxBound `div` right = maxBound
-      | otherwise = left * right
 
 lookupExactSymbolInfos :: (MonadLore m) => Text -> m [SymbolInfo]
 lookupExactSymbolInfos query = do

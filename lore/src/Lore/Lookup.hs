@@ -39,7 +39,6 @@ import Control.Monad (filterM)
 import Data.List (foldl', sortOn)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
-import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified GHC
@@ -85,7 +84,7 @@ data SymbolCategory
   deriving stock (Eq, Show)
 
 data FindSimilarSymbolsOptions = FindSimilarSymbolsOptions
-  { similarSymbolsLimit :: Int,
+  { similarSymbolsQuery :: T.Text,
     similarSymbolsModulePatterns :: [ModulePattern]
   }
   deriving stock (Eq, Show)
@@ -130,33 +129,10 @@ isLookupNameMatchingPrefix :: NormalizedOccName -> NormalizedOccName -> Bool
 isLookupNameMatchingPrefix prefix lookupName =
   unNormalizedOccName prefix `T.isPrefixOf` unNormalizedOccName lookupName
 
-findSimilarSymbols :: (MonadLore m) => FindSimilarSymbolsOptions -> NormalizedName -> m [SymbolSuggestion]
-findSimilarSymbols options targetName = do
+findSimilarSymbols :: (MonadLore m) => FindSimilarSymbolsOptions -> m [SymbolSuggestion]
+findSimilarSymbols options = do
   symbolsMap <- SymbolsMap.getCachedSymbolsMap
-  suggestions <- findSimilarSymbolsInMap options.similarSymbolsModulePatterns targetName symbolsMap
-  pure $
-    take options.similarSymbolsLimit $
-      sortOn suggestionSortKey $
-        Map.elems $
-          foldl' collectBestSuggestion Map.empty suggestions
-  where
-    suggestionSortKey suggestion =
-      ( Down suggestion.suggestionScore,
-        suggestion.suggestedLookupName,
-        suggestion.suggestedSymbol.name
-      )
-
-    collectBestSuggestion suggestionsByName suggestion =
-      Map.insertWith
-        pickBetterSuggestion
-        suggestion.suggestedSymbol.name
-        suggestion
-        suggestionsByName
-
-    pickBetterSuggestion newSuggestion oldSuggestion
-      | newSuggestion.suggestionScore > oldSuggestion.suggestionScore = newSuggestion
-      | newSuggestion.suggestionScore < oldSuggestion.suggestionScore = oldSuggestion
-      | otherwise = oldSuggestion
+  findSimilarSymbolsInMap options.similarSymbolsModulePatterns options.similarSymbolsQuery symbolsMap
 
 lookupSymbolInfo :: (MonadLore m) => GHC.Name -> m (Maybe SymbolInfo)
 lookupSymbolInfo name = do

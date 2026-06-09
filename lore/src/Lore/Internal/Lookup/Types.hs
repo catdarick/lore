@@ -21,6 +21,7 @@ import GHC.Generics (Generic)
 import qualified GHC.Types.Name.Env as NameEnv
 import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames)
 import Lore.Internal.Lookup.Name (NormalizedOccName)
+import Lore.Internal.Lookup.SymbolSearch.Base (TokenMatchEvidence)
 
 data SymbolsIndex = SymbolsIndex
   { symbolsByLookupName :: Map.Map NormalizedOccName (Set.Set Symbol),
@@ -50,7 +51,9 @@ data Symbol = Symbol
 data SymbolSuggestion = SymbolSuggestion
   { suggestedSymbol :: Symbol,
     suggestedLookupName :: Text,
-    suggestionScore :: Double
+    suggestionExactLookupNameMatch :: Bool,
+    suggestionScore :: Double,
+    suggestionEvidence :: [TokenMatchEvidence]
   }
   deriving (Generic, NFData, Eq, Ord)
 

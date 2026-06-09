@@ -1,16 +1,15 @@
-module Lore.Internal.Lookup.Search.Tokenize
+module Lore.Internal.Lookup.SymbolSearch.Tokenize
   ( tokenizeSearchText,
     canonicalizeSearchToken,
-    tokenSynonymRepresentative,
+    canonicalizeTokenText,
   )
 where
 
 import Data.Char (isAlphaNum, isLower, isSpace, isUpper)
-import qualified Data.Map.Strict as Map
+import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Lore.Internal.Lookup.Search.Synonyms (synonymRepresentatives)
-import Lore.Internal.Lookup.Search.Types (SearchToken (..))
+import Lore.Internal.Lookup.SymbolSearch.Types (SearchToken (..))
 
 tokenizeSearchText :: Text -> [SearchToken]
 tokenizeSearchText text =
@@ -58,22 +57,21 @@ splitCamelAcronymChunk =
           go completed (char : current) (next : rest)
 
 isBoundaryAfter :: Char -> Char -> [Char] -> Bool
-isBoundaryAfter char next rest =
-  (isLower char && isUpper next)
-    || (isAlphaNum char && isAlphaNum next && isDigitBoundary char next)
-    || case rest of
-      following : _ ->
-        isUpper char && isUpper next && isLower following
-      [] ->
-        False
+isBoundaryAfter char next rest
+  | isLower char && isUpper next = True
+  | isAlphaNum char && isAlphaNum next && digitBoundary char next = True
+  | isUpper char && isUpper next =
+      case rest of
+        following : _ -> isLower following
+        [] -> False
+  | otherwise = False
 
-isDigitBoundary :: Char -> Char -> Bool
-isDigitBoundary char next =
-  (isDigitChar char && not (isDigitChar next))
-    || (not (isDigitChar char) && isDigitChar next)
+digitBoundary :: Char -> Char -> Bool
+digitBoundary left right =
+  isDigitLike left /= isDigitLike right
 
-isDigitChar :: Char -> Bool
-isDigitChar char =
+isDigitLike :: Char -> Bool
+isDigitLike char =
   char >= '0' && char <= '9'
 
 isTokenSeparator :: Char -> Bool
@@ -83,10 +81,6 @@ isTokenSeparator char =
 canonicalizeSearchToken :: SearchToken -> SearchToken
 canonicalizeSearchToken (SearchToken token) =
   SearchToken (canonicalizeTokenText token)
-
-tokenSynonymRepresentative :: SearchToken -> Maybe SearchToken
-tokenSynonymRepresentative (SearchToken token) =
-  SearchToken <$> Map.lookup token synonymRepresentatives
 
 canonicalizeTokenText :: Text -> Text
 canonicalizeTokenText token
