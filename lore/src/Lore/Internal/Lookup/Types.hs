@@ -19,10 +19,12 @@ import Data.Text (Text)
 import qualified GHC
 import GHC.Generics (Generic)
 import qualified GHC.Types.Name.Env as NameEnv
+import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames)
 import Lore.Internal.Lookup.Name (NormalizedOccName)
 
-newtype SymbolsIndex = SymbolsIndex
-  { unSymbolsIndex :: Map.Map NormalizedOccName (Set.Set Symbol)
+data SymbolsIndex = SymbolsIndex
+  { symbolsByLookupName :: Map.Map NormalizedOccName (Set.Set Symbol),
+    valueTypeHeadNamesBySymbol :: Map.Map GHC.Name ValueTypeHeadNames
   }
 
 data SymbolsMap = SymbolsMap

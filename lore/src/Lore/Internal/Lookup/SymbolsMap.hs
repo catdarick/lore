@@ -35,13 +35,15 @@ import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Driver.Main as GHC
 import GHC.Generics (Generic)
+import qualified GHC.Iface.Syntax as GHC.Iface
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.Name as GHC.Name
 import qualified GHC.Types.SrcLoc as GHC.SrcLoc
 import Lore.Internal.Definition.Cache.TypedModuleFacts (lookupTypedModuleFactsCache)
-import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (..), TypedNameFacts (..), typedInstanceNames)
+import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (..), TypedDefinitionFacts (..), TypedNameFacts (..), typedInstanceNames)
 import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfosNameSet, greNameFieldAliasText)
+import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames (..), mergeValueTypeHeadNames, valueTypeHeadNamesFromIfaceType)
 import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
@@ -54,7 +56,7 @@ import Lore.Internal.Lookup.Cache.Types
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, extractAndNormalizeOccName, normalizeName, parseAndNormalizeName, unNormalizedModuleName, unNormalizedOccName)
 import Lore.Internal.Lookup.Search.Score (buildSearchIndex, searchOccurrences)
-import Lore.Internal.Lookup.Search.Types (SearchDocument (..), SearchResult (..), TokenSearchIndex)
+import Lore.Internal.Lookup.Search.Types (SearchContextField (..), SearchDocument (..), SearchResult (..), TokenSearchIndex)
 import Lore.Internal.Lookup.Types
   ( ModSummaries (..),
     Symbol (..),
@@ -92,7 +94,7 @@ findMatchingSymbolsInMap :: NormalizedName -> SymbolsMap -> Set.Set Symbol
 findMatchingSymbolsInMap targetName SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
   moduleMatchingSymbols
   where
-    lookupSymbolsInIndex (SymbolsIndex symbolsMap) =
+    lookupSymbolsInIndex SymbolsIndex {symbolsByLookupName = symbolsMap} =
       Map.findWithDefault Set.empty targetName.occName symbolsMap
     homeMatchingSymbols = lookupSymbolsInIndex homeSymbolsMap
     externalMatchingSymbols = lookupSymbolsInIndex externalSymbolsMap
@@ -125,10 +127,14 @@ findSimilarSymbolsCandidatesInMap targetName searchIndex =
 
 combineSymbolsIndexes :: SymbolsMap -> SymbolsIndex
 combineSymbolsIndexes SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
-  SymbolsIndex (Map.unionWith Set.union homeSymbols externalSymbols)
-  where
-    SymbolsIndex homeSymbols = homeSymbolsMap
-    SymbolsIndex externalSymbols = externalSymbolsMap
+  SymbolsIndex
+    { symbolsByLookupName = Map.unionWith Set.union homeSymbolsMap.symbolsByLookupName externalSymbolsMap.symbolsByLookupName,
+      valueTypeHeadNamesBySymbol =
+        Map.unionWith
+          mergeValueTypeHeadNames
+          homeSymbolsMap.valueTypeHeadNamesBySymbol
+          externalSymbolsMap.valueTypeHeadNamesBySymbol
+    }
 
 buildSimilarSymbolsSearchIndex :: SymbolsMap -> TokenSearchIndex SimilarSymbolSearchKey Symbol
 buildSimilarSymbolsSearchIndex symbolsMap =
@@ -136,15 +142,21 @@ buildSimilarSymbolsSearchIndex symbolsMap =
     [ ( SimilarSymbolSearchKey {searchLookupName = occName, searchSymbolName = symbol.name},
         SearchDocument
           { primaryText = unNormalizedOccName occName,
-            secondaryTexts = maybe [] ((: []) . unNormalizedModuleName) (symbolDefiningModuleName symbol)
+            contextTexts =
+              Map.fromList
+                [ (SearchContextModule, maybe [] ((: []) . unNormalizedModuleName) (symbolDefiningModuleName symbol)),
+                  (SearchContextResultType, Set.toList typeHeads.resultTypeHeadNames),
+                  (SearchContextArgumentType, Set.toList typeHeads.argumentTypeHeadNames)
+                ]
           },
         symbol
       )
-    | (occName, symbols) <- Map.toList combinedSymbolsIndex,
-      symbol <- Set.toList symbols
+    | (occName, symbols) <- Map.toList combinedSymbolsIndex.symbolsByLookupName,
+      symbol <- Set.toList symbols,
+      let typeHeads = Map.findWithDefault emptyValueTypeHeadNames symbol.name combinedSymbolsIndex.valueTypeHeadNamesBySymbol
     ]
   where
-    SymbolsIndex combinedSymbolsIndex = combineSymbolsIndexes symbolsMap
+    combinedSymbolsIndex = combineSymbolsIndexes symbolsMap
 
 isModuleMatching :: NormalizedName -> Symbol -> Bool
 isModuleMatching targetName symbol =
@@ -164,6 +176,13 @@ symbolAssociatedModuleNames symbol =
 symbolDefiningModuleName :: Symbol -> Maybe NormalizedModuleName
 symbolDefiningModuleName symbol =
   (normalizeName symbol.name).moduleName
+
+emptyValueTypeHeadNames :: ValueTypeHeadNames
+emptyValueTypeHeadNames =
+  ValueTypeHeadNames
+    { argumentTypeHeadNames = Set.empty,
+      resultTypeHeadNames = Set.empty
+    }
 
 invalidateHomeSymbolsIndexCache :: (MonadLore m) => m ()
 invalidateHomeSymbolsIndexCache = do
@@ -256,10 +275,35 @@ prepareExternalSymbolsIndex dependencies = do
   Log.debug $ "Enumerated " <> show (length externalModules) <> " visible package modules."
   hscEnv <- GHC.getSession
   externalModulesSymbols <- liftIO $ pooledForConcurrently externalModules (evaluateNFM . getExternalModuleSymbols hscEnv)
+  let loadedInterfaceModules = loadedModuleSymbolsModules externalModulesSymbols
+      missingDefiningModules =
+        Set.toList $
+          exportedDefiningModules externalModulesSymbols
+            `Set.difference` loadedInterfaceModules
+  Log.debug $ "Loading type facts for " <> show (length missingDefiningModules) <> " re-export defining modules."
+  definingModuleTypeFacts <- liftIO $ pooledForConcurrently missingDefiningModules (evaluateNFM . getExternalModuleTypeFacts hscEnv)
   Log.debug $ "Fetched symbols for " <> show (length externalModulesSymbols) <> " external modules."
-  let symbolsMap = buildSymbolsIndex externalModulesSymbols
+  let symbolsMap = buildSymbolsIndex (externalModulesSymbols <> definingModuleTypeFacts)
   logPreparedSymbolsIndex "external modules" symbolsMap
   pure symbolsMap
+
+loadedModuleSymbolsModules :: [ModuleSymbolsResult] -> Set.Set GHC.Module
+loadedModuleSymbolsModules =
+  Set.fromList . mapMaybe loadedModule
+  where
+    loadedModule = \case
+      ModuleSymbolsLoaded mdl _ _ -> Just mdl
+      ModuleSymbolsMissing _ -> Nothing
+      ModuleSymbolsFailed _ -> Nothing
+
+exportedDefiningModules :: [ModuleSymbolsResult] -> Set.Set GHC.Module
+exportedDefiningModules moduleSymbols =
+  Set.fromList
+    [ definingModule
+    | ModuleSymbolsLoaded _ symbols _ <- moduleSymbols,
+      indexableSymbol <- symbols,
+      Just definingModule <- [GHC.nameModule_maybe indexableSymbol.indexableSymbol.name]
+    ]
 
 enumerateHomeModules :: (MonadLore m) => m [GHC.Module]
 enumerateHomeModules = do
@@ -279,7 +323,7 @@ enumerateVisiblePackageModules = do
   pure mods
 
 data ModuleSymbolsResult
-  = ModuleSymbolsLoaded GHC.Module [IndexableSymbol]
+  = ModuleSymbolsLoaded GHC.Module [IndexableSymbol] (Map.Map GHC.OccName ValueTypeHeadNames)
   | ModuleSymbolsMissing GHC.Module
   | ModuleSymbolsFailed GHC.Module
   deriving (Generic, NFData)
@@ -297,6 +341,7 @@ getExternalModuleSymbols hsc_env mdl = do
     do \(_ :: SomeException) -> pure (ModuleSymbolsFailed mdl)
     do
       iface <- GHC.hscGetModuleInterface hsc_env mdl
+      valueTypeHeadNamesByOccName <- getIfaceValueTypeHeadNamesByOccName iface
       let exportedOccAliases = availInfosFieldAliases (GHC.mi_exports iface)
           exportedSymbols =
             buildIndexableSymbolsDetailed
@@ -304,7 +349,16 @@ getExternalModuleSymbols hsc_env mdl = do
               isExternalRawOccurrenceName
               (Symbol'ExportedFrom (Set.singleton mdl))
               (availInfosNameSet (GHC.mi_exports iface))
-      pure (ModuleSymbolsLoaded mdl exportedSymbols)
+      evaluateNFM (pure (ModuleSymbolsLoaded mdl exportedSymbols valueTypeHeadNamesByOccName))
+
+getExternalModuleTypeFacts :: GHC.HscEnv -> GHC.Module -> IO ModuleSymbolsResult
+getExternalModuleTypeFacts hsc_env mdl =
+  handle
+    do \(_ :: SomeException) -> pure (ModuleSymbolsFailed mdl)
+    do
+      iface <- GHC.hscGetModuleInterface hsc_env mdl
+      valueTypeHeadNamesByOccName <- getIfaceValueTypeHeadNamesByOccName iface
+      evaluateNFM (pure (ModuleSymbolsLoaded mdl [] valueTypeHeadNamesByOccName))
 
 getHomeModuleSymbols :: (MonadLore m) => Set.Set GHC.Module -> GHC.Module -> m ModuleSymbolsResult
 getHomeModuleSymbols homeModules mdl = do
@@ -347,7 +401,32 @@ getHomeModuleSymbols homeModules mdl = do
                       isHomeRawOccurrenceName
                       Symbol'Unexported
                       unexportedNameSet
-              pure (ModuleSymbolsLoaded mdl (exportedSymbols <> unexportedSymbols))
+                  localTypeHeadNames =
+                    homeValueTypeHeadNamesByOccName mdl typedModuleFacts
+              pure (ModuleSymbolsLoaded mdl (exportedSymbols <> unexportedSymbols) localTypeHeadNames)
+
+homeValueTypeHeadNamesByOccName :: GHC.Module -> MinimalTypedModuleFacts -> Map.Map GHC.OccName ValueTypeHeadNames
+homeValueTypeHeadNamesByOccName mdl typedModuleFacts =
+  Map.fromListWith
+    mergeValueTypeHeadNames
+    [ (GHC.nameOccName name, valueTypeHeadNames)
+    | (name, valueTypeHeadNames) <- Map.toList typedModuleFacts.typedDefinitionFacts.typedValueTypeHeadNamesByName,
+      GHC.nameModule_maybe name == Just mdl
+    ]
+
+ifaceValueTypeHeadNamesByOccName :: GHC.ModIface -> Map.Map GHC.OccName ValueTypeHeadNames
+ifaceValueTypeHeadNamesByOccName iface =
+  Map.fromListWith
+    mergeValueTypeHeadNames
+    [ (GHC.nameOccName ifName, valueTypeHeadNamesFromIfaceType ifType)
+    | (_, GHC.Iface.IfaceId {GHC.Iface.ifName, GHC.Iface.ifType}) <- GHC.mi_decls iface
+    ]
+
+getIfaceValueTypeHeadNamesByOccName :: GHC.ModIface -> IO (Map.Map GHC.OccName ValueTypeHeadNames)
+getIfaceValueTypeHeadNamesByOccName iface =
+  handle
+    do \(_ :: SomeException) -> pure Map.empty
+    do evaluateNFM (pure (ifaceValueTypeHeadNamesByOccName iface))
 
 buildIndexableSymbolsDetailed ::
   Map.Map GHC.Name (Set.Set NormalizedOccName) ->
@@ -479,10 +558,37 @@ availInfosFieldAliases availInfos =
 
 buildSymbolsIndex :: [ModuleSymbolsResult] -> SymbolsIndex
 buildSymbolsIndex moduleSymbols =
-  SymbolsIndex (mapToSymbols <$> foldl' insertModuleSymbols Map.empty moduleSymbols)
+  SymbolsIndex
+    { symbolsByLookupName = symbolsByLookupName,
+      valueTypeHeadNamesBySymbol = indexedValueTypeHeadNamesBySymbol
+    }
   where
+    symbolsByLookupName =
+      mapToSymbols <$> foldl' insertModuleSymbols Map.empty moduleSymbols
+
+    indexedValueTypeHeadNamesBySymbol =
+      Map.restrictKeys valueTypeHeadNamesBySymbol (Set.map (.name) (foldMap id symbolsByLookupName))
+
+    valueTypeHeadNamesBySymbol =
+      Map.fromListWith
+        mergeValueTypeHeadNames
+        [ (symbol.name, valueTypeHeadNames)
+        | symbols <- Map.elems symbolsByLookupName,
+          symbol <- Set.toList symbols,
+          Just definingModule <- [GHC.nameModule_maybe symbol.name],
+          Just valueTypeHeadNames <- [Map.lookup (definingModule, GHC.nameOccName symbol.name) valueTypeHeadNamesByQualifiedOccName]
+        ]
+
+    valueTypeHeadNamesByQualifiedOccName =
+      Map.fromListWith
+        mergeValueTypeHeadNames
+        [ ((mdl, occName), valueTypeHeadNames)
+        | ModuleSymbolsLoaded mdl _ typeFacts <- moduleSymbols,
+          (occName, valueTypeHeadNames) <- Map.toList typeFacts
+        ]
+
     insertModuleSymbols acc = \case
-      ModuleSymbolsLoaded _ symbols ->
+      ModuleSymbolsLoaded _ symbols _ ->
         foldl' insertSymbol acc symbols
       ModuleSymbolsMissing _ ->
         acc
@@ -527,10 +633,11 @@ buildSymbolsIndex moduleSymbols =
        in Symbol symbolName visibility aliases
 
 logPreparedSymbolsIndex :: (MonadLore m) => String -> SymbolsIndex -> m ()
-logPreparedSymbolsIndex scope (SymbolsIndex symbolsMap) = do
+logPreparedSymbolsIndex scope SymbolsIndex {symbolsByLookupName = symbolsMap, valueTypeHeadNamesBySymbol = typeFacts} = do
   let symbolsCount = sum (map length (Map.elems symbolsMap))
   Log.debug $ "Collected " <> show symbolsCount <> " symbols from " <> scope <> "."
   Log.debug $ "Prepared symbols map with " <> show (Map.size symbolsMap) <> " unique symbol names for " <> scope <> "."
+  Log.debug $ "Prepared symbols map with " <> show (Map.size typeFacts) <> " value type fact entries for " <> scope <> "."
 
 moduleDisplayName :: GHC.Module -> String
 moduleDisplayName =

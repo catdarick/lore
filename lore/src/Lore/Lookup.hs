@@ -109,13 +109,11 @@ matchingSymbolLookupNamesByPrefix :: T.Text -> SymbolsMap -> [T.Text]
 matchingSymbolLookupNamesByPrefix rawPrefix SymbolsMap {homeSymbolsMap, externalSymbolsMap} =
   map unNormalizedOccName (sortOn unNormalizedOccName (Set.toList matchingNames))
   where
-    SymbolsIndex homeSymbols = homeSymbolsMap
-    SymbolsIndex externalSymbols = externalSymbolsMap
     normalizedPrefix = (parseAndNormalizeName rawPrefix).occName
     matchingNames =
       Set.filter
         (isLookupNameMatchingPrefix normalizedPrefix)
-        (Map.keysSet homeSymbols <> Map.keysSet externalSymbols)
+        (Map.keysSet homeSymbolsMap.symbolsByLookupName <> Map.keysSet externalSymbolsMap.symbolsByLookupName)
 
 isLookupNameMatchingPrefix :: NormalizedOccName -> NormalizedOccName -> Bool
 isLookupNameMatchingPrefix prefix lookupName =

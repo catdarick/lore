@@ -2,6 +2,7 @@
 
 module Lore.Internal.Lookup.Search.Types
   ( SearchToken (..),
+    SearchContextField (..),
     SearchDocument (..),
     IndexedOccurrence (..),
     TokenSearchIndex (..),
@@ -22,15 +23,21 @@ newtype SearchToken = SearchToken
 
 data SearchDocument = SearchDocument
   { primaryText :: Text,
-    secondaryTexts :: [Text]
+    contextTexts :: Map SearchContextField [Text]
   }
   deriving stock (Eq, Show)
+
+data SearchContextField
+  = SearchContextModule
+  | SearchContextResultType
+  | SearchContextArgumentType
+  deriving stock (Eq, Ord, Show)
 
 data IndexedOccurrence key value = IndexedOccurrence
   { indexedOccurrenceKey :: key,
     indexedOccurrencePrimaryText :: Text,
     indexedOccurrencePrimaryTokens :: [SearchToken],
-    indexedOccurrenceSecondaryTokens :: [SearchToken],
+    indexedOccurrenceContextTokens :: Map SearchContextField (Set SearchToken),
     indexedOccurrenceValue :: value
   }
   deriving stock (Eq, Show)
@@ -39,9 +46,9 @@ data TokenSearchIndex key value = TokenSearchIndex
   { indexedOccurrences :: Map key (IndexedOccurrence key value),
     occurrencesByToken :: Map SearchToken (Set key),
     primaryTokenFrequency :: Map SearchToken Int,
-    secondaryTokenFrequency :: Map SearchToken Int,
+    contextTokenFrequency :: Map SearchContextField (Map SearchToken Int),
     totalPrimaryOccurrences :: Int,
-    totalSecondaryOccurrences :: Int
+    totalContextOccurrences :: Map SearchContextField Int
   }
   deriving stock (Eq, Show)
 

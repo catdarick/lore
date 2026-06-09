@@ -49,6 +49,7 @@ import qualified Data.Text as T
 import qualified GHC
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
+import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames)
 
 newtype SpanKey = SpanKey
   { unSpanKey :: Text
@@ -176,7 +177,8 @@ data TypedNameFacts = TypedNameFacts
 data TypedDefinitionFacts = TypedDefinitionFacts
   { -- | Exact typed occurrences used by definition reference and dependency
     -- producers.
-    typedOccurrences :: ![MinimalTypedOccurrence]
+    typedOccurrences :: ![MinimalTypedOccurrence],
+    typedValueTypeHeadNamesByName :: !(Map.Map GHC.Name ValueTypeHeadNames)
   }
   deriving stock (Generic)
   deriving anyclass (NFData)

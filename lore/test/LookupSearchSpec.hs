@@ -9,6 +9,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Unique as GHC.Unique
+import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames (..))
 import Lore.Internal.Lookup.Cache.Types (SimilarSymbolSearchKey (..))
 import Lore.Internal.Lookup.Name (NormalizedName (occName), NormalizedOccName, parseAndNormalizeName, unNormalizedOccName)
 import Lore.Internal.Lookup.Search.Score (searchOccurrences)
@@ -84,13 +85,48 @@ spec =
       suggestionNames (search "create" [usersCreate, subscriptionsCreate])
         `shouldBe` ["Subscriptions.Database.Account.create", "Users.Database.Account.create"]
 
+    it "uses result type context without module assistance" do
+      suggestionNames (searchWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, usersCreateShort] discountResultFacts)
+        `shouldBe` ["Subscriptions.create", "Users.create"]
+
+    it "keeps exact primary names stronger than result type context" do
+      suggestionNames (searchWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, exactCreateDiscountAccount] discountResultFacts)
+        `shouldBe` ["Other.Module.createDiscountAccount", "Subscriptions.create"]
+
+    it "uses argument type context when result type context is absent" do
+      suggestionNames (searchWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, usersCreateShort] discountArgumentFacts)
+        `shouldBe` ["Subscriptions.create", "Users.create"]
+
+    it "weights result type context above argument type context when they conflict" do
+      suggestionNames (searchWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, usersCreateShort] conflictingDiscountFacts)
+        `shouldBe` ["Subscriptions.create", "Users.create"]
+
+    it "does not discover candidates from type tokens only" do
+      suggestionNames (searchWithTypeFacts "DiscountAccount" [subscriptionsCreateShort, usersCreateShort] discountResultFacts)
+        `shouldBe` []
+
+    it "keeps same-named symbols on independent type contexts" do
+      (firstResult, secondResult) <- expectTwoResults (searchResultsWithTypeFacts "createDiscountAccount" [subscriptionsCreateShort, usersCreateShort] discountResultFacts)
+
+      (firstResult.searchResultValue.name == subscriptionsCreateShort.name) `shouldBe` True
+      (secondResult.searchResultValue.name == usersCreateShort.name) `shouldBe` True
+      firstResult.searchResultScore `shouldSatisfy` (> secondResult.searchResultScore)
+
 search :: Text -> [Symbol] -> [SymbolSuggestion]
 search query symbols =
   findSimilarSymbolsCandidatesInMap (parseAndNormalizeName query) (testSearchIndex symbols)
 
+searchWithTypeFacts :: Text -> [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> [SymbolSuggestion]
+searchWithTypeFacts query symbols typeFacts =
+  findSimilarSymbolsCandidatesInMap (parseAndNormalizeName query) (testSearchIndexWithTypeFacts symbols typeFacts)
+
 searchResults :: Text -> [Symbol] -> [SearchResult SimilarSymbolSearchKey Symbol]
 searchResults query symbols =
   searchOccurrences (queryOccText query) (testSearchIndex symbols)
+
+searchResultsWithTypeFacts :: Text -> [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> [SearchResult SimilarSymbolSearchKey Symbol]
+searchResultsWithTypeFacts query symbols typeFacts =
+  searchOccurrences (queryOccText query) (testSearchIndexWithTypeFacts symbols typeFacts)
 
 expectOneResult :: [result] -> IO result
 expectOneResult results =
@@ -114,11 +150,27 @@ testSearchIndex :: [Symbol] -> TokenSearchIndex SimilarSymbolSearchKey Symbol
 testSearchIndex symbols =
   buildSimilarSymbolsSearchIndex (symbolsMap symbols)
 
+testSearchIndexWithTypeFacts :: [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> TokenSearchIndex SimilarSymbolSearchKey Symbol
+testSearchIndexWithTypeFacts symbols typeFacts =
+  buildSimilarSymbolsSearchIndex (symbolsMapWithTypeFacts symbols typeFacts)
+
 symbolsMap :: [Symbol] -> SymbolsMap
 symbolsMap symbols =
+  symbolsMapWithTypeFacts symbols Map.empty
+
+symbolsMapWithTypeFacts :: [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> SymbolsMap
+symbolsMapWithTypeFacts symbols typeFacts =
   SymbolsMap
-    { homeSymbolsMap = SymbolsIndex (Map.fromListWith Set.union symbolEntries),
-      externalSymbolsMap = SymbolsIndex Map.empty
+    { homeSymbolsMap =
+        SymbolsIndex
+          { symbolsByLookupName = Map.fromListWith Set.union symbolEntries,
+            valueTypeHeadNamesBySymbol = typeFacts
+          },
+      externalSymbolsMap =
+        SymbolsIndex
+          { symbolsByLookupName = Map.empty,
+            valueTypeHeadNamesBySymbol = Map.empty
+          }
     }
   where
     symbolEntries =
@@ -185,6 +237,46 @@ unrelatedDataMapThing =
 otherMap :: Symbol
 otherMap =
   testSymbol 10 "Other.Module" "map"
+
+subscriptionsCreateShort :: Symbol
+subscriptionsCreateShort =
+  testSymbol 11 "Subscriptions" "create"
+
+usersCreateShort :: Symbol
+usersCreateShort =
+  testSymbol 12 "Users" "create"
+
+exactCreateDiscountAccount :: Symbol
+exactCreateDiscountAccount =
+  testSymbol 13 "Other.Module" "createDiscountAccount"
+
+discountResultFacts :: Map.Map GHC.Name ValueTypeHeadNames
+discountResultFacts =
+  Map.fromList
+    [ (subscriptionsCreateShort.name, valueTypeHeads [] ["DiscountAccount"]),
+      (usersCreateShort.name, valueTypeHeads [] ["UserAccount"])
+    ]
+
+discountArgumentFacts :: Map.Map GHC.Name ValueTypeHeadNames
+discountArgumentFacts =
+  Map.fromList
+    [ (subscriptionsCreateShort.name, valueTypeHeads ["DiscountAccount"] ["Result"]),
+      (usersCreateShort.name, valueTypeHeads ["UserAccount"] ["Result"])
+    ]
+
+conflictingDiscountFacts :: Map.Map GHC.Name ValueTypeHeadNames
+conflictingDiscountFacts =
+  Map.fromList
+    [ (subscriptionsCreateShort.name, valueTypeHeads ["UserAccount"] ["DiscountAccount"]),
+      (usersCreateShort.name, valueTypeHeads ["DiscountAccount"] ["UserAccount"])
+    ]
+
+valueTypeHeads :: [Text] -> [Text] -> ValueTypeHeadNames
+valueTypeHeads argumentNames resultNames =
+  ValueTypeHeadNames
+    { argumentTypeHeadNames = Set.fromList argumentNames,
+      resultTypeHeadNames = Set.fromList resultNames
+    }
 
 testSymbol :: Int -> String -> String -> Symbol
 testSymbol unique moduleName occName =

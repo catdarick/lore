@@ -75,6 +75,21 @@ spec =
 
       searchResult `shouldContainText` "create (defined in: Demo.Support, Demo)"
 
+    it "renders type-context symbol ordering from core search" do
+      searchResult <-
+        withFixtureCopy \fixtureRoot -> do
+          appendFile
+            (fixtureRoot </> "src" </> "Demo.hs")
+            "\ndata UserAccount = UserAccount\n\ncreate :: Int -> UserAccount\ncreate _ = UserAccount\n"
+          appendFile
+            (fixtureRoot </> "src" </> "Demo" </> "Support.hs")
+            "\ndata DiscountAccount = DiscountAccount\n\ncreate :: Int -> DiscountAccount\ncreate _ = DiscountAccount\n"
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureHomeModules
+            callToolWithArgs searchSymbolsTool (searchSymbolsArgs "createDiscountAccount")
+
+      searchResult `shouldContainText` "create (defined in: Demo.Support, Demo)"
+
 searchSymbolsArgs :: Text -> J.Value
 searchSymbolsArgs query =
   J.object

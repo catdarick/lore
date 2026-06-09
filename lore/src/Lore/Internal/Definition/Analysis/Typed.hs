@@ -18,6 +18,7 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
 import qualified GHC.Types.Avail as GHC
 import qualified GHC.Types.FieldLabel as GHC.FieldLabel
+import qualified GHC.Types.TypeEnv as GHC.TypeEnv
 import qualified GHC.Types.Unique.Set as GHC.UniqueSet
 import Lore.Internal.Definition.Analysis.Common
   ( collectTyped,
@@ -26,6 +27,7 @@ import Lore.Internal.Definition.Analysis.Common
   )
 import Lore.Internal.Definition.Types
 import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfoNamesWithFields, fieldLabelAliasText, greNameFieldAliasText)
+import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames, valueTypeHeadNamesFromType)
 
 buildMinimalTypedModuleFacts ::
   GHC.Module ->
@@ -42,13 +44,22 @@ buildMinimalTypedModuleFacts definingModule tcg =
           },
       typedDefinitionFacts =
         TypedDefinitionFacts
-          { typedOccurrences = collectMinimalTypedOccurrences tcg
+          { typedOccurrences = collectMinimalTypedOccurrences tcg,
+            typedValueTypeHeadNamesByName = collectValueTypeHeadNamesByName definingModule tcg
           },
       typedInstanceFacts =
         TypedInstanceFacts
           { typedInstanceHeadTypeNamesByInstance = collectInstanceHeadTypeNamesByInstance definingModule tcg
           }
     }
+
+collectValueTypeHeadNamesByName :: GHC.Module -> GHC.Tc.TcGblEnv -> Map.Map GHC.Name ValueTypeHeadNames
+collectValueTypeHeadNamesByName homeModule tcg =
+  Map.fromList
+    [ (GHC.getName identifier, valueTypeHeadNamesFromType (GHC.idType identifier))
+    | GHC.AnId identifier <- GHC.TypeEnv.typeEnvElts (GHC.Tc.tcg_type_env tcg),
+      GHC.nameModule_maybe (GHC.getName identifier) == Just homeModule
+    ]
 
 collectDefinitionCandidateNames :: GHC.Module -> GHC.Tc.TcGblEnv -> [GHC.Name]
 collectDefinitionCandidateNames homeModule tcg =

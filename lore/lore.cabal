@@ -47,6 +47,7 @@ library
       Lore.TemporalModules
       Lore.HomeModules
       Lore.HomeModules.Plan
+      Lore.Internal.Ghc.ValueTypeHead
       Lore.Internal.Lookup.ModulePreference
       Lore.Internal.Lookup.SymbolResolutionCore
       Lore.Internal.Lookup.TypeQuery
@@ -236,7 +237,125 @@ test-suite lore-test
       TemporalModulesSpec
       TestSupport
       TestSupportSpec
+      ValueTypeHeadSpec
       SomeModule
+      Lore
+      Lore.DeadCode
+      Lore.Definition
+      Lore.Definition.RenderSlice
+      Lore.Definition.Rendering
+      Lore.Diagnostics
+      Lore.HomeModules
+      Lore.HomeModules.Plan
+      Lore.Internal.BuildTool.Environment
+      Lore.Internal.DeadCode
+      Lore.Internal.Definition.Analysis
+      Lore.Internal.Definition.Analysis.Bindings
+      Lore.Internal.Definition.Analysis.Common
+      Lore.Internal.Definition.Analysis.Core
+      Lore.Internal.Definition.Analysis.Dependencies
+      Lore.Internal.Definition.Analysis.Members
+      Lore.Internal.Definition.Analysis.Occurrences
+      Lore.Internal.Definition.Analysis.Parsed
+      Lore.Internal.Definition.Analysis.Typed
+      Lore.Internal.Definition.Cache.CoreModuleFacts
+      Lore.Internal.Definition.Cache.DefinitionModuleIndex
+      Lore.Internal.Definition.Cache.ModuleArtifacts
+      Lore.Internal.Definition.Cache.ModuleCache
+      Lore.Internal.Definition.Cache.ParsedModuleFacts
+      Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex
+      Lore.Internal.Definition.Cache.TypedModuleFacts
+      Lore.Internal.Definition.Cache.Types
+      Lore.Internal.Definition.Callbacks
+      Lore.Internal.Definition.Index
+      Lore.Internal.Definition.ProjectIndex
+      Lore.Internal.Definition.Query
+      Lore.Internal.Definition.Reachability
+      Lore.Internal.Definition.SourceTree
+      Lore.Internal.Definition.Timing
+      Lore.Internal.Definition.Types
+      Lore.Internal.File
+      Lore.Internal.Ghc.AvailInfo
+      Lore.Internal.Ghc.DynFlags
+      Lore.Internal.Ghc.PackageEnvironment.Index
+      Lore.Internal.Ghc.PackageEnvironment.Parse
+      Lore.Internal.Ghc.PackageEnvironment.Probe
+      Lore.Internal.Ghc.PackageEnvironment.Resolve
+      Lore.Internal.Ghc.PackageEnvironment.Types
+      Lore.Internal.Ghc.TyThing
+      Lore.Internal.Ghc.ValueTypeHead
+      Lore.Internal.HomeModules
+      Lore.Internal.HomeModules.AutoRefactorLoop
+      Lore.Internal.HomeModules.EntryModules
+      Lore.Internal.HomeModules.LoadAttempt
+      Lore.Internal.HomeModules.ModuleGraphPatch
+      Lore.Internal.HomeModules.Plan
+      Lore.Internal.HomeModules.Result
+      Lore.Internal.HomeModules.SyntheticMain
+      Lore.Internal.ImportCleanup.Apply
+      Lore.Internal.ImportCleanup.Diagnostics
+      Lore.Internal.ImportCleanup.Edit
+      Lore.Internal.ImportCleanup.ImportListParser
+      Lore.Internal.ImportCleanup.Parse
+      Lore.Internal.ImportCleanup.Resolve
+      Lore.Internal.ImportCleanup.Rewrite
+      Lore.Internal.ImportCleanup.SourceSlice
+      Lore.Internal.ImportCleanup.Types
+      Lore.Internal.Interpreter
+      Lore.Internal.List
+      Lore.Internal.Lookup.Cache.Types
+      Lore.Internal.Lookup.InstanceResolution
+      Lore.Internal.Lookup.ModSummaries
+      Lore.Internal.Lookup.ModulePreference
+      Lore.Internal.Lookup.Name
+      Lore.Internal.Lookup.NameToInstances
+      Lore.Internal.Lookup.Orphans
+      Lore.Internal.Lookup.Search.Score
+      Lore.Internal.Lookup.Search.Synonyms
+      Lore.Internal.Lookup.Search.Tokenize
+      Lore.Internal.Lookup.Search.Types
+      Lore.Internal.Lookup.SymbolResolutionCore
+      Lore.Internal.Lookup.SymbolsMap
+      Lore.Internal.Lookup.TypeQuery
+      Lore.Internal.Lookup.TypeQuery.Names
+      Lore.Internal.Lookup.TypeQuery.Parse
+      Lore.Internal.Lookup.TypeQuery.Resolve
+      Lore.Internal.Lookup.Types
+      Lore.Internal.Monad
+      Lore.Internal.Package
+      Lore.Internal.Package.Discovery
+      Lore.Internal.Package.Materialize
+      Lore.Internal.Package.Path
+      Lore.Internal.Package.Root
+      Lore.Internal.Package.Types
+      Lore.Internal.ProjectProvider
+      Lore.Internal.Session
+      Lore.Internal.Session.Cache.Types
+      Lore.Internal.Session.CacheInvalidation
+      Lore.Internal.SourceEdit
+      Lore.Internal.SourcePath
+      Lore.Internal.SourceSpan
+      Lore.Internal.SourceSpan.Types
+      Lore.Internal.SourceText
+      Lore.Internal.TemporalModules
+      Lore.Internal.TestSuite
+      Lore.Interpreter
+      Lore.Lib.Force
+      Lore.Lib.Text
+      Lore.List
+      Lore.Logger
+      Lore.Lookup
+      Lore.Lookup.Search
+      Lore.Module
+      Lore.Monad
+      Lore.Project
+      Lore.Refactor.ImportCleanup.Internal
+      Lore.Session
+      Lore.SourceEdit
+      Lore.SourceSpan
+      Lore.SourceText
+      Lore.TemporalModules
+      Lore.TestSuite
   hs-source-dirs:
       test
       src

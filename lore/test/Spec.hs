@@ -22,6 +22,7 @@ import qualified SourceEditSpec
 import qualified TemporalModulesSpec
 import Test.Hspec
 import qualified TestSupportSpec
+import qualified ValueTypeHeadSpec
 
 main :: IO ()
 main =
@@ -42,5 +43,6 @@ main =
     SourceEditSpec.spec
     HomeModulesSpec.spec
     TemporalModulesSpec.spec
+    ValueTypeHeadSpec.spec
     RedundantImportsSpec.spec
     TestSupportSpec.spec
