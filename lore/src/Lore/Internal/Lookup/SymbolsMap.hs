@@ -54,6 +54,7 @@ import Lore.Internal.Lookup.Cache.Types
     SymbolsDependencySetCache (..),
   )
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
+import Lore.Internal.Lookup.ModulePattern (ModulePattern, matchesModulePattern)
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName, extractAndNormalizeModuleName, extractAndNormalizeOccName, normalizeName, parseAndNormalizeName, unNormalizedModuleName, unNormalizedOccName)
 import Lore.Internal.Lookup.Search.Score (buildSearchIndex, searchOccurrences)
 import Lore.Internal.Lookup.Search.Types (SearchContextField (..), SearchDocument (..), SearchResult (..), TokenSearchIndex)
@@ -101,21 +102,22 @@ findMatchingSymbolsInMap targetName SymbolsMap {homeSymbolsMap, externalSymbolsM
     moduleMatchingSymbols =
       Set.filter (isModuleMatching targetName) (homeMatchingSymbols <> externalMatchingSymbols)
 
-findSimilarSymbolsInMap :: (MonadLore m) => NormalizedName -> SymbolsMap -> m [SymbolSuggestion]
-findSimilarSymbolsInMap targetName symbolsMap = do
+findSimilarSymbolsInMap :: (MonadLore m) => [ModulePattern] -> NormalizedName -> SymbolsMap -> m [SymbolSuggestion]
+findSimilarSymbolsInMap modulePatterns targetName symbolsMap = do
   SimilarSymbolsSearchIndex cachedSearchIndex <- getCachedSimilarSymbolsSearchIndex symbolsMap
-  pure $ findSimilarSymbolsCandidatesInMap targetName cachedSearchIndex
+  pure $ findSimilarSymbolsCandidatesInMap modulePatterns targetName cachedSearchIndex
 
 findSimilarSymbolsCandidatesInMap ::
+  [ModulePattern] ->
   NormalizedName ->
   TokenSearchIndex SimilarSymbolSearchKey Symbol ->
   [SymbolSuggestion]
-findSimilarSymbolsCandidatesInMap targetName searchIndex =
+findSimilarSymbolsCandidatesInMap modulePatterns targetName searchIndex =
   mapMaybe mkSymbolSuggestion $
     searchOccurrences (unNormalizedOccName targetName.occName) searchIndex
   where
     mkSymbolSuggestion result
-      | isModuleMatching targetName result.searchResultValue =
+      | symbolMatchesSearchScope targetName modulePatterns result.searchResultValue =
           Just
             SymbolSuggestion
               { suggestedSymbol = result.searchResultValue,
@@ -167,6 +169,19 @@ isModuleMatching targetName symbol =
       hintedModule `Set.member` symbolAssociatedModules
   where
     symbolAssociatedModules = symbolAssociatedModuleNames symbol
+
+symbolMatchesSearchScope :: NormalizedName -> [ModulePattern] -> Symbol -> Bool
+symbolMatchesSearchScope targetName modulePatterns symbol =
+  isModuleMatching targetName symbol && matchesModulePatterns modulePatterns symbol
+
+matchesModulePatterns :: [ModulePattern] -> Symbol -> Bool
+matchesModulePatterns [] _ =
+  True
+matchesModulePatterns modulePatterns symbol =
+  any moduleMatchesAnyPattern (symbolAssociatedModuleNames symbol)
+  where
+    moduleMatchesAnyPattern moduleName =
+      any (`matchesModulePattern` moduleName) modulePatterns
 
 symbolAssociatedModuleNames :: Symbol -> Set.Set NormalizedModuleName
 symbolAssociatedModuleNames symbol =

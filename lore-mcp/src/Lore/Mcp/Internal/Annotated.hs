@@ -63,6 +63,9 @@ data Minimum (minimum :: Nat)
 data Maximum (maximum :: Nat)
   deriving (Typeable)
 
+data MinLength (minimum :: Nat)
+  deriving (Typeable)
+
 class IsFieldMetadata a metadata where
   modifySchema :: OpenApi.Schema -> OpenApi.Schema
 
@@ -71,6 +74,9 @@ instance (KnownNat minimum) => IsFieldMetadata a (Minimum minimum) where
 
 instance (KnownNat maximum) => IsFieldMetadata a (Maximum maximum) where
   modifySchema schema' = schema' & OpenApi.maximum_ ?~ fromIntegral (natVal (Proxy @maximum))
+
+instance (KnownNat minimum) => IsFieldMetadata T.Text (MinLength minimum) where
+  modifySchema schema' = schema' & OpenApi.minLength ?~ natVal (Proxy @minimum)
 
 instance (KnownSymbol description) => IsFieldMetadata a (Description description) where
   modifySchema schema' = schema' & OpenApi.description ?~ T.pack (symbolVal (Proxy @description))

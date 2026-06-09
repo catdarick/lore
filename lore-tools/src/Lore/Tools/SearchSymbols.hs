@@ -1,5 +1,8 @@
 module Lore.Tools.SearchSymbols
   ( SearchSymbolsOptions (..),
+    SearchSymbolsModulePattern,
+    mkSearchSymbolsModulePattern,
+    searchSymbolsModulePatternText,
     SearchSymbolsResult,
     SearchSymbolsReady (..),
     searchSymbols,
@@ -9,7 +12,7 @@ where
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Lore (MonadLore, findSimilarSymbols, parseAndNormalizeName)
+import Lore (FindSimilarSymbolsOptions (..), ModulePattern, ModulePatternError, MonadLore, compileModulePattern, findSimilarSymbols, parseAndNormalizeName)
 import Lore.Tools.Internal.SymbolSuggestions
   ( GroupedSymbolSuggestion,
     groupSymbolSuggestions,
@@ -31,14 +34,31 @@ import Lore.Tools.Result
 
 data SearchSymbolsOptions = SearchSymbolsOptions
   { searchSymbolsQuery :: Text,
-    searchSymbolsSuggestionLimit :: ResultLimit
+    searchSymbolsSuggestionLimit :: ResultLimit,
+    searchSymbolsModulePatterns :: [SearchSymbolsModulePattern]
   }
   deriving stock (Eq, Show)
+
+data SearchSymbolsModulePattern = SearchSymbolsModulePattern
+  { searchSymbolsModulePatternText :: Text,
+    searchSymbolsCompiledModulePattern :: ModulePattern
+  }
+  deriving stock (Eq, Show)
+
+mkSearchSymbolsModulePattern :: Text -> Either ModulePatternError SearchSymbolsModulePattern
+mkSearchSymbolsModulePattern rawPattern = do
+  compiledPattern <- compileModulePattern rawPattern
+  pure
+    SearchSymbolsModulePattern
+      { searchSymbolsModulePatternText = rawPattern,
+        searchSymbolsCompiledModulePattern = compiledPattern
+      }
 
 type SearchSymbolsResult = ToolRun SearchSymbolsReady
 
 data SearchSymbolsReady = SearchSymbolsReady
   { searchSymbolsReadyQuery :: Text,
+    searchSymbolsReadyModulePatterns :: [SearchSymbolsModulePattern],
     searchSymbolsSuggestions :: [GroupedSymbolSuggestion],
     searchSymbolsPartialLoadWarning :: Maybe PartialLoadWarning
   }
@@ -46,7 +66,13 @@ data SearchSymbolsReady = SearchSymbolsReady
 searchSymbols :: (MonadLore m) => SearchSymbolsOptions -> m SearchSymbolsResult
 searchSymbols options = do
   withLoadedSession \session -> do
-    suggestions <- findSimilarSymbols (suggestionFetchLimit options.searchSymbolsSuggestionLimit) (parseAndNormalizeName options.searchSymbolsQuery)
+    suggestions <-
+      findSimilarSymbols
+        FindSimilarSymbolsOptions
+          { similarSymbolsLimit = suggestionFetchLimit options.searchSymbolsSuggestionLimit,
+            similarSymbolsModulePatterns = map (.searchSymbolsCompiledModulePattern) options.searchSymbolsModulePatterns
+          }
+        (parseAndNormalizeName options.searchSymbolsQuery)
     let renderedSuggestions =
           maybe [] paginatedItems
             (paginateItemsWithPageRequest
@@ -58,6 +84,7 @@ searchSymbols options = do
     pure
       SearchSymbolsReady
         { searchSymbolsReadyQuery = options.searchSymbolsQuery,
+          searchSymbolsReadyModulePatterns = options.searchSymbolsModulePatterns,
           searchSymbolsSuggestions = renderedSuggestions,
           searchSymbolsPartialLoadWarning = loadedSessionPartialWarning session "Search results may be incomplete."
         }
@@ -79,12 +106,22 @@ renderSearchSymbolsReady ready =
   case ready.searchSymbolsSuggestions of
     [] ->
       mconcat
-        [ paragraph (noSymbolsFound ready.searchSymbolsReadyQuery),
+        [ paragraph (noSymbolsFound ready.searchSymbolsReadyQuery <> renderModulePatternScopeSuffix "." ready.searchSymbolsReadyModulePatterns),
           maybe mempty toLoreDoc ready.searchSymbolsPartialLoadWarning
         ]
     suggestions ->
       mconcat
-        [ paragraph ("Found " <> T.pack (show (length suggestions)) <> " similar symbols for " <> quoteText ready.searchSymbolsReadyQuery <> ":"),
+        [ paragraph ("Found " <> T.pack (show (length suggestions)) <> " similar symbols for " <> quoteText ready.searchSymbolsReadyQuery <> renderModulePatternScopeSuffix ":" ready.searchSymbolsReadyModulePatterns),
           numberedListFrom 1 (map (paragraph . groupedSymbolSuggestionLabel) suggestions),
           maybe mempty toLoreDoc ready.searchSymbolsPartialLoadWarning
         ]
+
+renderModulePatternScopeSuffix :: Text -> [SearchSymbolsModulePattern] -> Text
+renderModulePatternScopeSuffix terminal modulePatterns =
+  case modulePatterns of
+    [] ->
+      terminal
+    [modulePattern] ->
+      " in modules matching " <> quoteText modulePattern.searchSymbolsModulePatternText <> terminal
+    _ ->
+      " in modules matching any of:\n" <> T.intercalate ", " (map (quoteText . (.searchSymbolsModulePatternText)) modulePatterns) <> terminal

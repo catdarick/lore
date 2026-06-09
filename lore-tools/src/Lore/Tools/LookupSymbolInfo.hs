@@ -14,7 +14,7 @@ import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC.Plugins as Plugins
-import Lore (MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, parseAndNormalizeName, resolvePathToRoot)
+import Lore (FindSimilarSymbolsOptions (..), MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, parseAndNormalizeName, resolvePathToRoot)
 import qualified Lore as Core
 import Lore.Tools.Internal.DetailedSymbolInfo (DetailedSymbolInfo (..), detailedSymbolInfoLabel)
 import Lore.Tools.Internal.SymbolSuggestions
@@ -61,7 +61,13 @@ lookupSymbolInfo options = do
           loadedSessionPartialWarning session "Symbol lookup results may be incomplete."
     case symbolInfos of
       [] -> do
-        suggestions <- findSimilarSymbols (suggestionFetchLimit options.lookupSymbolInfoSuggestionLimit) (parseAndNormalizeName options.lookupSymbolInfoQuery)
+        suggestions <-
+          findSimilarSymbols
+            FindSimilarSymbolsOptions
+              { similarSymbolsLimit = suggestionFetchLimit options.lookupSymbolInfoSuggestionLimit,
+                similarSymbolsModulePatterns = []
+              }
+            (parseAndNormalizeName options.lookupSymbolInfoQuery)
         let renderedSuggestions =
               maybe [] paginatedItems
                 (paginateItemsWithPageRequest

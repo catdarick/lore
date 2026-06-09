@@ -11,12 +11,13 @@ import qualified GHC.Plugins as GHC
 import qualified GHC.Types.Unique as GHC.Unique
 import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames (..))
 import Lore.Internal.Lookup.Cache.Types (SimilarSymbolSearchKey (..))
+import Lore.Internal.Lookup.ModulePattern (ModulePattern, compileModulePattern)
 import Lore.Internal.Lookup.Name (NormalizedName (occName), NormalizedOccName, parseAndNormalizeName, unNormalizedOccName)
 import Lore.Internal.Lookup.Search.Score (buildSearchIndex, searchOccurrences)
 import Lore.Internal.Lookup.Search.Types (SearchDocument (..), SearchResult (..), TokenSearchIndex)
 import Lore.Internal.Lookup.SymbolsMap (buildSimilarSymbolsSearchIndex, findSimilarSymbolsCandidatesInMap)
 import Lore.Internal.Lookup.Types (Symbol (..), SymbolSuggestion (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
-import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe, shouldSatisfy)
+import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe, shouldMatchList, shouldSatisfy)
 
 spec :: Spec
 spec =
@@ -72,6 +73,32 @@ spec =
     it "preserves re-export-module qualified filtering" do
       suggestionNames (search "Public.Api.create" [reexportedCreate, usersCreate])
         `shouldBe` ["Internal.Database.Account.create"]
+
+    it "lets any module pattern qualify a symbol" do
+      suggestionNames (searchWithPatterns ["Missing.*", "Users.*"] "create" [subscriptionsCreate, usersCreate])
+        `shouldBe` ["Users.Database.Account.create"]
+
+    it "lets any associated module qualify a symbol" do
+      suggestionNames (searchWithPatterns ["Public.*"] "create" [reexportedCreate, usersCreate])
+        `shouldBe` ["Internal.Database.Account.create"]
+
+    it "combines qualified query modules and module patterns with AND semantics" do
+      suggestionNames (searchWithPatterns ["Public.*"] "Public.Api.create" [reexportedCreate, usersCreate])
+        `shouldBe` ["Internal.Database.Account.create"]
+
+      suggestionNames (searchWithPatterns ["Users.*", "Missing.*"] "Public.Api.create" [reexportedCreate, usersCreate])
+        `shouldBe` []
+
+      suggestionNames (searchWithPatterns ["Missing.*", "Public.*"] "Public.Api.create" [reexportedCreate, usersCreate])
+        `shouldBe` ["Internal.Database.Account.create"]
+
+    it "keeps empty module patterns unrestricted" do
+      suggestionNames (searchWithPatterns [] "create" [subscriptionsCreate, usersCreate])
+        `shouldBe` suggestionNames (search "create" [subscriptionsCreate, usersCreate])
+
+    it "keeps out-of-scope high-ranked results from consuming the requested result budget" do
+      take 2 (suggestionNames (searchWithPatterns ["Public.*"] "createUser" [exactPrivateCreateUser, exactOtherCreateUser, publicCreateUserRecord, publicCreateTestUser]))
+        `shouldMatchList` ["Public.Api.createUserRecord", "Public.Api.createTestUser"]
 
     it "keeps alias entries independent so the best lookup name can survive deduplication" do
       let alias = lookupOcc "createSubscriptionAccount"
@@ -170,11 +197,21 @@ spec =
 
 search :: Text -> [Symbol] -> [SymbolSuggestion]
 search query symbols =
-  findSimilarSymbolsCandidatesInMap (parseAndNormalizeName query) (testSearchIndex symbols)
+  findSimilarSymbolsCandidatesInMap [] (parseAndNormalizeName query) (testSearchIndex symbols)
+
+searchWithPatterns :: [Text] -> Text -> [Symbol] -> [SymbolSuggestion]
+searchWithPatterns rawPatterns query symbols =
+  findSimilarSymbolsCandidatesInMap (map compilePattern rawPatterns) (parseAndNormalizeName query) (testSearchIndex symbols)
 
 searchWithTypeFacts :: Text -> [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> [SymbolSuggestion]
 searchWithTypeFacts query symbols typeFacts =
-  findSimilarSymbolsCandidatesInMap (parseAndNormalizeName query) (testSearchIndexWithTypeFacts symbols typeFacts)
+  findSimilarSymbolsCandidatesInMap [] (parseAndNormalizeName query) (testSearchIndexWithTypeFacts symbols typeFacts)
+
+compilePattern :: Text -> ModulePattern
+compilePattern rawPattern =
+  case compileModulePattern rawPattern of
+    Right pattern' -> pattern'
+    Left _ -> error ("Expected valid module pattern " <> T.unpack rawPattern)
 
 searchResults :: Text -> [Symbol] -> [SearchResult SimilarSymbolSearchKey Symbol]
 searchResults query symbols =
@@ -335,6 +372,22 @@ usersCreateShort =
 exactCreateDiscountAccount :: Symbol
 exactCreateDiscountAccount =
   testSymbol 13 "Other.Module" "createDiscountAccount"
+
+exactPrivateCreateUser :: Symbol
+exactPrivateCreateUser =
+  testSymbol 14 "Private.Internal" "createUser"
+
+exactOtherCreateUser :: Symbol
+exactOtherCreateUser =
+  testSymbol 15 "Other.Internal" "createUser"
+
+publicCreateUserRecord :: Symbol
+publicCreateUserRecord =
+  testSymbol 16 "Public.Api" "createUserRecord"
+
+publicCreateTestUser :: Symbol
+publicCreateTestUser =
+  testSymbol 17 "Public.Api" "createTestUser"
 
 discountResultFacts :: Map.Map GHC.Name ValueTypeHeadNames
 discountResultFacts =

@@ -15,6 +15,7 @@ import qualified InterpreterSpec
 import qualified LoggerSpec
 import qualified LookupSearchSpec
 import qualified LookupSpec
+import qualified ModulePatternSpec
 import qualified PackageDiscoverySpec
 import qualified PackageEnvironmentSpec
 import qualified RedundantImportsSpec
@@ -36,6 +37,7 @@ main =
     ImportCleanupRewriteSpec.spec
     InterpreterSpec.spec
     LoggerSpec.spec
+    ModulePatternSpec.spec
     LookupSearchSpec.spec
     LookupSpec.spec
     PackageDiscoverySpec.spec

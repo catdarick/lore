@@ -11,6 +11,7 @@ module Lore.Tools.Cli.Internal.Annotated
     somePositionalText,
     optionalOptionText,
     manyOptionText,
+    manyOptionWithReader,
     optionWithReader,
     optionalOptionWithReader,
   )
@@ -161,6 +162,38 @@ manyOptionText longName shortName metavarText description completion =
                     <> metavar (T.unpack metavarText)
                     <> help (T.unpack description)
                 )
+          ),
+      cliArgsSpecs =
+        [ CliArgOption
+            CliOptionSpec
+              { cliOptionLong = longName,
+                cliOptionShort = shortName,
+                cliOptionMetavar = metavarText,
+                cliOptionDescription = description,
+                cliOptionRepeatable = True,
+                cliOptionCompletion = completion
+              }
+        ]
+    }
+
+manyOptionWithReader ::
+  ReadM a ->
+  Text ->
+  Maybe Char ->
+  Text ->
+  Text ->
+  CompletionProvider m ->
+  CliArgs m [a]
+manyOptionWithReader reader longName shortName metavarText description completion =
+  CliArgs
+    { cliArgsParser =
+        many
+          ( option
+              reader
+              ( optionModifier longName shortName
+                  <> metavar (T.unpack metavarText)
+                  <> help (T.unpack description)
+              )
           ),
       cliArgsSpecs =
         [ CliArgOption

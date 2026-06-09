@@ -8,7 +8,7 @@ import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
-import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
 import Lore.Tools.Render.Doc (LoreDoc)
@@ -25,6 +25,11 @@ data SearchSymbolsArgs (fieldType :: FieldType) = SearchSymbolsArgs
                       Example "lookupOrZero",
                       Example "Some.Module.someFunction",
                       Example "load picture from database"
+                    ],
+    modulePatterns ::
+      Field fieldType (Maybe [Text])
+        `WithMeta` '[ Description "Optional module-name patterns. A symbol is included when any associated module matches at least one pattern. '*' matches any sequence of characters. To search across all modules, set to null.",
+                      ExampleList '["Some.Module.*", "Some.*.Name.*", "Some.Module.Name"]
                     ]
   }
   deriving stock (Generic)
@@ -46,12 +51,23 @@ searchSymbolsTool =
       }
 
 searchSymbolsHandler :: (MonadLore m) => SearchSymbolsArgs 'ValueType -> m LoreDoc
-searchSymbolsHandler SearchSymbolsArgs {query} = do
+searchSymbolsHandler SearchSymbolsArgs {query, modulePatterns} = do
+  compiledModulePatterns <- compileModulePatterns modulePatterns
   result <-
     ToolsSearchSymbols.searchSymbols
       SearchSymbolsOptions
         { searchSymbolsQuery = query,
           searchSymbolsSuggestionLimit =
-            Limit (limitToIntWithDefault 10 (symbolSuggestionsLimit mcpDefaultToolPolicy))
+            Limit (limitToIntWithDefault 10 (symbolSuggestionsLimit mcpDefaultToolPolicy)),
+          searchSymbolsModulePatterns = compiledModulePatterns
         }
   pure $ renderToolRun ToolsSearchSymbols.renderSearchSymbolsReady result
+
+compileModulePatterns :: (Monad m) => Maybe [Text] -> m [ToolsSearchSymbols.SearchSymbolsModulePattern]
+compileModulePatterns maybeRawModulePatterns =
+  traverse compileModulePattern (maybe [] id maybeRawModulePatterns)
+  where
+    compileModulePattern rawPattern =
+      case ToolsSearchSymbols.mkSearchSymbolsModulePattern rawPattern of
+        Right modulePattern -> pure modulePattern
+        Left _ -> error "modulePatterns items must be nonempty strings"

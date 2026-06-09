@@ -17,6 +17,10 @@ module Lore.Lookup
     ChosenInstanceResolution (..),
     ChosenInstanceContextStatus (..),
     PathToRoot (..),
+    ModulePattern,
+    ModulePatternError (..),
+    compileModulePattern,
+    FindSimilarSymbolsOptions (..),
     classifySymbolCategory,
     findMatchingSymbols,
     findMatchingSymbolLookupNamesByPrefix,
@@ -50,6 +54,7 @@ import Lore.Internal.Lookup.InstanceResolution
     ChosenInstanceResolution (..),
     resolveChosenClassInstanceFromTypeText,
   )
+import Lore.Internal.Lookup.ModulePattern (ModulePattern, ModulePatternError (..), compileModulePattern)
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName (..), mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap, findSimilarSymbolsInMap)
@@ -77,6 +82,12 @@ data SymbolCategory
   | SymbolConstructor
   | SymbolCoercionAxiom
   | SymbolUnknown
+  deriving stock (Eq, Show)
+
+data FindSimilarSymbolsOptions = FindSimilarSymbolsOptions
+  { similarSymbolsLimit :: Int,
+    similarSymbolsModulePatterns :: [ModulePattern]
+  }
   deriving stock (Eq, Show)
 
 findMatchingSymbols :: (MonadLore m) => NormalizedName -> m (Set.Set Symbol)
@@ -119,12 +130,12 @@ isLookupNameMatchingPrefix :: NormalizedOccName -> NormalizedOccName -> Bool
 isLookupNameMatchingPrefix prefix lookupName =
   unNormalizedOccName prefix `T.isPrefixOf` unNormalizedOccName lookupName
 
-findSimilarSymbols :: (MonadLore m) => Int -> NormalizedName -> m [SymbolSuggestion]
-findSimilarSymbols suggestionLimit targetName = do
+findSimilarSymbols :: (MonadLore m) => FindSimilarSymbolsOptions -> NormalizedName -> m [SymbolSuggestion]
+findSimilarSymbols options targetName = do
   symbolsMap <- SymbolsMap.getCachedSymbolsMap
-  suggestions <- findSimilarSymbolsInMap targetName symbolsMap
+  suggestions <- findSimilarSymbolsInMap options.similarSymbolsModulePatterns targetName symbolsMap
   pure $
-    take suggestionLimit $
+    take options.similarSymbolsLimit $
       sortOn suggestionSortKey $
         Map.elems $
           foldl' collectBestSuggestion Map.empty suggestions
