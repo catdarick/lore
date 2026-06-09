@@ -2,6 +2,7 @@ module Lore.Tools.Internal.DefinitionSourceRendering
   ( PaginatedDefinitionSources (..),
     buildDefinitionSourceFiles,
     buildPaginatedDefinitionSourceFiles,
+    definitionSourceSortKey,
     paginateDefinitionSources,
   )
 where
@@ -10,8 +11,6 @@ where
 -- Used by getDefinition and resolveInstance.
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.List (foldl', sortOn)
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC.Plugins as GHC
@@ -24,8 +23,8 @@ import Lore
   )
 import Lore.Definition.RenderSlice (definitionSourceToRenderSlice)
 import Lore.Tools.Render.Doc (SourceFile)
-import Lore.Tools.Result (Paginated (..))
 import Lore.Tools.Render.Source (definitionSlicesToSourceFiles)
+import Lore.Tools.Result (Paginated (..))
 
 buildPaginatedDefinitionSourceFiles ::
   (MonadIO m) =>
@@ -81,7 +80,7 @@ data PaginatedDefinitionSources = PaginatedDefinitionSources
 
 paginateDefinitionSources :: Int -> Int -> [NamedDefinitionSource] -> Maybe PaginatedDefinitionSources
 paginateDefinitionSources skip maxItems definitionEntries =
-  case sortedSources of
+  case orderedSources of
     [] ->
       Nothing
     _ ->
@@ -89,28 +88,15 @@ paginateDefinitionSources skip maxItems definitionEntries =
         PaginatedDefinitionSources
           { sourceTotalItems = totalItems,
             sourceSkippedItems = skippedItems,
-            visibleDefinitionSources = take maxItems (drop skippedItems sortedSources)
+            visibleDefinitionSources = take maxItems (drop skippedItems orderedSources)
           }
   where
-    sortedSources =
-      sortOn definitionSourceSortKey (dedupeDefinitionSources definitionEntries)
+    orderedSources =
+      definitionEntries
     totalItems =
-      length sortedSources
+      length orderedSources
     skippedItems =
       min skip totalItems
-
-dedupeDefinitionSources :: [NamedDefinitionSource] -> [NamedDefinitionSource]
-dedupeDefinitionSources =
-  reverse . snd . foldl' dedupeOne (Set.empty, [])
-  where
-    dedupeOne (seenDefinitionIds, deduped) definitionEntry
-      | Set.member definitionId seenDefinitionIds =
-          (seenDefinitionIds, deduped)
-      | otherwise =
-          (Set.insert definitionId seenDefinitionIds, definitionEntry : deduped)
-      where
-        definitionId =
-          definitionEntry.definitionSource.definitionSourceId
 
 definitionSourceSortKey :: NamedDefinitionSource -> (String, String, Int, Int, Text)
 definitionSourceSortKey definitionEntry =

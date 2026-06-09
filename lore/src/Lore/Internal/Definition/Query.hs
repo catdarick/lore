@@ -57,27 +57,24 @@ resolveDefinitionClosureSources maxDepth inputName = do
         []
       Just root ->
         mapMaybeTargetSource projectIndex $
-          dependencyFirstTargets $
-            reachableNamedTargets maxDepth projectIndex [root]
+          reachableNamedTargets maxDepth projectIndex [root]
   where
-    dependencyFirstTargets =
-      reverse
-
-    mapMaybeTargetSource :: ProjectDefinitionIndex -> [DefinitionTarget] -> [NamedDefinitionSource]
+    mapMaybeTargetSource :: ProjectDefinitionIndex -> [(Int, DefinitionTarget)] -> [NamedDefinitionSource]
     mapMaybeTargetSource projectIndex =
       foldr collectSource []
       where
-        collectSource :: DefinitionTarget -> [NamedDefinitionSource] -> [NamedDefinitionSource]
-        collectSource target sources =
+        collectSource :: (Int, DefinitionTarget) -> [NamedDefinitionSource] -> [NamedDefinitionSource]
+        collectSource (depth, target) sources =
           case lookupDefinitionSource projectIndex target.definitionTargetId of
             Nothing ->
               sources
             Just source ->
-              namedSource target source : sources
+              namedSource depth target source : sources
 
-    namedSource target source =
+    namedSource depth target source =
       NamedDefinitionSource
         { definitionName = target.definitionTargetName,
+          definitionDependencyDepth = depth,
           definitionSource = source
         }
 

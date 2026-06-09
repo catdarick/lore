@@ -7,10 +7,13 @@ import qualified Data.Aeson as J
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import qualified GHC.Plugins as GHC
+import Lore (DefinitionSlice (..))
 import Lore.Mcp.Tools.GetDefinition.Cached (cachedGetDefinitionTool)
 import Lore.Mcp.Tools.GetDefinition.Regular (regularGetDefinitionTool)
 import Lore.Mcp.Tools.LookupSymbolInfo (lookupSymbolInfoTool)
 import Lore.Mcp.Tools.NotifyKnowledgeReset (notifyKnowledgeResetTool)
+import Lore.Tools.Render.Source (mergeDefinitionModules)
 import McpTestSupport
   ( callToolWithArgs,
     callToolWithoutArgs,
@@ -53,6 +56,29 @@ spec = do
       recursiveCall `shouldContainText` "bumpWithSeed :: Int -> Int"
       directCall `shouldContainText` "The following definitions are unchanged and were omitted, you already have them in your context:"
       directCall `shouldContainText` "Demo: bumpWithSeed"
+
+    it "reports every requested alias from an already cached shared declaration" do
+      secondCall <-
+        fixtureLoreMcpWithCache True do
+          loadFixtureHomeModules
+          _ <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["pairLeft", "pairRight"] None Nothing)
+          callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["pairLeft", "pairRight"] None Nothing)
+
+      secondCall `shouldContainText` "The following definitions are unchanged and were omitted, you already have them in your context:"
+      secondCall `shouldContainText` "Demo:"
+      secondCall `shouldContainText` "pairLeft"
+      secondCall `shouldContainText` "pairRight"
+
+    it "omits another alias of an already cached shared declaration" do
+      secondCall <-
+        fixtureLoreMcpWithCache True do
+          loadFixtureHomeModules
+          _ <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["pairLeft"] None Nothing)
+          callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["pairRight"] None Nothing)
+
+      secondCall `shouldContainText` "The following definitions are unchanged and were omitted, you already have them in your context:"
+      secondCall `shouldContainText` "Demo: pairRight"
+      secondCall `shouldNotContainText` "pairLeft, pairRight :: Int"
 
     it "returns previously omitted definitions after notifyKnowledgeReset" do
       (cachedCall, resetCall, afterResetCall) <-
@@ -190,6 +216,50 @@ spec = do
         ambiguousDefinitionResult `shouldContainText` "is ambiguous. More qualification is required"
         ambiguousDefinitionResult `shouldContainText` "Demo.AmbiguousId"
 
+    it "orders recursive definitions by scored module rather than alphabetic module name" do
+      withFixtureCopy \fixtureRoot -> do
+        addRankedDefinitionFixture fixtureRoot
+        definitionResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureHomeModules
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Z.Root.rootValue"] Recursive Nothing)
+
+        definitionResult `shouldContainText` "rootValue :: Int"
+        definitionResult `shouldContainText` "directValue :: Int"
+        definitionResult `shouldContainText` "deepValue :: Int"
+        definitionResult `shouldContainTextInOrder` ["## src/Z/Root.hs", "## src/Y/Direct.hs", "## src/A/Deep.hs"]
+
+    it "scores all requested roots together before rendering" do
+      withFixtureCopy \fixtureRoot -> do
+        addRankedDefinitionFixture fixtureRoot
+        definitionResult <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureHomeModules
+            callToolWithArgs regularGetDefinitionTool (getDefinitionArgs ["Z.Root.rootValue", "Y.Direct.directValue"] Recursive Nothing)
+
+        definitionResult `shouldContainTextInOrder` ["## src/Y/Direct.hs", "## src/Z/Root.hs", "## src/A/Deep.hs"]
+
+    it "paginates consecutive slices of the ranked stream" do
+      withFixtureCopy \fixtureRoot -> do
+        addRankedDefinitionFixture fixtureRoot
+        (firstPage, secondPage) <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureHomeModules
+            firstPage <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgsWithSkip ["Z.Root.rootValue"] (Just 0) Recursive Nothing)
+            secondPage <- callToolWithArgs regularGetDefinitionTool (getDefinitionArgsWithSkip ["Z.Root.rootValue"] (Just 1) Recursive Nothing)
+            pure (firstPage, secondPage)
+
+        firstPage `shouldContainTextInOrder` ["## src/Z/Root.hs", "## src/Y/Direct.hs", "## src/A/Deep.hs"]
+        secondPage `shouldNotContainText` "## src/Z/Root.hs"
+        secondPage `shouldContainTextInOrder` ["## src/Y/Direct.hs", "## src/A/Deep.hs"]
+
+    it "preserves first module occurrence when merging repeated rendered slices" do
+      let moduleB = testModule "B"
+          moduleA = testModule "A"
+          merged = mergeDefinitionModules [emptySlice moduleB, emptySlice moduleA, emptySlice moduleB]
+
+      map (GHC.moduleNameString . GHC.moduleName . (.definitionModule)) merged `shouldBe` ["B", "A"]
+
   describe "lookupSymbolInfo" do
     it "deduplicates same-root candidates and keeps the closest-to-root symbol" do
       indexedLookup <-
@@ -292,6 +362,30 @@ lookupSymbolInfoArgs symbol =
   J.object
     [ "symbol" J..= symbol
     ]
+
+shouldContainTextInOrder :: (HasCallStack) => Text -> [Text] -> Expectation
+shouldContainTextInOrder renderedText expectedFragments =
+  go renderedText expectedFragments
+  where
+    go _ [] =
+      pure ()
+    go remaining (fragment : fragments) =
+      case T.breakOn fragment remaining of
+        (_, "") ->
+          expectationFailure ("expected fragment in order: " <> T.unpack fragment)
+        (_, matched) ->
+          go (T.drop (T.length fragment) matched) fragments
+
+testModule :: String -> GHC.Module
+testModule =
+  GHC.mkModule (GHC.stringToUnit "test") . GHC.mkModuleName
+
+emptySlice :: GHC.Module -> DefinitionSlice
+emptySlice definitionModule =
+  DefinitionSlice
+    { definitionModule,
+      declarationSpans = []
+    }
 
 addSameModuleDuplicateSymbolFixture :: FilePath -> IO ()
 addSameModuleDuplicateSymbolFixture fixtureRoot = do
@@ -418,6 +512,19 @@ addSupportHiddenValueFixture fixtureRoot = do
   let sourceWithExports =
         T.replace supportHiddenValueExportAnchor supportHiddenValueExportReplacement source
   TIO.writeFile supportFile (sourceWithExports <> "\n\n" <> supportHiddenValueFixtureDeclarations)
+
+addRankedDefinitionFixture :: FilePath -> IO ()
+addRankedDefinitionFixture fixtureRoot = do
+  let srcDir = fixtureRoot </> "src"
+      deepDir = srcDir </> "A"
+      directDir = srcDir </> "Y"
+      rootDir = srcDir </> "Z"
+  createDirectoryIfMissing True deepDir
+  createDirectoryIfMissing True directDir
+  createDirectoryIfMissing True rootDir
+  TIO.writeFile (deepDir </> "Deep.hs") rankedDeepModuleSource
+  TIO.writeFile (directDir </> "Direct.hs") rankedDirectModuleSource
+  TIO.writeFile (rootDir </> "Root.hs") rankedRootModuleSource
 
 constructorScopedDependencyFixtureModuleSource :: Text
 constructorScopedDependencyFixtureModuleSource =
@@ -601,6 +708,43 @@ supportHiddenValueFixtureDeclarations =
   T.unlines
     [ "hiddenValue :: Int",
       "hiddenValue = supportSeed * 10"
+    ]
+
+rankedDeepModuleSource :: Text
+rankedDeepModuleSource =
+  T.unlines
+    [ "module A.Deep",
+      "  ( deepValue",
+      "  ) where",
+      "",
+      "deepValue :: Int",
+      "deepValue = 1"
+    ]
+
+rankedDirectModuleSource :: Text
+rankedDirectModuleSource =
+  T.unlines
+    [ "module Y.Direct",
+      "  ( directValue",
+      "  ) where",
+      "",
+      "import A.Deep (deepValue)",
+      "",
+      "directValue :: Int",
+      "directValue = deepValue + 1"
+    ]
+
+rankedRootModuleSource :: Text
+rankedRootModuleSource =
+  T.unlines
+    [ "module Z.Root",
+      "  ( rootValue",
+      "  ) where",
+      "",
+      "import Y.Direct (directValue)",
+      "",
+      "rootValue :: Int",
+      "rootValue = directValue + 1"
     ]
 
 paginationExportAnchor :: Text

@@ -20,20 +20,25 @@ where
 import Data.List (foldl', sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
+import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
 import Lore
-  ( MonadLore,
+  ( DefinitionId,
+    DefinitionSource (..),
+    MonadLore,
     NamedDefinitionSource (..),
     Symbol (..),
     SymbolInfo (..),
+    definitionSourceModule,
     lookupSymbolInfo,
     resolveDefinitionClosureSourcesNamed,
     resolveDefinitionSourceNamed,
   )
+import Lore.Tools.Internal.DefinitionSourceRendering (definitionSourceSortKey)
 import Lore.Tools.Internal.SymbolResolution
   ( ResolvedSymbolQuery (resolvedSymbol),
     SymbolsResolved (resolvedQueries),
@@ -140,8 +145,12 @@ getDefinitionHandlerWithStrategy GetDefinitionRequest {getDefinitionRequestSymbo
               resolved.resolvedQueries
         let directlyRequestedSymbolNames =
               Set.fromList (map (.symbolName) resolvedSymbolInfos)
-        definitionEntries <- concat <$> mapM (resolveSymbolDefinitions resolvedExpansion) resolvedSymbolInfos
-        filteredDefinitions <- buildDefinitions resolvedPageRequest directlyRequestedSymbolNames definitionEntries
+        resolvedEntries <- concat <$> mapM (resolveSymbolDefinitions resolvedExpansion) resolvedSymbolInfos
+        let orderedEntries =
+              orderDefinitionSources resolvedEntries
+            limitedEntries =
+              applyExpansionDefinitionLimit resolvedExpansion orderedEntries
+        filteredDefinitions <- buildDefinitions resolvedPageRequest directlyRequestedSymbolNames limitedEntries
         pure $
           GetDefinitionCoreReadyResult
             GetDefinitionCoreReady
@@ -160,17 +169,77 @@ resolveSymbolDefinitions :: (MonadLore m) => DefinitionExpansion -> SymbolInfo -
 resolveSymbolDefinitions expansion symbolInfo =
   case expansion of
     NoExpansion ->
-      maybe [] (pure . NamedDefinitionSource symbolInfo.symbolName) <$> resolveDefinitionSourceNamed symbolInfo.symbolName
+      maybe [] (pure . namedRootDefinitionSource symbolInfo.symbolName) <$> resolveDefinitionSourceNamed symbolInfo.symbolName
     ExpandDirect ->
       resolveDefinitionClosureSourcesNamed directExpansionMaxDepth symbolInfo.symbolName
-    ExpandRecursive options -> do
-      definitions <- resolveDefinitionClosureSourcesNamed (recursiveDepth options) symbolInfo.symbolName
-      pure $
-        case options.recursiveExpansionMaxDefinitions of
-          Unlimited ->
-            definitions
-          Limit limit ->
-            take (max 0 limit) definitions
+    ExpandRecursive options ->
+      resolveDefinitionClosureSourcesNamed (recursiveDepth options) symbolInfo.symbolName
+
+namedRootDefinitionSource :: GHC.Name -> DefinitionSource -> NamedDefinitionSource
+namedRootDefinitionSource definitionName definitionSource =
+  NamedDefinitionSource
+    { definitionName,
+      definitionDependencyDepth = 0,
+      definitionSource
+    }
+
+applyExpansionDefinitionLimit :: DefinitionExpansion -> [NamedDefinitionSource] -> [NamedDefinitionSource]
+applyExpansionDefinitionLimit expansion definitionEntries =
+  case expansion of
+    ExpandRecursive options ->
+      case options.recursiveExpansionMaxDefinitions of
+        Unlimited ->
+          definitionEntries
+        Limit limit ->
+          take (max 0 limit) definitionEntries
+    NoExpansion ->
+      definitionEntries
+    ExpandDirect ->
+      definitionEntries
+
+orderDefinitionSources :: [NamedDefinitionSource] -> [NamedDefinitionSource]
+orderDefinitionSources definitionEntries =
+  sortOn rankedSortKey dedupedEntries
+  where
+    dedupedEntries =
+      dedupeDefinitionSourcesAtMinimumDepth definitionEntries
+    moduleScores =
+      definitionModuleScores dedupedEntries
+    rankedSortKey definitionEntry =
+      ( Down (Map.findWithDefault 0 (definitionSourceModule definitionEntry.definitionSource) moduleScores),
+        definitionSourceSortKey definitionEntry
+      )
+
+dedupeDefinitionSourcesAtMinimumDepth :: [NamedDefinitionSource] -> [NamedDefinitionSource]
+dedupeDefinitionSourcesAtMinimumDepth =
+  Map.elems . foldl' collectDefinition (Map.empty :: Map.Map DefinitionId NamedDefinitionSource)
+  where
+    collectDefinition definitionsById definitionEntry =
+      Map.insertWith preferShallower definitionId definitionEntry definitionsById
+      where
+        definitionId =
+          definitionEntry.definitionSource.definitionSourceId
+
+    preferShallower new old
+      | new.definitionDependencyDepth < old.definitionDependencyDepth =
+          new
+      | otherwise =
+          old
+
+definitionModuleScores :: [NamedDefinitionSource] -> Map.Map GHC.Module Integer
+definitionModuleScores =
+  foldl' collectScore Map.empty
+  where
+    collectScore scoresByModule definitionEntry =
+      Map.insertWith
+        (+)
+        (definitionSourceModule definitionEntry.definitionSource)
+        (definitionDepthScore definitionEntry.definitionDependencyDepth)
+        scoresByModule
+
+definitionDepthScore :: Int -> Integer
+definitionDepthScore depth =
+  2 ^ max 0 (30 - 5 * max 0 depth)
 
 directExpansionMaxDepth :: Int
 directExpansionMaxDepth = 1

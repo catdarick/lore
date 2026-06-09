@@ -189,7 +189,13 @@ resolveInstanceSourceFilesFor clsInst = do
     Nothing ->
       pure []
     Just source ->
-      buildDefinitionSourceFiles [NamedDefinitionSource instanceName source]
+      buildDefinitionSourceFiles
+        [ NamedDefinitionSource
+            { definitionName = instanceName,
+              definitionDependencyDepth = 0,
+              definitionSource = source
+            }
+        ]
 
 chosenInstanceErrorToFailure :: Text -> ChosenInstanceError -> ResolveInstanceFailureReason
 chosenInstanceErrorToFailure rawQuery = \case

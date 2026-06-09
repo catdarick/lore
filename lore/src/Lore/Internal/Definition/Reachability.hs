@@ -21,7 +21,7 @@ walkReachable ::
   Maybe Int ->
   (node -> [node]) ->
   [node] ->
-  [node]
+  [(Int, node)]
 walkReachable maybeMaxDepth neighbours roots =
   go initialVisited initialQueue []
   where
@@ -49,7 +49,7 @@ walkReachable maybeMaxDepth neighbours roots =
                 Seq.fromList [(depth + 1, nextNode) | nextNode <- nextNodes]
               queue' =
                 remainingQueue Seq.>< nextQueueItems
-           in go visited' queue' (node : reached)
+           in go visited' queue' ((depth, node) : reached)
 
 dedupePreservingOrder :: (Ord a) => [a] -> [a]
 dedupePreservingOrder =
@@ -65,7 +65,7 @@ reachableNamedTargets ::
   Int ->
   ProjectDefinitionIndex ->
   [DefinitionTarget] ->
-  [DefinitionTarget]
+  [(Int, DefinitionTarget)]
 reachableNamedTargets maxDepth projectIndex =
   walkReachable
     (Just (max 0 maxDepth))
@@ -77,7 +77,8 @@ reachableDeclarationIds ::
   Set.Set DefinitionId
 reachableDeclarationIds projectIndex roots =
   Set.fromList $
-    walkReachable
-      Nothing
-      (Set.toList . dependenciesForDeclaration projectIndex)
-      (Set.toList roots)
+    map snd $
+      walkReachable
+        Nothing
+        (Set.toList . dependenciesForDeclaration projectIndex)
+        (Set.toList roots)

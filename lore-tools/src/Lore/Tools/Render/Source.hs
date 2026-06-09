@@ -9,6 +9,7 @@ module Lore.Tools.Render.Source
     definitionSourceRealSrcSpan,
     definitionSourcePathFromCurrentDirectory,
     definitionSourcePath,
+    mergeDefinitionModules,
   )
 where
 
@@ -22,9 +23,9 @@ import qualified GHC
 import qualified GHC.Plugins as Plugins
 import Lore (DeclarationSpans (..), DefinitionSlice (..), DefinitionSource (..), mergeDefinitionSlices)
 import Lore.List (maximumMaybe, minimumMaybe)
-import Lore.Tools.Render.Doc (SourceFile (..), SourceSection (..))
 import Lore.SourceSpan (realSrcSpanFromSrcSpan)
 import Lore.SourceText (readSpanText, relativeSourcePath)
+import Lore.Tools.Render.Doc (SourceFile (..), SourceSection (..))
 import System.Directory (getCurrentDirectory)
 
 definitionSliceToSourceFile :: DefinitionSlice -> IO SourceFile
@@ -129,14 +130,24 @@ sortDeclarationSpans =
 
 mergeDefinitionModules :: [DefinitionSlice] -> [DefinitionSlice]
 mergeDefinitionModules =
-  Map.elems . foldl insertSlice Map.empty
+  mergeInInputOrder ([], Map.empty)
   where
-    insertSlice acc slice =
-      Map.insertWith mergeTwo slice.definitionModule slice acc
+    mergeInInputOrder (moduleOrder, slicesByModule) [] =
+      mapMaybe (`Map.lookup` slicesByModule) (reverse moduleOrder)
+    mergeInInputOrder (moduleOrder, slicesByModule) (slice : slices) =
+      case Map.lookup slice.definitionModule slicesByModule of
+        Nothing ->
+          mergeInInputOrder
+            (slice.definitionModule : moduleOrder, Map.insert slice.definitionModule slice slicesByModule)
+            slices
+        Just existing ->
+          mergeInInputOrder
+            (moduleOrder, Map.insert slice.definitionModule (mergeTwo slice existing) slicesByModule)
+            slices
 
-    mergeTwo new old =
-      case mergeDefinitionSlices [old, new] of
+    mergeTwo new existing =
+      case mergeDefinitionSlices [existing, new] of
         Just merged ->
           merged
         Nothing ->
-          old
+          existing

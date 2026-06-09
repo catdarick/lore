@@ -115,6 +115,7 @@ data DefinitionSlice = DefinitionSlice
 
 data NamedDefinitionSource = NamedDefinitionSource
   { definitionName :: !GHC.Name,
+    definitionDependencyDepth :: !Int,
     definitionSource :: !DefinitionSource
   }
   deriving stock (Eq, Generic)

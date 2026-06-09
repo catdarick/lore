@@ -12,7 +12,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Fingerprint (Fingerprint (..), fingerprintString)
 import qualified GHC.Plugins as GHC
-import Lore (DeclarationSpans (..), DefinitionId, DefinitionSource (..), MonadLore, NamedDefinitionSource (..), definitionSourceModule)
+import Lore (DeclarationSpans (..), DefinitionId (..), DefinitionSource (..), MonadLore, NamedDefinitionSource (..), definitionSourceModule)
 import Lore.Mcp.Internal.Annotated (FieldType (..))
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Monad (MonadLoreMcp (..), sentDefinitionHashes)
@@ -96,10 +96,10 @@ buildWithKnowledgeCache pageRequest directlyRequestedSymbolNames definitionEntri
           (visibleKnownFingerprints, visibleFreshDefinitions)
         )
   let omittedDefinitions =
-        [ definition.definitionEntry.definitionName
+        [ requestedName
         | definition <- uniqueDefinitions,
           Set.member definition.definitionFingerprint visibleKnownFingerprints,
-          Set.member definition.definitionEntry.definitionName directlyRequestedSymbolNames
+          requestedName <- Set.toList (definition.definitionEntry.definitionSource.definitionSourceNames `Set.intersection` directlyRequestedSymbolNames)
         ]
   filteredDefinitionPage <-
     buildFilteredVisibleDefinitionSourceFiles
@@ -138,7 +138,7 @@ definitionFingerprintIdentity :: NamedDefinitionSource -> DeclarationSpans -> Te
 definitionFingerprintIdentity definitionEntry declarationSpans =
   case declarationSpans.declarationSpan of
     GHC.RealSrcSpan realSpan _ ->
-      renderSymbolName definitionEntry.definitionName
+      renderDefinitionId definitionEntry.definitionSource.definitionSourceId
         <> ":"
         <> renderModuleName definitionEntry
         <> ":"
@@ -146,7 +146,7 @@ definitionFingerprintIdentity definitionEntry declarationSpans =
         <> ":"
         <> T.pack (GHC.unpackFS (GHC.srcSpanFile realSpan))
     GHC.UnhelpfulSpan unhelpfulSpan ->
-      renderSymbolName definitionEntry.definitionName
+      renderDefinitionId definitionEntry.definitionSource.definitionSourceId
         <> ":"
         <> renderModuleName definitionEntry
         <> ":"
@@ -160,9 +160,11 @@ renderModuleNameFromModule :: GHC.Module -> Text
 renderModuleNameFromModule definitionModule =
   T.pack (GHC.moduleNameString (GHC.moduleName definitionModule))
 
-renderSymbolName :: GHC.Name -> Text
-renderSymbolName name =
-  T.pack (GHC.showSDocUnsafe (GHC.ppr name))
+renderDefinitionId :: DefinitionId -> Text
+renderDefinitionId definitionId =
+  renderModuleNameFromModule definitionId.definitionIdModule
+    <> ":"
+    <> T.pack (show definitionId.definitionIdSpanKey)
 
 realSpanCoords :: GHC.RealSrcSpan -> Text
 realSpanCoords realSpan =

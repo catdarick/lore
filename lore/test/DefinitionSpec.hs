@@ -32,7 +32,7 @@ spec = withFixtureSpec do
   describe "walkReachable" do
     it "deduplicates roots while preserving first root ordering" \_fixture -> do
       walkReachable (Just 0) (const []) (["a", "b", "a", "c", "b"] :: [String])
-        `shouldBe` ["a", "b", "c"]
+        `shouldBe` [(0, "a"), (0, "b"), (0, "c")]
 
     it "preserves breadth-first queue ordering for broad dependencies" \_fixture -> do
       let neighbours :: String -> [String]
@@ -40,7 +40,35 @@ spec = withFixtureSpec do
           neighbours _ = []
 
       walkReachable (Just 1) neighbours (["root"] :: [String])
-        `shouldBe` ["root", "1", "2", "3", "4", "5"]
+        `shouldBe` [(0, "root"), (1, "1"), (1, "2"), (1, "3"), (1, "4"), (1, "5")]
+
+    it "records transitive dependency depth" \_fixture -> do
+      let neighbours :: String -> [String]
+          neighbours "root" = ["direct"]
+          neighbours "direct" = ["transitive"]
+          neighbours _ = []
+
+      walkReachable (Just 2) neighbours (["root"] :: [String])
+        `shouldBe` [(0, "root"), (1, "direct"), (2, "transitive")]
+
+    it "terminates cycles and keeps the first minimum-depth visit" \_fixture -> do
+      let neighbours :: String -> [String]
+          neighbours "root" = ["left", "right"]
+          neighbours "left" = ["shared", "root"]
+          neighbours "right" = ["shared"]
+          neighbours "shared" = ["left"]
+          neighbours _ = []
+
+      walkReachable (Just 10) neighbours (["root"] :: [String])
+        `shouldBe` [(0, "root"), (1, "left"), (1, "right"), (2, "shared")]
+
+    it "keeps depth zero when a dependency is also requested as a root" \_fixture -> do
+      let neighbours :: String -> [String]
+          neighbours "root" = ["shared"]
+          neighbours _ = []
+
+      walkReachable (Just 2) neighbours (["shared", "root"] :: [String])
+        `shouldBe` [(0, "shared"), (0, "root")]
 
   describe "resolveDefinitionSourceNamed + renderDefinitionSourceSlice" do
     it "resolves declaration spans for a symbol" \fixture -> do
@@ -212,6 +240,19 @@ spec = withFixtureSpec do
                                           ]
                                         )
                                       ]
+
+    it "records root, direct, and transitive dependency depths" \fixture -> do
+      depths <-
+        fixtureLore fixture do
+          loadHomeModules defaultLoadHomeModulesOptions
+          exportedSymbols <- findSymbols "derivedValue"
+          targetName <- maybe (error "symbol not found: derivedValue") pure (findFixtureSymbol "derivedValue" exportedSymbols)
+          namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
+          pure [(GHC.Plugins.getOccString source.definitionName, source.definitionDependencyDepth) | source <- namedSources]
+
+      depths `shouldSatisfy` elem ("derivedValue", 0)
+      depths `shouldSatisfy` elem ("bumpWithSeed", 1)
+      depths `shouldSatisfy` elem ("seedValue", 2)
 
     it "includes referenced types when recursively resolving a function definition" \fixture -> do
       closure <- fixtureDefinitionClosure fixture 1 "mkIndexed"
@@ -554,7 +595,7 @@ spec = withFixtureSpec do
                                         )
                                       ]
 
-    it "orders recursive closure results with dependencies before the queried root definition" \fixture -> do
+    it "orders recursive closure results with the queried root definition first" \fixture -> do
       moduleOrder <-
         fixtureLore fixture do
           loadHomeModules defaultLoadHomeModulesOptions
@@ -563,10 +604,10 @@ spec = withFixtureSpec do
           namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
           pure (map (GHC.moduleNameString . GHC.moduleName . definitionSourceModule . (.definitionSource)) namedSources)
 
-      last moduleOrder `shouldBe` "Demo"
+      head moduleOrder `shouldBe` "Demo"
       "Demo.Support" `shouldSatisfy` (`elem` moduleOrder)
 
-    it "orders nested dependencies before their dependents within closure output" \fixture -> do
+    it "orders nested dependencies after their dependents within breadth-first closure output" \fixture -> do
       definitionOrder <-
         fixtureLore fixture do
           loadHomeModules defaultLoadHomeModulesOptions
@@ -575,9 +616,9 @@ spec = withFixtureSpec do
           namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
           pure (map (GHC.Plugins.getOccString . definitionName) namedSources)
 
-      definitionOrder `shouldBe` ["seedValue", "bumpWithSeed", "derivedValue"]
+      definitionOrder `shouldBe` ["derivedValue", "bumpWithSeed", "seedValue"]
 
-    it "keeps transitive dependencies before direct dependencies in branching closures" \fixture -> do
+    it "keeps direct dependencies before transitive dependencies in branching closures" \fixture -> do
       definitionOrder <-
         fixtureLore fixture do
           loadHomeModules defaultLoadHomeModulesOptions
@@ -591,10 +632,10 @@ spec = withFixtureSpec do
               (error ("missing definition in closure: " <> occName))
               id
               (lookup occName (zip definitionOrder [0 :: Int ..]))
-      indexOf "supportSeed" `shouldSatisfy` (< indexOf "crossModuleSeed")
-      indexOf "supportStep" `shouldSatisfy` (< indexOf "crossModuleRecord")
-      indexOf "crossModuleRecord" `shouldSatisfy` (< indexOf "crossModuleBundle")
-      indexOf "crossModuleSeed" `shouldSatisfy` (< indexOf "crossModuleBundle")
+      indexOf "crossModuleSeed" `shouldSatisfy` (< indexOf "supportSeed")
+      indexOf "crossModuleRecord" `shouldSatisfy` (< indexOf "supportStep")
+      indexOf "crossModuleBundle" `shouldSatisfy` (< indexOf "crossModuleRecord")
+      indexOf "crossModuleBundle" `shouldSatisfy` (< indexOf "crossModuleSeed")
 
     it "merges same-module closure declarations when dependencies are split across references" \fixture -> do
       closure <- fixtureDefinitionClosure fixture 2 "crossModuleBundle"
@@ -843,7 +884,13 @@ spec = withFixtureSpec do
 
       rendered
         `shouldBe` unlines
-          [ "=== src/Demo/Support.hs ===",
+          [ "=== src/Demo.hs ===",
+            "--- lines 60-62 ---",
+            "crossModuleRecord :: Int -> Support.SupportRecord",
+            "crossModuleRecord value =",
+            "  Support.mkSupportRecord (Support.supportStep value)",
+            "",
+            "=== src/Demo/Support.hs ===",
             "--- lines 12-13 ---",
             "supportSeed :: Int",
             "supportSeed = 5",
@@ -859,13 +906,7 @@ spec = withFixtureSpec do
             "mkSupportRecord value =",
             "  SupportRecord",
             "    { supportValues = Map.singleton \"value\" value",
-            "    }",
-            "",
-            "=== src/Demo.hs ===",
-            "--- lines 60-62 ---",
-            "crossModuleRecord :: Int -> Support.SupportRecord",
-            "crossModuleRecord value =",
-            "  Support.mkSupportRecord (Support.supportStep value)"
+            "    }"
           ]
 
 shouldHaveSingleDefinitionText ::
