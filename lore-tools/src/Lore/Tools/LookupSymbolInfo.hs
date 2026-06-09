@@ -14,7 +14,7 @@ import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC.Plugins as Plugins
-import Lore (FindSimilarSymbolsOptions (..), MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, parseAndNormalizeName, resolvePathToRoot)
+import Lore (FindSimilarSymbolsOptions (..), LoreConfigError, MonadLore, PathToRoot (..), Symbol (..), SymbolInfo (..), findMatchingSymbols, findSimilarSymbols, listDirectInstances, parseAndNormalizeName, renderLoreConfigError, resolvePathToRoot)
 import qualified Lore as Core
 import Lore.Tools.Internal.DetailedSymbolInfo (DetailedSymbolInfo (..), detailedSymbolInfoLabel)
 import Lore.Tools.Internal.SymbolSuggestions
@@ -49,9 +49,12 @@ type LookupSymbolInfoResult = ToolRun LookupSymbolInfoReady
 data LookupSymbolInfoReady = LookupSymbolInfoReady
   { lookupSymbolInfoReadyQuery :: Text,
     lookupSymbolInfoPage :: Maybe (Paginated DetailedSymbolInfo),
+    lookupSymbolInfoFailure :: Maybe LookupSymbolInfoFailure,
     lookupSymbolInfoSuggestions :: [GroupedSymbolSuggestion],
     lookupSymbolInfoPartialLoadWarning :: Maybe PartialLoadWarning
   }
+
+newtype LookupSymbolInfoFailure = LookupSymbolInfoInvalidConfig LoreConfigError
 
 lookupSymbolInfo :: (MonadLore m) => LookupSymbolInfoOptions -> m LookupSymbolInfoResult
 lookupSymbolInfo options = do
@@ -61,52 +64,69 @@ lookupSymbolInfo options = do
           loadedSessionPartialWarning session "Symbol lookup results may be incomplete."
     case symbolInfos of
       [] -> do
-        suggestions <-
+        eiSuggestions <-
           findSimilarSymbols
             FindSimilarSymbolsOptions
               { similarSymbolsQuery = options.lookupSymbolInfoQuery,
                 similarSymbolsModulePatterns = []
               }
-        let renderedSuggestions =
-              maybe [] paginatedItems
-                (paginateItemsWithPageRequest
-                   PageRequest
-                     { pageOffset = 0,
-                       pageLimit = options.lookupSymbolInfoSuggestionLimit
-                     }
-                   (groupSymbolSuggestions suggestions))
-        pure
-          LookupSymbolInfoReady
-            { lookupSymbolInfoReadyQuery = options.lookupSymbolInfoQuery,
-              lookupSymbolInfoPage = Nothing,
-              lookupSymbolInfoSuggestions = renderedSuggestions,
-              lookupSymbolInfoPartialLoadWarning = partialLoadWarning
-            }
+        pure $
+          case eiSuggestions of
+            Left configError ->
+              LookupSymbolInfoReady
+                { lookupSymbolInfoReadyQuery = options.lookupSymbolInfoQuery,
+                  lookupSymbolInfoPage = Nothing,
+                  lookupSymbolInfoFailure = Just (LookupSymbolInfoInvalidConfig configError),
+                  lookupSymbolInfoSuggestions = [],
+                  lookupSymbolInfoPartialLoadWarning = partialLoadWarning
+                }
+            Right suggestions ->
+              let renderedSuggestions =
+                    maybe [] paginatedItems
+                      (paginateItemsWithPageRequest
+                         PageRequest
+                           { pageOffset = 0,
+                             pageLimit = options.lookupSymbolInfoSuggestionLimit
+                           }
+                         (groupSymbolSuggestions suggestions))
+               in LookupSymbolInfoReady
+                    { lookupSymbolInfoReadyQuery = options.lookupSymbolInfoQuery,
+                      lookupSymbolInfoPage = Nothing,
+                      lookupSymbolInfoFailure = Nothing,
+                      lookupSymbolInfoSuggestions = renderedSuggestions,
+                      lookupSymbolInfoPartialLoadWarning = partialLoadWarning
+                    }
       _ -> do
         detailedSymbolInfos <- mapM mkDetailedSymbolInfo symbolInfos
         pure
           LookupSymbolInfoReady
             { lookupSymbolInfoReadyQuery = options.lookupSymbolInfoQuery,
               lookupSymbolInfoPage = paginateDetailedSymbolInfos options.lookupSymbolInfoPageRequest detailedSymbolInfos,
+              lookupSymbolInfoFailure = Nothing,
               lookupSymbolInfoSuggestions = [],
               lookupSymbolInfoPartialLoadWarning = partialLoadWarning
             }
 
 renderLookupSymbolInfoReady :: LookupSymbolInfoReady -> LoreDoc
 renderLookupSymbolInfoReady ready =
-  case (ready.lookupSymbolInfoPage, ready.lookupSymbolInfoSuggestions) of
-    (Nothing, []) ->
+  case (ready.lookupSymbolInfoPage, ready.lookupSymbolInfoFailure, ready.lookupSymbolInfoSuggestions) of
+    (Nothing, Just failure, _) ->
+      mconcat
+        [ renderLookupSymbolInfoFailure failure,
+          maybe mempty toLoreDoc ready.lookupSymbolInfoPartialLoadWarning
+        ]
+    (Nothing, Nothing, []) ->
       mconcat
         [ paragraph (noSymbolsFound ready.lookupSymbolInfoReadyQuery),
           maybe mempty toLoreDoc ready.lookupSymbolInfoPartialLoadWarning
         ]
-    (Nothing, suggestions) ->
+    (Nothing, Nothing, suggestions) ->
       mconcat
         [ paragraph (noSymbolsFound ready.lookupSymbolInfoReadyQuery <> " Maybe you meant one of these?"),
           numberedListFrom 1 (map (paragraph . groupedSymbolSuggestionLabel) suggestions),
           maybe mempty toLoreDoc ready.lookupSymbolInfoPartialLoadWarning
         ]
-    (Just page, _) ->
+    (Just page, _, _) ->
       mconcat
         [ paginationSummaryDoc
             PaginationRenderConfig
@@ -117,6 +137,11 @@ renderLookupSymbolInfoReady ready =
           numberedListFrom (fromIntegral (page.paginatedSkippedItems + 1)) (map (paragraph . detailedSymbolInfoLabel) page.paginatedItems),
           maybe mempty toLoreDoc ready.lookupSymbolInfoPartialLoadWarning
         ]
+
+renderLookupSymbolInfoFailure :: LookupSymbolInfoFailure -> LoreDoc
+renderLookupSymbolInfoFailure = \case
+  LookupSymbolInfoInvalidConfig configError ->
+    paragraph (renderLoreConfigError configError)
 
 paginateDetailedSymbolInfos :: PageRequest -> [DetailedSymbolInfo] -> Maybe (Paginated DetailedSymbolInfo)
 paginateDetailedSymbolInfos pageRequest =

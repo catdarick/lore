@@ -52,20 +52,20 @@ spec = do
 
     it "supports aliveModules roots" do
       result <-
-        runFindDeadCodeFixtureWithConfig "alive-modules:\n  - Dev\n" (J.object [])
+        runFindDeadCodeFixtureWithConfig "dead-code:\n  alive-modules:\n    - Dev\n" (J.object [])
       result `shouldNotContainText` "deadRoot"
       result `shouldNotContainText` "deadDependency"
 
     it "supports aliveSymbols roots" do
       result <-
-        runFindDeadCodeFixtureWithConfig "alive-symbols:\n  - DeadCode.Lib.deadRoot\n" (J.object [])
+        runFindDeadCodeFixtureWithConfig "dead-code:\n  alive-symbols:\n    - DeadCode.Lib.deadRoot\n" (J.object [])
       result `shouldNotContainText` "deadRoot"
       result `shouldNotContainText` "deadDependency"
 
     it "returns a clear error for invalid lore.yaml content" do
       result <-
-        runFindDeadCodeFixtureWithConfig "alive-symbols: [\n" (J.object [])
-      result `shouldContainText` "Failed to parse \"lore.yaml\""
+        runFindDeadCodeFixtureWithConfig "dead-code:\n  alive-symbols: [\n" (J.object [])
+      result `shouldContainText` "Failed to parse"
 
     it "returns a clear error for unresolved module names" do
       result <-

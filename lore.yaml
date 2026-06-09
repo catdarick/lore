@@ -1,6 +1,7 @@
-alive-modules: 
-  - Lore.Mcp.Internal.Annotated
-  - Lore.Tools.Render.Doc
+dead-code:
+  alive-modules: 
+    - Lore.Mcp.Internal.Annotated
+    - Lore.Tools.Render.Doc
 
-alive-symbols:
-  - Lore.Session.defaultSessionConfig
+  alive-symbols:
+    - Lore.Session.defaultSessionConfig

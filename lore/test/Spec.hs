@@ -3,6 +3,7 @@ module Main
   )
 where
 
+import qualified ConfigSpec
 import qualified DeadCodeSpec
 import qualified DefinitionSpec
 import qualified HomeModulesSpec
@@ -28,6 +29,7 @@ import qualified ValueTypeHeadSpec
 main :: IO ()
 main =
   hspec do
+    ConfigSpec.spec
     DefinitionSpec.spec
     DeadCodeSpec.spec
     ImportCleanupApplySpec.spec

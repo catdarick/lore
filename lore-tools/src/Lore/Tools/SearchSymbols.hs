@@ -4,15 +4,18 @@ module Lore.Tools.SearchSymbols
     mkSearchSymbolsModulePattern,
     searchSymbolsModulePatternText,
     SearchSymbolsResult,
+    SearchSymbolsOutput (..),
+    SearchSymbolsFailure (..),
     SearchSymbolsReady (..),
     searchSymbols,
+    renderSearchSymbolsOutput,
     renderSearchSymbolsReady,
   )
 where
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Lore (FindSimilarSymbolsOptions (..), ModulePattern, ModulePatternError, MonadLore, compileModulePattern, findSimilarSymbols)
+import Lore (FindSimilarSymbolsOptions (..), LoreConfigError, ModulePattern, ModulePatternError, MonadLore, compileModulePattern, findSimilarSymbols, renderLoreConfigError)
 import Lore.Tools.Internal.SymbolSuggestions
   ( GroupedSymbolSuggestion,
     groupSymbolSuggestions,
@@ -54,7 +57,13 @@ mkSearchSymbolsModulePattern rawPattern = do
         searchSymbolsCompiledModulePattern = compiledPattern
       }
 
-type SearchSymbolsResult = ToolRun SearchSymbolsReady
+type SearchSymbolsResult = ToolRun SearchSymbolsOutput
+
+data SearchSymbolsOutput
+  = SearchSymbolsFailed SearchSymbolsFailure
+  | SearchSymbolsReadyOutput SearchSymbolsReady
+
+newtype SearchSymbolsFailure = SearchSymbolsInvalidConfig LoreConfigError
 
 data SearchSymbolsReady = SearchSymbolsReady
   { searchSymbolsReadyQuery :: Text,
@@ -66,27 +75,44 @@ data SearchSymbolsReady = SearchSymbolsReady
 searchSymbols :: (MonadLore m) => SearchSymbolsOptions -> m SearchSymbolsResult
 searchSymbols options = do
   withLoadedSession \session -> do
-    suggestions <-
+    eiSuggestions <-
       findSimilarSymbols
         FindSimilarSymbolsOptions
           { similarSymbolsQuery = options.searchSymbolsQuery,
             similarSymbolsModulePatterns = map (.searchSymbolsCompiledModulePattern) options.searchSymbolsModulePatterns
           }
-    let renderedSuggestions =
-          maybe [] paginatedItems
-            (paginateItemsWithPageRequest
-               PageRequest
-                 { pageOffset = 0,
-                   pageLimit = options.searchSymbolsSuggestionLimit
-                 }
-               (groupSymbolSuggestions suggestions))
-    pure
-      SearchSymbolsReady
-        { searchSymbolsReadyQuery = options.searchSymbolsQuery,
-          searchSymbolsReadyModulePatterns = options.searchSymbolsModulePatterns,
-          searchSymbolsSuggestions = renderedSuggestions,
-          searchSymbolsPartialLoadWarning = loadedSessionPartialWarning session "Search results may be incomplete."
-        }
+    pure $
+      case eiSuggestions of
+        Left configError ->
+          SearchSymbolsFailed (SearchSymbolsInvalidConfig configError)
+        Right suggestions ->
+          let renderedSuggestions =
+                maybe [] paginatedItems
+                  (paginateItemsWithPageRequest
+                     PageRequest
+                       { pageOffset = 0,
+                         pageLimit = options.searchSymbolsSuggestionLimit
+                       }
+                     (groupSymbolSuggestions suggestions))
+           in SearchSymbolsReadyOutput
+                SearchSymbolsReady
+                  { searchSymbolsReadyQuery = options.searchSymbolsQuery,
+                    searchSymbolsReadyModulePatterns = options.searchSymbolsModulePatterns,
+                    searchSymbolsSuggestions = renderedSuggestions,
+                    searchSymbolsPartialLoadWarning = loadedSessionPartialWarning session "Search results may be incomplete."
+                  }
+
+renderSearchSymbolsOutput :: SearchSymbolsOutput -> LoreDoc
+renderSearchSymbolsOutput = \case
+  SearchSymbolsFailed failure ->
+    renderSearchSymbolsFailure failure
+  SearchSymbolsReadyOutput ready ->
+    renderSearchSymbolsReady ready
+
+renderSearchSymbolsFailure :: SearchSymbolsFailure -> LoreDoc
+renderSearchSymbolsFailure = \case
+  SearchSymbolsInvalidConfig configError ->
+    paragraph (renderLoreConfigError configError)
 
 renderSearchSymbolsReady :: SearchSymbolsReady -> LoreDoc
 renderSearchSymbolsReady ready =

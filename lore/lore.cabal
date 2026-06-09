@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       Lore
+      Lore.Config
       Lore.Definition
       Lore.DeadCode
       Lore.Definition.RenderSlice
@@ -221,6 +222,7 @@ test-suite lore-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      ConfigSpec
       DefinitionSpec
       DeadCodeSpec
       ImportCleanupApplySpec
@@ -244,6 +246,7 @@ test-suite lore-test
       ValueTypeHeadSpec
       SomeModule
       Lore
+      Lore.Config
       Lore.DeadCode
       Lore.Definition
       Lore.Definition.RenderSlice

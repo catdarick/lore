@@ -58,6 +58,7 @@ library:
   source-dirs: src
   exposed-modules:
   - Lore
+  - Lore.Config
   - Lore.Definition
   - Lore.DeadCode
   - Lore.Definition.RenderSlice
@@ -94,6 +95,7 @@ tests:
     - test
     - src
     other-modules:
+    - ConfigSpec
     - DefinitionSpec
     - DeadCodeSpec
     - ImportCleanupApplySpec
@@ -117,6 +119,7 @@ tests:
     - ValueTypeHeadSpec
     - SomeModule
     - Lore
+    - Lore.Config
     - Lore.DeadCode
     - Lore.Definition
     - Lore.Definition.RenderSlice

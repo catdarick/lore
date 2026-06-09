@@ -22,7 +22,6 @@ source-repository head
 library
   exposed-modules:
       Lore.Tools
-      Lore.Tools.Config
       Lore.Tools.CreateTemporalModule
       Lore.Tools.DebugCacheMemory
       Lore.Tools.Directory

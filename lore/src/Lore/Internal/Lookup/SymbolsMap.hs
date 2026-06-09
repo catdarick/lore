@@ -57,6 +57,7 @@ import Lore.Internal.Lookup.ModulePattern (ModulePattern)
 import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, extractAndNormalizeOccName, parseAndNormalizeName)
 import Lore.Internal.Lookup.SymbolSearch.Index (buildSymbolSearchIndex, symbolAssociatedModuleNames)
 import Lore.Internal.Lookup.SymbolSearch.Rank (findSymbolSearchSuggestions)
+import Lore.Internal.Lookup.SymbolSearch.Synonyms (SynonymLexicon)
 import Lore.Internal.Lookup.SymbolSearch.Types (SymbolSearchIndex)
 import Lore.Internal.Lookup.Types
   ( ModSummaries (..),
@@ -101,18 +102,19 @@ findMatchingSymbolsInMap targetName SymbolsMap {homeSymbolsMap, externalSymbolsM
     moduleMatchingSymbols =
       Set.filter (isModuleMatching targetName) (homeMatchingSymbols <> externalMatchingSymbols)
 
-findSimilarSymbolsInMap :: (MonadLore m) => [ModulePattern] -> Text -> SymbolsMap -> m [SymbolSuggestion]
-findSimilarSymbolsInMap modulePatterns query symbolsMap = do
+findSimilarSymbolsInMap :: (MonadLore m) => SynonymLexicon -> [ModulePattern] -> Text -> SymbolsMap -> m [SymbolSuggestion]
+findSimilarSymbolsInMap lexicon modulePatterns query symbolsMap = do
   cachedSearchIndex <- getCachedSymbolSearchIndex symbolsMap
-  pure $ findSimilarSymbolsCandidatesInMap modulePatterns query cachedSearchIndex
+  pure $ findSimilarSymbolsCandidatesInMap lexicon modulePatterns query cachedSearchIndex
 
 findSimilarSymbolsCandidatesInMap ::
+  SynonymLexicon ->
   [ModulePattern] ->
   Text ->
   SymbolSearchIndex ->
   [SymbolSuggestion]
-findSimilarSymbolsCandidatesInMap modulePatterns query searchIndex =
-  findSymbolSearchSuggestions modulePatterns query searchIndex
+findSimilarSymbolsCandidatesInMap lexicon modulePatterns query searchIndex =
+  findSymbolSearchSuggestions lexicon modulePatterns query searchIndex
 
 isModuleMatching :: NormalizedName -> Symbol -> Bool
 isModuleMatching targetName symbol =

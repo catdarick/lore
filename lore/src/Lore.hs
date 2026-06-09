@@ -1,6 +1,16 @@
 module Lore
   ( SessionConfig (..),
     ProjectProvider (..),
+    LoreConfig (..),
+    DeadCodeConfig (..),
+    SymbolSearchConfig (..),
+    LoreConfigError (..),
+    SynonymGroupError (..),
+    defaultLoreConfig,
+    defaultDeadCodeConfig,
+    defaultSymbolSearchConfig,
+    loadLoreConfig,
+    renderLoreConfigError,
     defaultSessionConfig,
     ParallelWorkersCount (..),
     LoreMonadT,
@@ -96,6 +106,7 @@ module Lore
   )
 where
 
+import Lore.Config
 import Lore.DeadCode
 import Lore.Definition
 import Lore.Diagnostics

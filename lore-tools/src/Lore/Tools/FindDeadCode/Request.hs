@@ -13,11 +13,15 @@ import qualified Data.Text as T
 import qualified GHC
 import GHC.Generics (Generic)
 import Lore
-  ( MonadLore,
+  ( DeadCodeConfig (..),
+    LoreConfig (..),
+    LoreConfigError,
+    MonadLore,
     Symbol (..),
+    loadLoreConfig,
+    renderLoreConfigError,
     resolveDefinitionSourceNamed,
   )
-import Lore.Tools.Config (LoreConfig (..), loadLoreConfig)
 import Lore.Tools.Internal.SymbolResolution
   ( ResolvedSymbolQuery (..),
     SymbolsResolved (resolvedQueries),
@@ -37,7 +41,7 @@ data FindDeadCodeOptions = FindDeadCodeOptions
 
 data FindDeadCodeFailureReason
   = FindDeadCodeUnresolvedModules [Text]
-  | FindDeadCodeInvalidConfig Text
+  | FindDeadCodeInvalidConfig LoreConfigError
   | FindDeadCodeUnresolvedAliveModules [Text]
   | FindDeadCodeUnresolvedSymbols SymbolsUnresolved
   | FindDeadCodeInvalidAliveSymbols [Text]
@@ -47,7 +51,7 @@ instance ToLoreDoc FindDeadCodeFailureReason where
     FindDeadCodeUnresolvedModules unresolved ->
       paragraph (T.intercalate "\n" unresolved)
     FindDeadCodeInvalidConfig configError ->
-      paragraph configError
+      paragraph (renderLoreConfigError configError)
     FindDeadCodeUnresolvedAliveModules unresolved ->
       paragraph (T.intercalate "\n" unresolved)
     FindDeadCodeUnresolvedSymbols unresolvedSymbols ->
@@ -76,12 +80,12 @@ resolveFindDeadCodeRequest FindDeadCodeOptions {findDeadCodeModules} = do
         Left configError ->
           pure (Left (FindDeadCodeInvalidConfig configError))
         Right config -> do
-          eiAliveModules <- resolveLoadedHomeModulesByName config.loreConfigAliveModules
+          eiAliveModules <- resolveLoadedHomeModulesByName config.loreConfigDeadCode.deadCodeConfigAliveModules
           case eiAliveModules of
             Left unresolvedAliveModules ->
               pure (Left (FindDeadCodeUnresolvedAliveModules unresolvedAliveModules))
             Right resolvedAliveModules -> do
-              eiAliveNames <- resolveAliveRootNames config.loreConfigAliveSymbols
+              eiAliveNames <- resolveAliveRootNames config.loreConfigDeadCode.deadCodeConfigAliveSymbols
               pure $
                 case eiAliveNames of
                   Left unresolvedSymbols ->

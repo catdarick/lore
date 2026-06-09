@@ -16,7 +16,7 @@ import Lore.Internal.Lookup.ModulePattern (ModulePattern, compileModulePattern)
 import Lore.Internal.Lookup.Name (NormalizedName (occName), NormalizedOccName, parseAndNormalizeName, unNormalizedModuleName)
 import Lore.Internal.Lookup.SymbolSearch.Index (buildSymbolSearchIndex)
 import Lore.Internal.Lookup.SymbolSearch.Rank (parseSymbolSearchQuery, tokenIdf)
-import Lore.Internal.Lookup.SymbolSearch.Synonyms (areDirectSynonyms)
+import Lore.Internal.Lookup.SymbolSearch.Synonyms (SynonymLexicon, areDirectSynonyms, builtInSynonymLexicon, compileSynonymGroups, mergeSynonymLexicons)
 import Lore.Internal.Lookup.SymbolSearch.Types
   ( IndexedNameVariant (..),
     SearchToken (..),
@@ -61,9 +61,9 @@ spec =
         `shouldBe` []
 
     it "uses direct synonyms without transitive synonym expansion" do
-      SearchToken "query" `areDirectSynonyms` SearchToken "select" `shouldBe` True
-      SearchToken "select" `areDirectSynonyms` SearchToken "filter" `shouldBe` True
-      SearchToken "query" `areDirectSynonyms` SearchToken "filter" `shouldBe` False
+      areDirectSynonyms builtInSynonymLexicon (SearchToken "query") (SearchToken "select") `shouldBe` True
+      areDirectSynonyms builtInSynonymLexicon (SearchToken "select") (SearchToken "filter") `shouldBe` True
+      areDirectSynonyms builtInSynonymLexicon (SearchToken "query") (SearchToken "filter") `shouldBe` False
 
     it "applies direct synonyms in full search only for direct neighbors" do
       suggestionNames (search "db" [databaseConnect])
@@ -71,6 +71,28 @@ spec =
 
       suggestionNames (search "query" [filterRows])
         `shouldBe` []
+
+    it "applies project synonym groups without replacing built-ins" do
+      projectLexicon <- expectRight "Expected project synonym group to compile." (compileSynonymGroups [["enqueue", "schedule"]])
+      let effectiveLexicon = mergeSynonymLexicons builtInSynonymLexicon projectLexicon
+
+      suggestionNames (searchWithLexicon projectLexicon "enqueue" [scheduleJob])
+        `shouldBe` ["Jobs.scheduleJob"]
+      suggestionNames (searchWithLexicon mempty "enqueue" [scheduleJob])
+        `shouldBe` []
+      suggestionNames (searchWithLexicon effectiveLexicon "db" [databaseConnect])
+        `shouldBe` ["Storage.Database.connect"]
+
+    it "keeps overlapping project synonym groups direct and non-transitive" do
+      projectLexicon <- expectRight "Expected project synonym groups to compile." (compileSynonymGroups [["alpha", "beta"], ["beta", "gamma"], ["query", "projection"]])
+      let effectiveLexicon = mergeSynonymLexicons builtInSynonymLexicon projectLexicon
+
+      areDirectSynonyms projectLexicon (SearchToken "alpha") (SearchToken "beta") `shouldBe` True
+      areDirectSynonyms projectLexicon (SearchToken "beta") (SearchToken "gamma") `shouldBe` True
+      areDirectSynonyms projectLexicon (SearchToken "alpha") (SearchToken "gamma") `shouldBe` False
+      areDirectSynonyms effectiveLexicon (SearchToken "projection") (SearchToken "query") `shouldBe` True
+      areDirectSynonyms effectiveLexicon (SearchToken "query") (SearchToken "lookup") `shouldBe` True
+      areDirectSynonyms effectiveLexicon (SearchToken "projection") (SearchToken "lookup") `shouldBe` False
 
     it "indexes one document per actual symbol including all aliases" do
       let alias = lookupOcc "createSubscriptionAccount"
@@ -174,15 +196,19 @@ spec =
 
 search :: Text -> [Symbol] -> [SymbolSuggestion]
 search query symbols =
-  findSimilarSymbolsCandidatesInMap [] query (testSearchIndex symbols)
+  findSimilarSymbolsCandidatesInMap builtInSynonymLexicon [] query (testSearchIndex symbols)
+
+searchWithLexicon :: SynonymLexicon -> Text -> [Symbol] -> [SymbolSuggestion]
+searchWithLexicon lexicon query symbols =
+  findSimilarSymbolsCandidatesInMap lexicon [] query (testSearchIndex symbols)
 
 searchWithPatterns :: [Text] -> Text -> [Symbol] -> [SymbolSuggestion]
 searchWithPatterns rawPatterns query symbols =
-  findSimilarSymbolsCandidatesInMap (map compilePattern rawPatterns) query (testSearchIndex symbols)
+  findSimilarSymbolsCandidatesInMap builtInSynonymLexicon (map compilePattern rawPatterns) query (testSearchIndex symbols)
 
 searchWithTypeFacts :: Text -> [Symbol] -> Map.Map GHC.Name ValueTypeHeadNames -> [SymbolSuggestion]
 searchWithTypeFacts query symbols facts =
-  findSimilarSymbolsCandidatesInMap [] query (testSearchIndexWithTypeFacts symbols facts)
+  findSimilarSymbolsCandidatesInMap builtInSynonymLexicon [] query (testSearchIndexWithTypeFacts symbols facts)
 
 testSearchIndex :: [Symbol] -> SymbolSearchIndex
 testSearchIndex symbols =
@@ -202,6 +228,12 @@ expectJust :: String -> Maybe a -> IO a
 expectJust _ (Just value) =
   pure value
 expectJust message Nothing =
+  expectationFailure message *> fail "unreachable"
+
+expectRight :: String -> Either err a -> IO a
+expectRight _ (Right value) =
+  pure value
+expectRight message (Left _) =
   expectationFailure message *> fail "unreachable"
 
 fieldFrequency :: SymbolSearchField -> SearchToken -> SymbolSearchIndex -> Int
@@ -226,7 +258,7 @@ moduleTexts document =
 
 selectedEvidenceFor :: SearchToken -> Symbol -> SymbolSearchIndex -> Maybe TokenMatchEvidence
 selectedEvidenceFor queryToken symbol index = do
-  suggestion <- List.find ((== symbol.name) . (.name) . (.suggestedSymbol)) (findSimilarSymbolsCandidatesInMap [] queryToken.unSearchToken index)
+  suggestion <- List.find ((== symbol.name) . (.name) . (.suggestedSymbol)) (findSimilarSymbolsCandidatesInMap builtInSynonymLexicon [] queryToken.unSearchToken index)
   List.find ((== queryToken) . (.evidenceQueryToken)) suggestion.suggestionEvidence
 
 compilePattern :: Text -> ModulePattern
@@ -365,3 +397,6 @@ splitAliasSymbol = testSymbol 21 "Alias.Split" "placeholder"
 
 genuineFooQux :: Symbol
 genuineFooQux = testSymbol 22 "Alias.Real" "fooQux"
+
+scheduleJob :: Symbol
+scheduleJob = testSymbol 23 "Jobs" "scheduleJob"

@@ -80,4 +80,4 @@ runSearchSymbols args = do
           searchSymbolsSuggestionLimit = args.searchSymbolsLimitArg,
           searchSymbolsModulePatterns = args.searchSymbolsModulePatternArgs
         }
-  pure (renderToolRun SearchSymbols.renderSearchSymbolsReady result)
+  pure (renderToolRun SearchSymbols.renderSearchSymbolsOutput result)

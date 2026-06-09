@@ -2,6 +2,7 @@ module Lore.Internal.Lookup.SymbolSearch.Rank
   ( parseSymbolSearchQuery,
     findSymbolSearchSuggestions,
     matchQueryTokens,
+    classifyTokenMatch,
     tokenIdf,
     scoreSymbolDocument,
     wholeNameDistance,
@@ -21,7 +22,7 @@ import qualified GHC.Types.Name as GHC
 import Lore.Internal.Lookup.ModulePattern (ModulePattern, matchesModulePattern)
 import Lore.Internal.Lookup.Name (NormalizedOccName, parseQualifiedNormalizedOccName, unNormalizedOccName)
 import Lore.Internal.Lookup.SymbolSearch.Index (fieldTokens)
-import Lore.Internal.Lookup.SymbolSearch.Synonyms (areDirectSynonyms)
+import Lore.Internal.Lookup.SymbolSearch.Synonyms (SynonymLexicon, areDirectSynonyms)
 import Lore.Internal.Lookup.SymbolSearch.Tokenize (canonicalizeSearchToken, tokenizeSearchText)
 import Lore.Internal.Lookup.SymbolSearch.Types
   ( IndexedNameVariant (..),
@@ -48,13 +49,13 @@ parseSymbolSearchQuery rawQuery =
   where
     (exactModule, occName) = parseQualifiedNormalizedOccName rawQuery
 
-findSymbolSearchSuggestions :: [ModulePattern] -> Text -> SymbolSearchIndex -> [SymbolSuggestion]
-findSymbolSearchSuggestions modulePatterns rawQuery index =
+findSymbolSearchSuggestions :: SynonymLexicon -> [ModulePattern] -> Text -> SymbolSearchIndex -> [SymbolSuggestion]
+findSymbolSearchSuggestions lexicon modulePatterns rawQuery index =
   List.sortOn suggestionSortKey $
     mapMaybe (scoreCandidate query tokenMatches) candidateDocuments
   where
     query = parseSymbolSearchQuery rawQuery
-    tokenMatches = matchQueryTokens index query.symbolSearchTokens
+    tokenMatches = matchQueryTokens lexicon index query.symbolSearchTokens
     candidateNames =
       Set.filter
         (candidateInScope index query modulePatterns)
@@ -83,17 +84,17 @@ findSymbolSearchSuggestions modulePatterns rawQuery index =
         suggestion.suggestedSymbol.name
       )
 
-matchQueryTokens :: SymbolSearchIndex -> [SearchToken] -> [QueryTokenMatch]
-matchQueryTokens index queryTokens =
+matchQueryTokens :: SynonymLexicon -> SymbolSearchIndex -> [SearchToken] -> [QueryTokenMatch]
+matchQueryTokens lexicon index queryTokens =
   concatMap matchQueryToken queryTokens
   where
     storedTokens = Set.toList index.searchVocabulary
     matchQueryToken queryToken =
-      mapMaybe (mkTokenMatch queryToken) storedTokens
+      mapMaybe (mkTokenMatch lexicon queryToken) storedTokens
 
-mkTokenMatch :: SearchToken -> SearchToken -> Maybe QueryTokenMatch
-mkTokenMatch queryToken storedToken =
-  case classifyTokenMatch queryToken storedToken of
+mkTokenMatch :: SynonymLexicon -> SearchToken -> SearchToken -> Maybe QueryTokenMatch
+mkTokenMatch lexicon queryToken storedToken =
+  case classifyTokenMatch lexicon queryToken storedToken of
     Just (matchKind, matchDistance) ->
       Just
         QueryTokenMatch
@@ -118,13 +119,13 @@ mkTokenMatch queryToken storedToken =
                   }
             else Nothing
 
-classifyTokenMatch :: SearchToken -> SearchToken -> Maybe (TokenMatchKind, Int)
-classifyTokenMatch queryToken storedToken
+classifyTokenMatch :: SynonymLexicon -> SearchToken -> SearchToken -> Maybe (TokenMatchKind, Int)
+classifyTokenMatch lexicon queryToken storedToken
   | queryToken == storedToken =
       Just (TokenMatchExact, 0)
   | canonicalQueryToken == canonicalStoredToken =
       Just (TokenMatchCanonical, 0)
-  | canonicalQueryToken `areDirectSynonyms` canonicalStoredToken =
+  | areDirectSynonyms lexicon canonicalQueryToken canonicalStoredToken =
       Just (TokenMatchSynonym, 1)
   | otherwise =
       Nothing

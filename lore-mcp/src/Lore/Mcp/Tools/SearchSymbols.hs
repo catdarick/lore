@@ -61,7 +61,7 @@ searchSymbolsHandler SearchSymbolsArgs {query, modulePatterns} = do
             Limit (limitToIntWithDefault 10 (symbolSuggestionsLimit mcpDefaultToolPolicy)),
           searchSymbolsModulePatterns = compiledModulePatterns
         }
-  pure $ renderToolRun ToolsSearchSymbols.renderSearchSymbolsReady result
+  pure $ renderToolRun ToolsSearchSymbols.renderSearchSymbolsOutput result
 
 compileModulePatterns :: (Monad m) => Maybe [Text] -> m [ToolsSearchSymbols.SearchSymbolsModulePattern]
 compileModulePatterns maybeRawModulePatterns =

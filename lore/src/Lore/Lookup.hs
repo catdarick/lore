@@ -47,6 +47,7 @@ import qualified GHC.Core.InstEnv as InstEnv
 import qualified GHC.Core.RoughMap as RoughMap
 import qualified GHC.Plugins as GHC
 import qualified GHC.Types.TyThing as GHC
+import Lore.Config (LoreConfigError, loadLoreConfig, projectSynonymLexicon)
 import Lore.Internal.Lookup.InstanceResolution
   ( ChosenInstanceContextStatus (..),
     ChosenInstanceError (..),
@@ -56,6 +57,7 @@ import Lore.Internal.Lookup.InstanceResolution
 import Lore.Internal.Lookup.ModulePattern (ModulePattern, ModulePatternError (..), compileModulePattern)
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName (..), mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
+import Lore.Internal.Lookup.SymbolSearch.Synonyms (builtInSynonymLexicon, mergeSynonymLexicons)
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap, findSimilarSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
 import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolSuggestion (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
@@ -129,10 +131,21 @@ isLookupNameMatchingPrefix :: NormalizedOccName -> NormalizedOccName -> Bool
 isLookupNameMatchingPrefix prefix lookupName =
   unNormalizedOccName prefix `T.isPrefixOf` unNormalizedOccName lookupName
 
-findSimilarSymbols :: (MonadLore m) => FindSimilarSymbolsOptions -> m [SymbolSuggestion]
+findSimilarSymbols :: (MonadLore m) => FindSimilarSymbolsOptions -> m (Either LoreConfigError [SymbolSuggestion])
 findSimilarSymbols options = do
-  symbolsMap <- SymbolsMap.getCachedSymbolsMap
-  findSimilarSymbolsInMap options.similarSymbolsModulePatterns options.similarSymbolsQuery symbolsMap
+  eiConfig <- loadLoreConfig
+  case eiConfig of
+    Left configError ->
+      pure (Left configError)
+    Right config ->
+      case projectSynonymLexicon config of
+        Left configError ->
+          pure (Left configError)
+        Right projectLexicon -> do
+          let effectiveLexicon =
+                mergeSynonymLexicons builtInSynonymLexicon projectLexicon
+          symbolsMap <- SymbolsMap.getCachedSymbolsMap
+          Right <$> findSimilarSymbolsInMap effectiveLexicon options.similarSymbolsModulePatterns options.similarSymbolsQuery symbolsMap
 
 lookupSymbolInfo :: (MonadLore m) => GHC.Name -> m (Maybe SymbolInfo)
 lookupSymbolInfo name = do
