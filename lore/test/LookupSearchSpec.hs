@@ -12,8 +12,8 @@ import qualified GHC.Types.Unique as GHC.Unique
 import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames (..))
 import Lore.Internal.Lookup.Cache.Types (SimilarSymbolSearchKey (..))
 import Lore.Internal.Lookup.Name (NormalizedName (occName), NormalizedOccName, parseAndNormalizeName, unNormalizedOccName)
-import Lore.Internal.Lookup.Search.Score (searchOccurrences)
-import Lore.Internal.Lookup.Search.Types (SearchResult (..), TokenSearchIndex)
+import Lore.Internal.Lookup.Search.Score (buildSearchIndex, searchOccurrences)
+import Lore.Internal.Lookup.Search.Types (SearchDocument (..), SearchResult (..), TokenSearchIndex)
 import Lore.Internal.Lookup.SymbolsMap (buildSimilarSymbolsSearchIndex, findSimilarSymbolsCandidatesInMap)
 import Lore.Internal.Lookup.Types (Symbol (..), SymbolSuggestion (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
 import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe, shouldSatisfy)
@@ -112,6 +112,62 @@ spec =
       (secondResult.searchResultValue.name == usersCreateShort.name) `shouldBe` True
       firstResult.searchResultScore `shouldSatisfy` (> secondResult.searchResultScore)
 
+    it "keeps exact common tokens above rare canonical approximations" do
+      let results =
+            documentSearchResults
+              "createUser"
+              ( [ "createUserRecord",
+                  "createsUserRecord"
+                ]
+                  <> createFrequencyFixtures
+              )
+
+      scoreOfDocument "createUserRecord" results
+        `shouldSatisfy` (> scoreOfDocument "createsUserRecord" results)
+
+    it "keeps reported create-user candidates below closer exact-token names" do
+      let results =
+            documentSearchResults
+              "createUser"
+              [ "createUser",
+                "createUserRecord",
+                "interruptCreatesUserInterruptHitlSpec",
+                "createTestUsers",
+                "manuallyCreateUsersEndpoint",
+                "createFromUser",
+                "createUserName"
+              ]
+
+      rankOfDocument "createUser" results `shouldBe` 1
+      rankOfDocument "createUserRecord" results
+        `shouldSatisfy` (< rankOfDocument "interruptCreatesUserInterruptHitlSpec" results)
+      rankOfDocument "createUserRecord" results
+        `shouldSatisfy` (< rankOfDocument "manuallyCreateUsersEndpoint" results)
+
+    it "keeps exact common tokens above rare fuzzy approximations" do
+      let results =
+            documentSearchResults
+              "createUser"
+              ( [ "createUserRecord",
+                  "cretaeUserRecord"
+                ]
+                  <> createFrequencyFixtures
+              )
+
+      scoreOfDocument "createUserRecord" results
+        `shouldSatisfy` (> scoreOfDocument "cretaeUserRecord" results)
+
+    it "keeps generic extra-token penalties stronger for narrower names" do
+      let results =
+            documentSearchResults
+              "createUser"
+              [ "createUserRecord",
+                "createUserBankAccountRecord"
+              ]
+
+      rankOfDocument "createUserRecord" results
+        `shouldSatisfy` (< rankOfDocument "createUserBankAccountRecord" results)
+
 search :: Text -> [Symbol] -> [SymbolSuggestion]
 search query symbols =
   findSimilarSymbolsCandidatesInMap (parseAndNormalizeName query) (testSearchIndex symbols)
@@ -145,6 +201,36 @@ expectScoreFor target query symbols =
   case [result.searchResultScore | result <- searchResults query symbols, result.searchResultValue.name == target.name] of
     [score] -> pure score
     _ -> expectationFailure "Expected exactly one result for target symbol." *> fail "unreachable"
+
+documentSearchResults :: Text -> [Text] -> [SearchResult Text Text]
+documentSearchResults query documents =
+  searchOccurrences query $
+    buildSearchIndex
+      [ (document, SearchDocument {primaryText = document, contextTexts = Map.empty}, document)
+      | document <- documents
+      ]
+
+scoreOfDocument :: Text -> [SearchResult Text Text] -> Double
+scoreOfDocument document results =
+  case [result.searchResultScore | result <- results, result.searchResultValue == document] of
+    [score] -> score
+    _ -> error ("Expected exactly one score for document " <> T.unpack document)
+
+rankOfDocument :: Text -> [SearchResult Text Text] -> Int
+rankOfDocument document results =
+  case [rank | (rank, result) <- zip [1 ..] results, result.searchResultValue == document] of
+    [rank] -> rank
+    _ -> error ("Expected exactly one rank for document " <> T.unpack document)
+
+createFrequencyFixtures :: [Text]
+createFrequencyFixtures =
+  [ "createAccount",
+    "createProject",
+    "createSession",
+    "createInvoice",
+    "createReport",
+    "createToken"
+  ]
 
 testSearchIndex :: [Symbol] -> TokenSearchIndex SimilarSymbolSearchKey Symbol
 testSearchIndex symbols =

@@ -424,11 +424,20 @@ tokenIdfIfPresent field index token =
 matchTokenIdf :: TokenSearchIndex key value -> SearchField -> SearchToken -> SearchToken -> TokenMatchKind -> Double
 matchTokenIdf index field queryToken storedToken matchKind =
   case matchKind of
+    TokenMatchExact ->
+      storedTokenIdf
+    TokenMatchCanonical ->
+      approximateMatchIdf
     TokenMatchSynonym ->
-      let storedTokenIdf = tokenIdf field index storedToken
-       in maybe storedTokenIdf (`min` storedTokenIdf) (tokenIdfIfPresent field index queryToken)
-    _ ->
+      approximateMatchIdf
+    TokenMatchFuzzy ->
+      approximateMatchIdf
+  where
+    storedTokenIdf =
       tokenIdf field index storedToken
+
+    approximateMatchIdf =
+      maybe storedTokenIdf (min storedTokenIdf) (tokenIdfIfPresent field index queryToken)
 
 missingTokenPenalty :: SearchWeights -> TokenSearchIndex key value -> SearchToken -> Double
 missingTokenPenalty weights index token =
