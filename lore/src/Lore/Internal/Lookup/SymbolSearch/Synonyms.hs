@@ -1,12 +1,14 @@
 module Lore.Internal.Lookup.SymbolSearch.Synonyms
   ( builtInSynonymGroups,
+    SynonymTerm (..),
     SynonymLexicon (..),
+    SynonymTermError (..),
     SynonymGroupError (..),
     builtInSynonymLexicon,
+    compileSynonymTerm,
     compileSynonymGroups,
     mergeSynonymLexicons,
     directSynonyms,
-    areDirectSynonyms,
     renderInvalidBuiltInSynonymGroups,
     renderSynonymGroupError,
   )
@@ -20,10 +22,10 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Lore.Internal.Lookup.SymbolSearch.Tokenize (canonicalizeSearchToken, tokenizeSearchText)
-import Lore.Internal.Lookup.SymbolSearch.Types (SearchToken (..))
+import Lore.Internal.Lookup.SymbolSearch.Types (SearchToken (..), SynonymTerm (..))
 
 newtype SynonymLexicon = SynonymLexicon
-  { unSynonymLexicon :: Map.Map SearchToken (Set.Set SearchToken)
+  { unSynonymLexicon :: Map.Map SynonymTerm (Set.Set SynonymTerm)
   }
   deriving stock (Eq, Show)
 
@@ -38,8 +40,11 @@ instance Monoid SynonymLexicon where
 data SynonymGroupError
   = SynonymGroupHasTooFewTerms Int
   | SynonymTermProducesNoToken Int Int Text
-  | SynonymTermProducesMultipleTokens Int Int Text [Text]
-  | SynonymGroupHasTooFewDistinctTokens Int [Text]
+  | SynonymGroupHasTooFewDistinctTerms Int [SynonymTerm]
+  deriving stock (Eq, Show)
+
+data SynonymTermError
+  = SynonymTermProducesNoTokens Text
   deriving stock (Eq, Show)
 
 builtInSynonymGroups :: [[Text]]
@@ -48,7 +53,7 @@ builtInSynonymGroups =
     ["db", "database"],
     ["rdbms", "sql", "relational"],
     ["nosql", "document"],
-    ["kv", "keyvalue"],
+    ["kv", "key value"],
     ["cache", "memo", "memoize"],
     ["redis", "cache"],
     ["postgres", "postgresql", "pg"],
@@ -118,7 +123,7 @@ builtInSynonymGroups =
     ["api", "endpoint"],
     ["rest", "restful"],
     ["graphql", "gql"],
-    ["rpc", "grpc", "jsonrpc", "xmlrpc"],
+    ["rpc", "grpc", "json rpc", "xml rpc"],
     ["request", "req"],
     ["response", "res", "resp"],
     ["header", "hdr"],
@@ -131,7 +136,7 @@ builtInSynonymGroups =
     ["client", "consumer"],
     ["server", "backend", "service"],
     ["proxy", "gateway"],
-    ["reverseproxy", "gateway"],
+    ["reverse proxy", "gateway"],
     ["webhook", "callback"],
     ["poll", "polling"],
     ["retry", "reattempt"],
@@ -139,7 +144,7 @@ builtInSynonymGroups =
     ["latency", "delay"],
     ["throughput", "bandwidth"],
     ["rate", "quota", "limit"],
-    ["ratelimit", "throttle"],
+    ["rate limit", "throttle"],
     ["status", "code"],
     ["redirect", "forward"],
     ["upload", "send"],
@@ -225,7 +230,7 @@ builtInSynonymGroups =
     ["dict", "map", "hashmap"],
     ["set", "collection"],
     ["tuple", "pair"],
-    ["option", "optional", "maybe"],
+    ["option", "optional", "maybe", "nullable"],
     ["nullable", "nil", "null"],
     ["none", "nil", "null"],
     ["uuid", "guid"],
@@ -301,8 +306,8 @@ builtInSynonymGroups =
     ["branch", "ref"],
     ["commit", "revision"],
     ["merge", "rebase"],
-    ["pr", "pullrequest"],
-    ["mr", "mergerequest"],
+    ["pr", "pull request"],
+    ["mr", "merge request"],
     ["repo", "repository"],
     ["vcs", "git"],
     ["checkout", "switch"],
@@ -336,14 +341,14 @@ builtInSynonymGroups =
     ["azure", "microsoft"],
     ["vm", "machine", "instance"],
     ["container", "docker"],
-    ["image", "containerimage"],
+    ["image", "container image"],
     ["k8s", "kubernetes"],
     ["pod", "container"],
     ["node", "host"],
     ["cluster", "fleet"],
     ["service", "svc"],
     ["ingress", "gateway"],
-    ["lb", "loadbalancer"],
+    ["lb", "load balancer"],
     ["cdn", "edge"],
     ["region", "zone"],
     ["secret", "credential"],
@@ -353,7 +358,7 @@ builtInSynonymGroups =
     ["cpu", "processor"],
     ["mem", "memory", "ram"],
     ["gpu", "accelerator"],
-    ["autoscale", "scale"],
+    ["auto scale", "scale"],
     ["provision", "allocate"],
     ["terraform", "tf"],
     ["ansible", "playbook"],
@@ -368,8 +373,8 @@ builtInSynonymGroups =
     ["goroutine", "coroutine"],
     ["fiber", "greenlet"],
     ["queue", "channel"],
-    ["mq", "messagequeue"],
-    ["pubsub", "eventbus"],
+    ["mq", "message queue"],
+    ["pub sub", "event bus"],
     ["event", "message", "notification"],
     ["producer", "publisher"],
     ["consumer", "subscriber"],
@@ -585,9 +590,9 @@ builtInSynonymGroups =
     ["listener", "subscriber"],
     ["event", "signal"],
     ["command", "action"],
-    ["query", "readmodel"],
-    ["cqrs", "commandquery"],
-    ["ddd", "domaindriven"],
+    ["query", "read model"],
+    ["cqrs", "command query"],
+    ["ddd", "domain driven"],
     ["aggregate", "root"],
     ["service", "manager"],
     ["manager", "coordinator"],
@@ -659,17 +664,13 @@ mergeSynonymLexicons :: SynonymLexicon -> SynonymLexicon -> SynonymLexicon
 mergeSynonymLexicons =
   (<>)
 
-directSynonyms :: SynonymLexicon -> SearchToken -> Set.Set SearchToken
+directSynonyms :: SynonymLexicon -> SynonymTerm -> Set.Set SynonymTerm
 directSynonyms lexicon token =
   case lexicon of
     SynonymLexicon adjacency ->
       Map.findWithDefault Set.empty token adjacency
 
-areDirectSynonyms :: SynonymLexicon -> SearchToken -> SearchToken -> Bool
-areDirectSynonyms lexicon left right =
-  right `Set.member` directSynonyms lexicon left
-
-validateGroup :: Int -> [Text] -> Either [SynonymGroupError] [SearchToken]
+validateGroup :: Int -> [Text] -> Either [SynonymGroupError] [SynonymTerm]
 validateGroup groupIndex groupTerms =
   case tooFewTermsError ++ termErrors ++ tooFewDistinctError of
     [] ->
@@ -691,44 +692,43 @@ validateGroup groupIndex groupTerms =
       ]
 
     normalizedTerms =
-      [ canonicalizeSearchToken token
-      | Right token <- validatedTerms
+      [ term
+      | Right token <- validatedTerms,
+        let term = token
       ]
 
     distinctTerms =
       Set.toList (Set.fromList normalizedTerms)
 
     tooFewDistinctError =
-      [ SynonymGroupHasTooFewDistinctTokens
+      [ SynonymGroupHasTooFewDistinctTerms
           groupIndex
-          (map unSearchToken distinctTerms)
+          distinctTerms
       | null termErrors,
         length groupTerms >= 2,
         length distinctTerms < 2
       ]
 
-validateTerm :: Int -> Int -> Text -> Either SynonymGroupError SearchToken
+validateTerm :: Int -> Int -> Text -> Either SynonymGroupError SynonymTerm
 validateTerm groupIndex termIndex term =
-  case tokenizeSearchText term of
-    [] ->
+  case compileSynonymTerm term of
+    Left (SynonymTermProducesNoTokens _) ->
       Left
         ( SynonymTermProducesNoToken
             groupIndex
             termIndex
             term
         )
-    [token] ->
-      Right token
-    tokens ->
-      Left
-        ( SynonymTermProducesMultipleTokens
-            groupIndex
-            termIndex
-            term
-            (map unSearchToken tokens)
-        )
+    Right synonymTerm ->
+      Right synonymTerm
 
-buildAdjacency :: [[SearchToken]] -> Map.Map SearchToken (Set.Set SearchToken)
+compileSynonymTerm :: Text -> Either SynonymTermError SynonymTerm
+compileSynonymTerm term =
+  case NE.nonEmpty (map canonicalizeSearchToken (tokenizeSearchText term)) of
+    Nothing -> Left (SynonymTermProducesNoTokens term)
+    Just tokens -> Right (SynonymTerm tokens)
+
+buildAdjacency :: [[SynonymTerm]] -> Map.Map SynonymTerm (Set.Set SynonymTerm)
 buildAdjacency =
   foldl' insertGroup Map.empty
   where
@@ -762,23 +762,19 @@ renderSynonymGroupError = \case
       <> T.pack (show synonymTermIndex)
       <> ": "
       <> quote invalidSynonymTerm
-      <> " produces no search token. Each synonym entry must represent exactly one token."
-  SynonymTermProducesMultipleTokens synonymGroupIndex synonymTermIndex invalidSynonymTerm producedTokens ->
+      <> " produces no search token. Each synonym entry must represent at least one token."
+  SynonymGroupHasTooFewDistinctTerms synonymGroupIndex normalizedTerms ->
     "Invalid lore.yaml symbol-search synonym group "
       <> T.pack (show synonymGroupIndex)
-      <> ", entry "
-      <> T.pack (show synonymTermIndex)
-      <> ": "
-      <> quote invalidSynonymTerm
-      <> " produces multiple search tokens: "
-      <> T.intercalate ", " producedTokens
-      <> ". Each synonym entry must represent exactly one token."
-  SynonymGroupHasTooFewDistinctTokens synonymGroupIndex normalizedTerms ->
-    "Invalid lore.yaml symbol-search synonym group "
-      <> T.pack (show synonymGroupIndex)
-      <> ": entries collapse to fewer than two distinct search tokens after normalization: "
-      <> T.intercalate ", " normalizedTerms
+      <> ": entries collapse to fewer than two distinct search terms after normalization: "
+      <> T.intercalate ", " (map renderSynonymTerm normalizedTerms)
       <> "."
+
+renderSynonymTerm :: SynonymTerm -> Text
+renderSynonymTerm term =
+  case term of
+    SynonymTerm tokens ->
+      "[" <> T.intercalate ", " (map unSearchToken (NE.toList tokens)) <> "]"
 
 quote :: Text -> Text
 quote value =

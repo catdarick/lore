@@ -193,6 +193,7 @@ tests:
     - Lore.Internal.Lookup.Orphans
     - Lore.Internal.Lookup.SymbolSearch.Base
     - Lore.Internal.Lookup.SymbolSearch.Index
+    - Lore.Internal.Lookup.SymbolSearch.Match
     - Lore.Internal.Lookup.SymbolSearch.Rank
     - Lore.Internal.Lookup.SymbolSearch.Synonyms
     - Lore.Internal.Lookup.SymbolSearch.Tokenize

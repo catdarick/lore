@@ -3,22 +3,33 @@
 
 module Lore.Internal.Lookup.SymbolSearch.Base
   ( SearchToken (..),
+    SynonymTerm (..),
     SymbolSearchField (..),
     TokenMatchKind (..),
+    TokenSpan (..),
     SymbolSearchQuery (..),
-    QueryTokenMatch (..),
-    TokenMatchEvidence (..),
+    StoredMatchPattern (..),
+    QueryTermMatch (..),
+    TermMatchEvidence (..),
     SymbolScoreBreakdown (..),
   )
 where
 
 import Control.DeepSeq (NFData)
+import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedOccName)
 
 newtype SearchToken = SearchToken
   { unSearchToken :: Text
+  }
+  deriving stock (Generic)
+  deriving newtype (Eq, Ord, Show)
+  deriving anyclass (NFData)
+
+newtype SynonymTerm = SynonymTerm
+  { synonymTermTokens :: NonEmpty SearchToken
   }
   deriving stock (Generic)
   deriving newtype (Eq, Ord, Show)
@@ -40,6 +51,13 @@ data TokenMatchKind
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (NFData)
 
+data TokenSpan = TokenSpan
+  { tokenSpanStart :: Int,
+    tokenSpanLength :: Int
+  }
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (NFData)
+
 data SymbolSearchQuery = SymbolSearchQuery
   { symbolSearchText :: Text,
     symbolSearchTokens :: [SearchToken],
@@ -48,23 +66,33 @@ data SymbolSearchQuery = SymbolSearchQuery
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (NFData)
 
-data QueryTokenMatch = QueryTokenMatch
-  { matchedQueryToken :: SearchToken,
-    matchedStoredToken :: SearchToken,
+data StoredMatchPattern
+  = StoredTokenPattern SearchToken
+  | StoredSynonymTermPattern SynonymTerm
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (NFData)
+
+data QueryTermMatch = QueryTermMatch
+  { matchedQuerySpan :: TokenSpan,
+    matchedQueryTokens :: NonEmpty SearchToken,
+    matchedStoredPattern :: StoredMatchPattern,
     matchedKind :: TokenMatchKind,
-    matchedDistance :: Int,
+    matchedEditDistance :: Maybe Int,
     matchedQuality :: Double
   }
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (NFData)
 
-data TokenMatchEvidence = TokenMatchEvidence
-  { evidenceQueryToken :: SearchToken,
-    evidenceStoredToken :: SearchToken,
+data TermMatchEvidence = TermMatchEvidence
+  { evidenceQuerySpan :: TokenSpan,
+    evidenceQueryTokens :: NonEmpty SearchToken,
+    evidenceStoredTokens :: NonEmpty SearchToken,
+    evidenceStoredSpan :: TokenSpan,
+    evidenceSourceSequence :: NonEmpty SearchToken,
     evidenceField :: SymbolSearchField,
     evidenceNameVariant :: Maybe NormalizedOccName,
     evidenceMatchKind :: TokenMatchKind,
-    evidenceMatchDistance :: Int,
+    evidenceEditDistance :: Maybe Int,
     evidenceMatchQuality :: Double,
     evidenceIdf :: Double,
     evidenceContribution :: Double

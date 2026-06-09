@@ -2,6 +2,7 @@ module Lore.Internal.Lookup.SymbolSearch.Index
   ( buildSymbolSearchIndex,
     buildSymbolSearchDocuments,
     symbolAssociatedModuleNames,
+    fieldTokenSequences,
     fieldTokens,
   )
 where
@@ -9,12 +10,14 @@ where
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified GHC.Types.Name as GHC
 import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames (..), mergeValueTypeHeadNames)
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (moduleName, occName), NormalizedOccName, extractAndNormalizeModuleName, normalizeName, unNormalizedModuleName, unNormalizedOccName)
-import Lore.Internal.Lookup.SymbolSearch.Tokenize (tokenizeSearchText)
+import Lore.Internal.Lookup.SymbolSearch.Tokenize (canonicalizeSearchToken, tokenizeSearchText)
 import Lore.Internal.Lookup.SymbolSearch.Types
   ( IndexedNameVariant (..),
+    IndexedTokenSequence (..),
     SearchToken,
     SymbolSearchDocument (..),
     SymbolSearchField (..),
@@ -29,7 +32,13 @@ buildSymbolSearchIndex symbolsMap =
       searchPostings = postings,
       searchDocumentFrequencies = Map.map (Map.map Set.size) postings,
       searchFieldDocumentCounts = fieldDocumentCounts,
-      searchVocabulary = foldMap Map.keysSet (Map.elems postings)
+      searchVocabulary = vocabulary,
+      searchTokensByCanonical =
+        Map.fromListWith
+          Set.union
+          [ (canonicalizeSearchToken token, Set.singleton token)
+          | token <- Set.toList vocabulary
+          ]
     }
   where
     documents = buildSymbolSearchDocuments symbolsMap
@@ -43,6 +52,7 @@ buildSymbolSearchIndex symbolsMap =
         [ (field, length [() | document <- Map.elems documents, not (Set.null (fieldTokens field document))])
         | field <- allFields
         ]
+    vocabulary = foldMap Map.keysSet (Map.elems postings)
 
 buildSymbolSearchDocuments :: SymbolsMap -> Map.Map GHC.Name SymbolSearchDocument
 buildSymbolSearchDocuments symbolsMap =
@@ -70,9 +80,9 @@ buildSymbolSearchDocuments symbolsMap =
         { symbolSearchSymbol = inputSymbol input,
           symbolSearchNames = indexedNames,
           symbolSearchModules = modules_,
-          symbolSearchModuleTokens = Set.fromList (concatMap (tokenizeSearchText . (.unNormalizedModuleName)) (Set.toList modules_)),
-          symbolSearchResultTypeTokens = Set.fromList (concatMap tokenizeSearchText (Set.toList typeHeads.resultTypeHeadNames)),
-          symbolSearchArgumentTypeTokens = Set.fromList (concatMap tokenizeSearchText (Set.toList typeHeads.argumentTypeHeadNames))
+          symbolSearchModuleTokenSequences = tokenSequencesFromTexts (map (.unNormalizedModuleName) (Set.toList modules_)),
+          symbolSearchResultTypeTokenSequences = tokenSequencesFromTexts (Set.toList typeHeads.resultTypeHeadNames),
+          symbolSearchArgumentTypeTokenSequences = tokenSequencesFromTexts (Set.toList typeHeads.argumentTypeHeadNames)
         }
       where
         actualOccName = (normalizeName symbolName).occName
@@ -87,7 +97,7 @@ buildSymbolSearchDocuments symbolsMap =
     mkNameVariant name =
       IndexedNameVariant
         { indexedName = name,
-          indexedNameTokens = tokenizeSearchText name.unNormalizedOccName
+          indexedNameTokens = expectTokens name.unNormalizedOccName
         }
 
 data DocumentInput = DocumentInput
@@ -146,17 +156,39 @@ buildFieldPostings field documents =
       token <- Set.toList (fieldTokens field document)
     ]
 
-fieldTokens :: SymbolSearchField -> SymbolSearchDocument -> Set.Set SearchToken
-fieldTokens field document =
+fieldTokenSequences :: SymbolSearchField -> SymbolSearchDocument -> [IndexedTokenSequence]
+fieldTokenSequences field document =
   case field of
     SearchName ->
-      Set.fromList (concatMap (.indexedNameTokens) (NE.toList document.symbolSearchNames))
+      map (IndexedTokenSequence . (.indexedNameTokens)) (NE.toList document.symbolSearchNames)
     SearchResultType ->
-      document.symbolSearchResultTypeTokens
+      Set.toList document.symbolSearchResultTypeTokenSequences
     SearchArgumentType ->
-      document.symbolSearchArgumentTypeTokens
+      Set.toList document.symbolSearchArgumentTypeTokenSequences
     SearchModule ->
-      document.symbolSearchModuleTokens
+      Set.toList document.symbolSearchModuleTokenSequences
+
+fieldTokens :: SymbolSearchField -> SymbolSearchDocument -> Set.Set SearchToken
+fieldTokens field document =
+  Set.fromList
+    [ token
+    | IndexedTokenSequence tokens <- fieldTokenSequences field document,
+      token <- NE.toList tokens
+    ]
+
+tokenSequencesFromTexts :: [Text] -> Set.Set IndexedTokenSequence
+tokenSequencesFromTexts texts =
+  Set.fromList
+    [ IndexedTokenSequence tokens
+    | text <- texts,
+      let tokens = expectTokens text
+    ]
+
+expectTokens :: Text -> NE.NonEmpty SearchToken
+expectTokens text =
+  case NE.nonEmpty (tokenizeSearchText text) of
+    Just tokens -> tokens
+    Nothing -> error "tokenizeSearchText unexpectedly produced no tokens for non-empty indexed text"
 
 symbolAssociatedModuleNames :: Symbol -> Set.Set NormalizedModuleName
 symbolAssociatedModuleNames symbol =

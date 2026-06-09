@@ -16,7 +16,7 @@ import Lore.Internal.Lookup.ModulePattern (ModulePattern, compileModulePattern)
 import Lore.Internal.Lookup.Name (NormalizedName (occName), NormalizedOccName, parseAndNormalizeName, unNormalizedModuleName)
 import Lore.Internal.Lookup.SymbolSearch.Index (buildSymbolSearchIndex)
 import Lore.Internal.Lookup.SymbolSearch.Rank (parseSymbolSearchQuery, tokenIdf)
-import Lore.Internal.Lookup.SymbolSearch.Synonyms (SynonymLexicon, areDirectSynonyms, builtInSynonymLexicon, compileSynonymGroups, mergeSynonymLexicons)
+import Lore.Internal.Lookup.SymbolSearch.Synonyms (SynonymLexicon, SynonymTerm (..), SynonymTermError (..), builtInSynonymLexicon, compileSynonymGroups, compileSynonymTerm, directSynonyms, mergeSynonymLexicons)
 import Lore.Internal.Lookup.SymbolSearch.Types
   ( IndexedNameVariant (..),
     SearchToken (..),
@@ -24,8 +24,9 @@ import Lore.Internal.Lookup.SymbolSearch.Types
     SymbolSearchField (..),
     SymbolSearchIndex (..),
     SymbolSearchQuery (symbolSearchExactModule, symbolSearchTokens),
-    TokenMatchEvidence (..),
+    TermMatchEvidence (..),
     TokenMatchKind (..),
+    TokenSpan (..),
   )
 import Lore.Internal.Lookup.SymbolsMap (findSimilarSymbolsCandidatesInMap)
 import Lore.Internal.Lookup.Types (Symbol (..), SymbolSuggestion (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
@@ -61,9 +62,9 @@ spec =
         `shouldBe` []
 
     it "uses direct synonyms without transitive synonym expansion" do
-      areDirectSynonyms builtInSynonymLexicon (SearchToken "query") (SearchToken "select") `shouldBe` True
-      areDirectSynonyms builtInSynonymLexicon (SearchToken "select") (SearchToken "filter") `shouldBe` True
-      areDirectSynonyms builtInSynonymLexicon (SearchToken "query") (SearchToken "filter") `shouldBe` False
+      areDirectSynonyms builtInSynonymLexicon (term ["query"]) (term ["select"]) `shouldBe` True
+      areDirectSynonyms builtInSynonymLexicon (term ["select"]) (term ["filter"]) `shouldBe` True
+      areDirectSynonyms builtInSynonymLexicon (term ["query"]) (term ["filter"]) `shouldBe` False
 
     it "applies direct synonyms in full search only for direct neighbors" do
       suggestionNames (search "db" [databaseConnect])
@@ -71,6 +72,10 @@ spec =
 
       suggestionNames (search "query" [filterRows])
         `shouldBe` []
+
+    it "uses built-in phrase synonyms for formerly collapsed compounds" do
+      suggestionLookupNames (search "ddd" [domainDrivenDesign])
+        `shouldBe` ["domainDrivenDesign"]
 
     it "applies project synonym groups without replacing built-ins" do
       projectLexicon <- expectRight "Expected project synonym group to compile." (compileSynonymGroups [["enqueue", "schedule"]])
@@ -87,12 +92,79 @@ spec =
       projectLexicon <- expectRight "Expected project synonym groups to compile." (compileSynonymGroups [["alpha", "beta"], ["beta", "gamma"], ["query", "projection"]])
       let effectiveLexicon = mergeSynonymLexicons builtInSynonymLexicon projectLexicon
 
-      areDirectSynonyms projectLexicon (SearchToken "alpha") (SearchToken "beta") `shouldBe` True
-      areDirectSynonyms projectLexicon (SearchToken "beta") (SearchToken "gamma") `shouldBe` True
-      areDirectSynonyms projectLexicon (SearchToken "alpha") (SearchToken "gamma") `shouldBe` False
-      areDirectSynonyms effectiveLexicon (SearchToken "projection") (SearchToken "query") `shouldBe` True
-      areDirectSynonyms effectiveLexicon (SearchToken "query") (SearchToken "lookup") `shouldBe` True
-      areDirectSynonyms effectiveLexicon (SearchToken "projection") (SearchToken "lookup") `shouldBe` False
+      areDirectSynonyms projectLexicon (term ["alpha"]) (term ["beta"]) `shouldBe` True
+      areDirectSynonyms projectLexicon (term ["beta"]) (term ["gamma"]) `shouldBe` True
+      areDirectSynonyms projectLexicon (term ["alpha"]) (term ["gamma"]) `shouldBe` False
+      areDirectSynonyms effectiveLexicon (term ["projection"]) (term ["query"]) `shouldBe` True
+      areDirectSynonyms effectiveLexicon (term ["query"]) (term ["lookup"]) `shouldBe` True
+      areDirectSynonyms effectiveLexicon (term ["projection"]) (term ["lookup"]) `shouldBe` False
+
+    it "normalizes multi-token synonym terms without collapsing token boundaries" do
+      compileSynonymTerm "RocketShip" `shouldBe` Right (term ["rocket", "ship"])
+      compileSynonymTerm "rocket ship" `shouldBe` Right (term ["rocket", "ship"])
+      compileSynonymTerm "rocket-ship" `shouldBe` Right (term ["rocket", "ship"])
+      compileSynonymTerm "rocket_ship" `shouldBe` Right (term ["rocket", "ship"])
+      compileSynonymTerm "SB" `shouldBe` Right (term ["sb"])
+      compileSynonymTerm "" `shouldBe` Left (SynonymTermProducesNoTokens "")
+
+    it "applies multi-token project synonyms bidirectionally and atomically" do
+      projectLexicon <- expectRight "Expected phrase synonym groups to compile." (compileSynonymGroups [["RocketShip", "Beacon"], ["SignalBridge", "SB"]])
+
+      suggestionLookupNames (searchWithLexicon projectLexicon "Beacon" [rocketShip])
+        `shouldBe` ["RocketShip"]
+      suggestionLookupNames (searchWithLexicon projectLexicon "RocketShip" [beacon])
+        `shouldBe` ["Beacon"]
+      suggestionLookupNames (searchWithLexicon projectLexicon "SB" [signalBridge])
+        `shouldBe` ["SignalBridge"]
+      suggestionLookupNames (searchWithLexicon projectLexicon "SignalBridge" [sb])
+        `shouldBe` ["SB"]
+      suggestionLookupNames (searchWithLexicon projectLexicon "createBeacon" [createRocketShip])
+        `shouldBe` ["createRocketShip"]
+      suggestionLookupNames (searchWithLexicon projectLexicon "createRocketShip" [createBeacon])
+        `shouldBe` ["createBeacon"]
+      suggestionLookupNames (searchWithLexicon projectLexicon "Beacon" [rocketCount, shipInvoice])
+        `shouldBe` []
+
+    it "requires synonym phrase occurrences to be ordered and contiguous within one value" do
+      projectLexicon <- expectRight "Expected phrase synonym group to compile." (compileSynonymGroups [["RocketShip", "Beacon"]])
+
+      suggestionLookupNames (searchWithLexicon projectLexicon "Beacon" [createRocketShipRequest])
+        `shouldBe` ["createRocketShipRequest"]
+      suggestionLookupNames (searchWithLexicon projectLexicon "Beacon" [createRocketLaterShipRequest])
+        `shouldBe` []
+
+      let splitAliases =
+            splitAliasSymbol
+              { aliases = Set.fromList [lookupOcc "rocket", lookupOcc "ship"]
+              }
+      suggestionLookupNames (searchWithLexicon projectLexicon "Beacon" [splitAliases])
+        `shouldBe` []
+
+    it "does not combine synonym phrase tokens across context values or fields" do
+      projectLexicon <- expectRight "Expected phrase synonym group to compile." (compileSynonymGroups [["RocketShip", "Beacon"]])
+      let splitModules =
+            rocketOnly
+              { visibility = Symbol'ExportedFrom (Set.singleton (testModule "Ship"))
+              }
+
+      suggestionLookupNames (searchWithLexicon projectLexicon "Beacon" [splitModules])
+        `shouldBe` []
+      suggestionLookupNames (findSimilarSymbolsCandidatesInMap projectLexicon [] "Beacon" (testSearchIndexWithTypeFacts [placeholder] (typeFacts [(placeholder, ["Rocket", "Ship"], [])])))
+        `shouldBe` []
+      suggestionLookupNames (searchWithLexicon projectLexicon "Beacon" [nameModuleSplit])
+        `shouldBe` []
+
+    it "does not multiply score for repeated one-token synonym query terms" do
+      let oneToken = search "db" [databaseConnect]
+          repeated = search "db db" [databaseConnect]
+
+      suggestionLookupNames repeated `shouldBe` suggestionLookupNames oneToken
+      map (.suggestionScore) repeated `shouldBe` map (.suggestionScore) oneToken
+      map (length . (.suggestionEvidence)) repeated `shouldBe` map (length . (.suggestionEvidence)) oneToken
+
+    it "selects repeated stored token occurrences that preserve query order" do
+      nameEvidenceStoredStarts "foo bar" fooBarFoo `shouldBe` [0, 1]
+      nameEvidenceStoredStarts "bar foo" fooBarFoo `shouldBe` [1, 2]
 
     it "indexes one document per actual symbol including all aliases" do
       let alias = lookupOcc "createSubscriptionAccount"
@@ -164,9 +236,9 @@ spec =
       suggestionLookupNames (search "create user" [threeTokenCreateUser, fiveTokenCreateUser])
         `shouldBe` ["createUserRecord", "createUserBankAccountRecord"]
 
-    it "deduplicates repeated query tokens" do
+    it "preserves repeated query tokens for phrase boundaries" do
       parseSymbolSearchQuery "user user lookup"
-        `shouldSatisfy` ((== [SearchToken "user", SearchToken "lookup"]) . (.symbolSearchTokens))
+        `shouldSatisfy` ((== [SearchToken "user", SearchToken "user", SearchToken "lookup"]) . (.symbolSearchTokens))
 
     it "strips owner hints before tokenizing symbol-search queries" do
       let unqualified = parseSymbolSearchQuery "lookup@Map"
@@ -256,10 +328,28 @@ moduleTexts :: SymbolSearchDocument -> [Text]
 moduleTexts document =
   map (.unNormalizedModuleName) (Set.toList document.symbolSearchModules)
 
-selectedEvidenceFor :: SearchToken -> Symbol -> SymbolSearchIndex -> Maybe TokenMatchEvidence
+selectedEvidenceFor :: SearchToken -> Symbol -> SymbolSearchIndex -> Maybe TermMatchEvidence
 selectedEvidenceFor queryToken symbol index = do
   suggestion <- List.find ((== symbol.name) . (.name) . (.suggestedSymbol)) (findSimilarSymbolsCandidatesInMap builtInSynonymLexicon [] queryToken.unSearchToken index)
-  List.find ((== queryToken) . (.evidenceQueryToken)) suggestion.suggestionEvidence
+  List.find ((== queryToken) . NE.head . (.evidenceQueryTokens)) suggestion.suggestionEvidence
+
+term :: [Text] -> SynonymTerm
+term tokens =
+  SynonymTerm (NE.fromList (map SearchToken tokens))
+
+areDirectSynonyms :: SynonymLexicon -> SynonymTerm -> SynonymTerm -> Bool
+areDirectSynonyms lexicon left right =
+  right `Set.member` directSynonyms lexicon left
+
+nameEvidenceStoredStarts :: Text -> Symbol -> [Int]
+nameEvidenceStoredStarts query symbol =
+  case search query [symbol] of
+    suggestion : _ ->
+      [ item.evidenceStoredSpan.tokenSpanStart
+      | item <- List.sortOn (.evidenceQuerySpan.tokenSpanStart) suggestion.suggestionEvidence,
+        item.evidenceField == SearchName
+      ]
+    [] -> []
 
 compilePattern :: Text -> ModulePattern
 compilePattern rawPattern =
@@ -400,3 +490,48 @@ genuineFooQux = testSymbol 22 "Alias.Real" "fooQux"
 
 scheduleJob :: Symbol
 scheduleJob = testSymbol 23 "Jobs" "scheduleJob"
+
+rocketShip :: Symbol
+rocketShip = testSymbol 24 "Synthetic" "RocketShip"
+
+beacon :: Symbol
+beacon = testSymbol 25 "Synthetic" "Beacon"
+
+signalBridge :: Symbol
+signalBridge = testSymbol 26 "Synthetic" "SignalBridge"
+
+sb :: Symbol
+sb = testSymbol 27 "Synthetic" "SB"
+
+createRocketShip :: Symbol
+createRocketShip = testSymbol 28 "Synthetic" "createRocketShip"
+
+createBeacon :: Symbol
+createBeacon = testSymbol 29 "Synthetic" "createBeacon"
+
+rocketCount :: Symbol
+rocketCount = testSymbol 30 "Synthetic" "rocketCount"
+
+shipInvoice :: Symbol
+shipInvoice = testSymbol 31 "Synthetic" "shipInvoice"
+
+createRocketShipRequest :: Symbol
+createRocketShipRequest = testSymbol 32 "Synthetic" "createRocketShipRequest"
+
+createRocketLaterShipRequest :: Symbol
+createRocketLaterShipRequest = testSymbol 33 "Synthetic" "createRocketLaterShipRequest"
+
+rocketOnly :: Symbol
+rocketOnly = testSymbol 34 "Rocket" "placeholder"
+
+placeholder :: Symbol
+placeholder = testSymbol 35 "Synthetic" "placeholder"
+
+nameModuleSplit :: Symbol
+nameModuleSplit = testSymbol 36 "Ship" "rocket"
+
+fooBarFoo :: Symbol
+fooBarFoo = testSymbol 37 "Synthetic" "fooBarFoo"
+
+domainDrivenDesign :: Symbol
+domainDrivenDesign = testSymbol 38 "Synthetic" "domainDrivenDesign"

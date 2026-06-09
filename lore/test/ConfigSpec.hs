@@ -7,6 +7,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Bifunctor (first)
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text.IO as TIO
 import qualified Data.Yaml as Y
@@ -21,8 +22,10 @@ import Lore.Config
   )
 import Lore.Internal.Lookup.SymbolSearch.Synonyms
   ( SynonymGroupError (..),
-    areDirectSynonyms,
+    SynonymLexicon,
+    SynonymTerm (..),
     compileSynonymGroups,
+    directSynonyms,
   )
 import Lore.Internal.Lookup.SymbolSearch.Types (SearchToken (..))
 import System.FilePath ((</>))
@@ -112,34 +115,38 @@ spec = do
     it "rejects duplicate terms that collapse to one token" do
       compileSynonymGroups [["user", "user"]]
         `shouldSatisfy` hasError \case
-          SynonymGroupHasTooFewDistinctTokens 1 ["user"] -> True
+          SynonymGroupHasTooFewDistinctTerms 1 [SynonymTerm (SearchToken "user" NE.:| [])] -> True
           _ -> False
 
     it "collapses case-equivalent terms before rejecting distinctness" do
       compileSynonymGroups [["Customer", "customer"]]
         `shouldSatisfy` hasError \case
-          SynonymGroupHasTooFewDistinctTokens _ ["customer"] -> True
+          SynonymGroupHasTooFewDistinctTerms _ [SynonymTerm (SearchToken "customer" NE.:| [])] -> True
           _ -> False
 
     it "collapses canonically equivalent plurals before rejecting distinctness" do
       compileSynonymGroups [["users", "user"]]
         `shouldSatisfy` hasError \case
-          SynonymGroupHasTooFewDistinctTokens _ ["user"] -> True
+          SynonymGroupHasTooFewDistinctTerms _ [SynonymTerm (SearchToken "user" NE.:| [])] -> True
           _ -> False
 
-    it "rejects multi-token text" do
-      compileSynonymGroups [["customer account", "client"]]
+    it "rejects duplicate multi-token terms that normalize equivalently" do
+      compileSynonymGroups [["RocketShip", "rocket ship"]]
         `shouldSatisfy` hasError \case
-          SynonymTermProducesMultipleTokens 1 1 _ ["customer", "account"] -> True
+          SynonymGroupHasTooFewDistinctTerms _ [SynonymTerm (SearchToken "rocket" NE.:| [SearchToken "ship"])] -> True
           _ -> False
+
+    it "accepts multi-token terms" do
+      lexicon <- expectRight (compileSynonymGroups [["RocketShip", "Beacon"]])
+      areDirectSynonyms lexicon (SynonymTerm (SearchToken "rocket" NE.:| [SearchToken "ship"])) (SynonymTerm (SearchToken "beacon" NE.:| [])) `shouldBe` True
 
     it "accepts operator tokens that produce one token" do
       lexicon <- expectRight (compileSynonymGroups [["<|>", "alternative"]])
-      areDirectSynonyms lexicon (SearchToken "<|>") (SearchToken "alternative") `shouldBe` True
+      areDirectSynonyms lexicon (SynonymTerm (SearchToken "<|>" NE.:| [])) (SynonymTerm (SearchToken "alternative" NE.:| [])) `shouldBe` True
 
     it "treats duplicate valid groups as harmless" do
       lexicon <- expectRight (compileSynonymGroups [["enqueue", "schedule"], ["enqueue", "schedule"]])
-      areDirectSynonyms lexicon (SearchToken "enqueue") (SearchToken "schedule") `shouldBe` True
+      areDirectSynonyms lexicon (SynonymTerm (SearchToken "enqueue" NE.:| [])) (SynonymTerm (SearchToken "schedule" NE.:| [])) `shouldBe` True
 
 parseConfig :: BS.ByteString -> Either String LoreConfig
 parseConfig =
@@ -163,3 +170,7 @@ expectRight :: Either err value -> IO value
 expectRight = \case
   Right value -> pure value
   Left _ -> fail "Expected Right"
+
+areDirectSynonyms :: SynonymLexicon -> SynonymTerm -> SynonymTerm -> Bool
+areDirectSynonyms lexicon left right =
+  right `Set.member` directSynonyms lexicon left
