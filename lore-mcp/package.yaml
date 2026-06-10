@@ -6,9 +6,6 @@ author:              "Author name here"
 maintainer:          "example@example.com"
 copyright:           "2026 Author name here"
 
-extra-source-files:
-- README.md
-
 description:         MCP executable package for the lore workspace
 
 dependencies:
