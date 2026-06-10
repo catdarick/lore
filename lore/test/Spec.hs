@@ -23,8 +23,8 @@ import qualified RedundantImportsSpec
 import qualified SessionEnvironmentSpec
 import qualified SourceEditSpec
 import qualified TemporalModulesSpec
-import qualified TestSuiteSpec
 import Test.Hspec
+import qualified TestSuiteSpec
 import qualified TestSupportSpec
 import qualified ValueTypeHeadSpec
 

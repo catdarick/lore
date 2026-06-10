@@ -8,10 +8,10 @@ import qualified Data.ByteString.Char8 as BS
 import qualified Data.Text as T
 import qualified Data.Yaml as Y
 import Lore
-  ( ParallelWorkersCount (..),
-    SessionConfig (..),
-    ConfigError (..),
+  ( ConfigError (..),
     LoadedConfigDocument (..),
+    ParallelWorkersCount (..),
+    SessionConfig (..),
     defaultSessionConfig,
     loadStartupConfig,
     startupSessionConfig,

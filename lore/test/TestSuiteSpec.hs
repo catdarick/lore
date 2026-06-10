@@ -3,12 +3,12 @@ module TestSuiteSpec
   )
 where
 
+import qualified Data.Text as T
 import Lore.Internal.TestSuite
   ( RunTestSuiteOptions (..),
     effectiveTestArguments,
     parseTestArguments,
   )
-import qualified Data.Text as T
 import Test.Hspec
 
 spec :: Spec

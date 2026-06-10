@@ -14,9 +14,9 @@ module Lore.Internal.Session.Environment
 where
 
 import Control.Applicative ((<|>))
-import Data.Char (toLower)
 import qualified Data.Aeson as J
 import qualified Data.Aeson.Types as JT
+import Data.Char (toLower)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
