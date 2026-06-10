@@ -8,7 +8,7 @@ import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
-import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Annotated (Description, ExampleList, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
 import Lore.Tools.Render.Doc (LoreDoc)
@@ -22,9 +22,12 @@ data SearchSymbolsArgs (fieldType :: FieldType) = SearchSymbolsArgs
   { query ::
       Field fieldType Text
         `WithMeta` '[ Description
-                        "A natural-language description or approximate concept name for the symbol you are trying to discover. \
-                        \Note on ranking: Capitalization of the core symbol name guides the results. Uppercase queries bias toward types, classes, and constructors; lowercase queries bias toward functions and values. \
-                        \Examples: \"load picture from database\", \"createUser\", \"SessionConfig\"."
+                        "A short, approximate symbol name — think 'what would this function or type be called?' rather than describing your problem in prose. \
+                        \For functions: use action-oriented phrases matching how a developer would name them (e.g. 'savePaymentIntent', 'loadUserProfile'). \
+                        \For types and classes: use noun phrases (e.g. 'SessionConfig', 'PaymentMethod'). \
+                        \Keep queries concise (2–6 words); long sentences perform poorly because matching is against symbol names, not free text. \
+                        \Queries are matched against symbol names, module paths, and type signatures — not against implementations, literals, or documentation. \
+                        \Note on ranking: Capitalization guides the results — Uppercase queries bias toward types/classes/constructors; lowercase queries bias toward functions/values."
                     ],
     modulePatterns ::
       Field fieldType (Maybe [Text])

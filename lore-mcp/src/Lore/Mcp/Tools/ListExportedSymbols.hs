@@ -36,7 +36,7 @@ data ListExportedSymbolsArgs (fieldType :: FieldType) = ListExportedSymbolsArgs
                     ],
     typeHint ::
       Field fieldType (Maybe Text)
-        `WithMeta` '[ Description "Optional type occ-name filter. When provided, only exports whose own type/signature structure directly mentions this type are kept. Useful for narrowing large module export lists. Can be a type, class, or type family name.",
+        `WithMeta` '[ Description "Optional type occurrence-name filter. When provided, only exports whose type signatures directly reference the specified type or class are included. This is useful for narrowing large module export lists when looking for symbols that operate on a particular type or class.",
                       Example "Int",
                       Example "Text",
                       Example "Show"
