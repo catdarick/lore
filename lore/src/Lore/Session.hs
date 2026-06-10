@@ -1,10 +1,11 @@
 module Lore.Session
   ( SessionContext (..),
     SessionConfig (..),
-    SessionConfigError (..),
+    SessionConfigError,
     ProjectProvider (..),
+    ResolvedStartupConfig (..),
     defaultSessionConfig,
-    loadSessionConfigFromEnvironment,
+    loadStartupConfig,
     renderSessionConfigError,
     prepareSessionContext,
     runLore,
@@ -22,12 +23,14 @@ import Control.Monad.Catch (bracket)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ReaderT (runReaderT), asks)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Word (Word32, Word64)
 import qualified GHC
 import qualified GHC.Stats as RTS
 import qualified GHC.Utils.Exception as GHCException
+import Lore.Config (LoadedConfigDocument (..), loadConfigDocumentAt, loreConfigFileName)
 import Lore.Internal.Definition.Callbacks (installDefinitionCallbacks)
 import Lore.Internal.Ghc.DynFlags
   ( ParallelWorkersCount (..),
@@ -63,13 +66,18 @@ import Lore.Internal.Session
     prepareSessionContext,
   )
 import Lore.Internal.Session.Environment
-  ( SessionConfigError (..),
-    applySessionEnvironment,
+  ( SessionConfigError,
+    SessionConfigOverrides (..),
+    applySessionConfigOverrides,
+    loadSessionEnvironmentOverrides,
+    normalizePathRelativeTo,
+    normalizeSessionConfigPaths,
+    parseSessionConfigOverrides,
     renderSessionConfigError,
   )
 import Lore.Logger (noLogHandle)
-import System.Directory (createDirectoryIfMissing, getCurrentDirectory, setCurrentDirectory)
-import System.FilePath ((</>))
+import System.Directory (createDirectoryIfMissing, getCurrentDirectory, makeAbsolute, setCurrentDirectory)
+import System.FilePath (takeDirectory, (</>))
 import System.Mem (performMajorGC)
 
 data CacheMemoryStats = CacheMemoryStats
@@ -107,6 +115,7 @@ defaultSessionConfig =
   SessionConfig
     { projectRoot = ".",
       ghcWorkDir = ".lore-work",
+      configFilePath = loreConfigFileName,
       projectProviderOverride = Nothing,
       loggerHandle = noLogHandle,
       customPrelude = Nothing,
@@ -115,9 +124,56 @@ defaultSessionConfig =
       isTestSuiteFunctionalityRequired = False
     }
 
-loadSessionConfigFromEnvironment :: IO (Either SessionConfigError SessionConfig)
-loadSessionConfigFromEnvironment =
-  applySessionEnvironment defaultSessionConfig
+data ResolvedStartupConfig = ResolvedStartupConfig
+  { startupSessionConfig :: SessionConfig,
+    startupConfigDocument :: LoadedConfigDocument
+  }
+
+loadStartupConfig :: IO (Either SessionConfigError ResolvedStartupConfig)
+loadStartupConfig = do
+  startupWorkingDirectory <- getCurrentDirectory
+  eiEnvironmentOverrides <- loadSessionEnvironmentOverrides
+  case eiEnvironmentOverrides of
+    Left err ->
+      pure (Left err)
+    Right environmentOverrides -> do
+      let bootstrapRoot =
+            fromMaybe "." environmentOverrides.projectRootOverride
+          absoluteBootstrapRoot =
+            normalizePathRelativeTo startupWorkingDirectory bootstrapRoot
+      absoluteConfigPath <- makeAbsolute (absoluteBootstrapRoot </> loreConfigFileName)
+      eiDocument <- loadConfigDocumentAt absoluteConfigPath
+      pure $
+        case eiDocument of
+          Left err ->
+            Left err
+          Right document ->
+            case parseSessionConfigOverrides document of
+              Left err ->
+                Left err
+              Right yamlOverrides ->
+                let configDir = takeDirectory document.configFilePath
+                    normalizedYamlOverrides =
+                      yamlOverrides
+                        { projectRootOverride =
+                            normalizePathRelativeTo configDir <$> yamlOverrides.projectRootOverride
+                        }
+                    normalizedEnvironmentOverrides =
+                      environmentOverrides
+                        { projectRootOverride =
+                            normalizePathRelativeTo startupWorkingDirectory <$> environmentOverrides.projectRootOverride
+                        }
+                    yamlConfig =
+                      applySessionConfigOverrides normalizedYamlOverrides defaultSessionConfig
+                    resolvedConfig =
+                      applySessionConfigOverrides normalizedEnvironmentOverrides yamlConfig
+                    normalizedConfig =
+                      normalizeSessionConfigPaths document.configFilePath resolvedConfig
+                 in Right
+                      ResolvedStartupConfig
+                        { startupSessionConfig = normalizedConfig,
+                          startupConfigDocument = document
+                        }
 
 runLore :: (GHCException.ExceptionMonad m) => SessionConfig -> LoreMonadT m a -> m a
 runLore sessionConfig lore = do

@@ -62,6 +62,7 @@ import Lore.Logger (LogLevel (..), LogMessage (..), LoggerHandle (..))
 data SessionContext = SessionContext
   { projectRoot :: FilePath,
     sessionGhcWorkDir :: FilePath,
+    configFilePath :: FilePath,
     isTestSuiteFunctionalityRequired :: Bool,
     projectProvider :: ProjectProvider,
     loggerHandle :: LoggerHandle,
@@ -91,6 +92,7 @@ data SessionContext = SessionContext
 data SessionConfig = SessionConfig
   { projectRoot :: FilePath,
     ghcWorkDir :: FilePath,
+    configFilePath :: FilePath,
     projectProviderOverride :: Maybe ProjectProvider,
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
@@ -160,7 +162,7 @@ emptyTemporalModulesRegistry =
   TemporalModulesRegistry Nothing []
 
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
-prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, projectProviderOverride, loggerHandle, customPrelude, testSuiteDefaultArguments, isTestSuiteFunctionalityRequired} = do
+prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, configFilePath, projectProviderOverride, loggerHandle, customPrelude, testSuiteDefaultArguments, isTestSuiteFunctionalityRequired} = do
   eiProvider <-
     case projectProviderOverride of
       Just provider -> pure (Right provider)
@@ -198,6 +200,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, proj
                   SessionContext
                     { projectRoot,
                       sessionGhcWorkDir = _ghcWorkDir,
+                      configFilePath,
                       isTestSuiteFunctionalityRequired,
                       projectProvider,
                       loggerHandle,

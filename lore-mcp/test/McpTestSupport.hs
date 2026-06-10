@@ -20,10 +20,11 @@ import Lore
   ( ProjectProvider (..),
     SessionConfig (..),
     defaultLoadHomeModulesOptions,
-    loadSessionConfigFromEnvironment,
     loadHomeModules,
+    loadStartupConfig,
     noLogHandle,
     renderSessionConfigError,
+    startupSessionConfig,
   )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..))
 import Lore.Mcp.Monad (LoreMcpMonad, newLoreMcpContext, runLoreMcp)
@@ -48,7 +49,7 @@ fixtureLoreMcpAtWithCache cacheEnabled fixtureRoot action = do
   provider <- resolveFixtureProjectProvider fixtureRoot
   withClearedGhcEnvironment do
     baseSessionConfig <-
-      loadSessionConfigFromEnvironment >>= either failWithSessionConfigError pure
+      startupSessionConfig <$> (loadStartupConfig >>= either failWithSessionConfigError pure)
     context <- newLoreMcpContext cacheEnabled
     runLoreMcp (sessionConfig baseSessionConfig provider) context action
   where
@@ -56,6 +57,7 @@ fixtureLoreMcpAtWithCache cacheEnabled fixtureRoot action = do
       baseSessionConfig
         { projectRoot = fixtureRoot,
           ghcWorkDir = fixtureRoot </> ".lore-work-test-mcp",
+          configFilePath = fixtureRoot </> "lore.yaml",
           projectProviderOverride = Just provider,
           loggerHandle = noLogHandle,
           isTestSuiteFunctionalityRequired = True

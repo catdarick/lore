@@ -11,6 +11,7 @@ import qualified FindReferencesSpec
 import qualified GetDefinitionSpec
 import qualified LookupInstancesSpec
 import qualified LoreDocMarkdownSpec
+import qualified McpConfigSpec
 import qualified ProtocolRequestSpec
 import qualified ReloadHomeModulesSpec
 import qualified ResolveInstanceSpec
@@ -29,6 +30,7 @@ main =
     FindDeadCodeSpec.spec
     FindReferencesSpec.spec
     LoreDocMarkdownSpec.spec
+    McpConfigSpec.spec
     LookupInstancesSpec.spec
     SearchSymbolsSpec.spec
     ResolveInstanceSpec.spec

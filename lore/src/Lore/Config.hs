@@ -2,12 +2,15 @@ module Lore.Config
   ( LoreConfig (..),
     DeadCodeConfig (..),
     SymbolSearchConfig (..),
+    LoadedConfigDocument (..),
+    ConfigError (..),
     LoreConfigError (..),
     SynonymGroupError (..),
     defaultLoreConfig,
     defaultDeadCodeConfig,
     defaultSymbolSearchConfig,
     loadLoreConfig,
+    loadConfigDocumentAt,
     loreConfigFileName,
     projectSynonymLexicon,
     renderLoreConfigError,
@@ -23,7 +26,11 @@ import Data.Aeson.Types (Parser)
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Yaml as Y
+import Lore.Internal.Config.Document
+  ( ConfigError (..),
+    LoadedConfigDocument (..),
+    loadConfigDocumentAt,
+  )
 import Lore.Internal.Lookup.SymbolSearch.Synonyms
   ( SynonymGroupError (..),
     SynonymLexicon,
@@ -31,9 +38,7 @@ import Lore.Internal.Lookup.SymbolSearch.Synonyms
     renderSynonymGroupError,
   )
 import Lore.Internal.Monad (MonadLore)
-import Lore.Internal.Session (SessionContext (projectRoot))
-import System.Directory (doesFileExist)
-import System.FilePath ((</>))
+import Lore.Internal.Session (SessionContext (configFilePath))
 
 data LoreConfig = LoreConfig
   { loreConfigDeadCode :: DeadCodeConfig,
@@ -79,20 +84,22 @@ defaultSymbolSearchConfig =
 
 loadLoreConfig :: (MonadLore m) => m (Either LoreConfigError LoreConfig)
 loadLoreConfig = do
-  rootPath <- asks projectRoot
-  let configPath = rootPath </> loreConfigFileName
-  configExists <- liftIO (doesFileExist configPath)
-  if not configExists
-    then pure (Right defaultLoreConfig)
-    else do
-      eiConfig <- liftIO (Y.decodeFileEither configPath)
-      pure $
-        case eiConfig of
-          Left parseError ->
-            Left
-              (LoreConfigParseError configPath (T.pack (Y.prettyPrintParseException parseError)))
-          Right config ->
+  path <- asks (.configFilePath)
+  eiDocument <- liftIO (loadConfigDocumentAt path)
+  pure $
+    case eiDocument of
+      Left (ConfigFileParseError configPath parseError) ->
+        Left (LoreConfigParseError configPath parseError)
+      Left (InvalidSessionConfig configPath message) ->
+        Left (LoreConfigParseError configPath message)
+      Left InvalidSessionEnvironmentVariable {} ->
+        Left (LoreConfigParseError path "unexpected session environment error while loading lore.yaml")
+      Right document ->
+        case J.fromJSON document.configFileValue of
+          J.Success config ->
             Right config
+          J.Error err ->
+            Left (LoreConfigParseError document.configFilePath (T.pack err))
 
 loreConfigFileName :: FilePath
 loreConfigFileName = "lore.yaml"

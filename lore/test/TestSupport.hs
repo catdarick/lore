@@ -102,6 +102,7 @@ fixtureLoreAtWithConfig context sessionConfig fixtureRoot action =
       sessionConfig
         { Session.projectRoot = fixtureRoot,
           Session.ghcWorkDir = fixtureRoot </> ".lore-work-test",
+          Session.configFilePath = fixtureRoot </> "lore.yaml",
           Session.projectProviderOverride = Just context.fixtureProjectProvider
         }
       action

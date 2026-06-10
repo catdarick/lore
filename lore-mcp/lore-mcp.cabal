@@ -24,6 +24,7 @@ source-repository head
 library
   exposed-modules:
       Lore.JsonRpc.Server
+      Lore.Mcp.Config
       Lore.Mcp.Internal.Annotated
       Lore.Mcp.Internal.Tool
       Lore.Mcp.Monad
@@ -204,6 +205,7 @@ test-suite lore-mcp-test
       GetDefinitionSpec
       LookupInstancesSpec
       LoreDocMarkdownSpec
+      McpConfigSpec
       McpTestSupport
       ProtocolRequestSpec
       ReloadHomeModulesSpec

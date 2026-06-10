@@ -83,49 +83,90 @@ The `lore-mcp` server exposes a rich suite of tools for deep codebase analysis a
 *   **`notifyKnowledgeReset`**: Clears the server's internal definition cache (used to suppress duplicate code blocks across multiple `getDefinition` calls).
 *   **`feedback`**: Records structured user feedback (such as bug reports or feature requests) to a configured log file.
 
-## Configuration & Environment Variables
+## Configuration
 
-`lore-mcp` relies on environment variables for session and tool configuration. These are read at startup.
+`lore-cli` and `lore-mcp` both read startup configuration from `lore.yaml` and environment variables. Precedence is:
 
-### General Session Configuration
+```text
+code defaults < lore.yaml < environment variables < frontend runtime requirements
+```
 
-| Environment Variable | Default | Description |
-| :--- | :--- | :--- |
-| `LORE_PROJECT_ROOT` | `"."` | Sets the project root directory. |
-| `LORE_GHC_WORK_DIR` | `".lore-work"` | Directory for GHC build artifacts. |
-| `LORE_CUSTOM_PRELUDE` | (Base Prelude) | Module name to import instead of standard `Prelude`. |
-| `LORE_PARALLEL_WORKERS_LIMIT` | `auto` | Number of concurrent workers (`auto` or a positive integer). |
-| `LORE_LOG_LEVEL` | (Disabled) | Minimum log level (`debug`, `info`, `warn`, `error`). Output goes to stderr. |
-| `LORE_DEFAULT_TEST_ARGS` | (Empty) | Prepends default arguments (e.g., `--arg 1`) to `runTestSuite` calls. |
+Frontend runtime requirements are imposed by the executable. For example, interactive CLI sessions require test-suite support, and MCP requires test-suite support when the `runTestSuite` tool is enabled.
 
-### Advanced Tool Configuration
+Startup settings are read once when the process starts. Changing `session` or `mcp` settings requires restarting the process. Operational project settings under `dead-code` and `symbol-search` are reloaded from disk by the relevant operations, so edits there can take effect without restarting.
 
-*   **`LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE`**: If `true`, `getDefinition` remembers and skips rendering duplicate source definitions in subsequent calls. Also registers `lore_notifyKnowledgeReset` to clear this cache.
-*   **`LORE_MCP_FEEDBACK_FILE`**: Providing a path registers the `feedback` tool, appending feedback to that file.
-*   **Disable Specific Tools**: Prefix any tool name in upper snake case with `LORE_MCP_TOOL_ENABLED_`. Example: `LORE_MCP_TOOL_ENABLED_EXECUTE_CODE=false`. By default, all tools are enabled except `runTestSuite`.
-*   **Enabling `runTestSuite`**: Set `LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE=true`. Note that this tool dynamically adds the `directory` package to interpreter dependencies. If enabling this causes project loading to fail with a missing package error, you must add `directory` to the `dependencies` in your project's `package.yaml` or `.cabal`, rebuild your project, and reload the modules.
+### `lore.yaml`
 
-## Project Metadata (`lore.yaml`)
-
-Projects can define a `.lore.yaml` (or `lore.yaml`) at the project root to control indexing, synonym mapping, and dead code detection.
+Place `lore.yaml` in the launch directory, or in `LORE_PROJECT_ROOT` when that environment variable is set.
 
 ```yaml
+session:
+  project-root: .
+  ghc-work-dir: .lore-work
+  custom-prelude: CustomPrelude
+  parallel-workers-limit: auto
+  log-level: info
+  default-test-args:
+    - --match
+    - some test name
+
 dead-code:
   alive-modules:
-    - "Main"
-    - "Dev"
+    - Main
   alive-symbols:
-    - "runApplication"
+    - runApplication
 
 symbol-search:
   synonym-groups:
-    - ["customer", "client"]
-    - ["enqueue", "schedule", "submit"]
-    - ["credit line", "commitment"]
+    - [customer, client]
+    - [BillPay, Spot]
+
+mcp:
+  enable-definition-knowledge-cache: true
+  feedback-file: .lore-work/mcp-feedback.md
+  tools:
+    runTestSuite: true
+    notifyKnowledgeReset: false
 ```
+
+YAML values use native YAML types. Booleans are booleans, `session.default-test-args` is a list of arguments, and `session.parallel-workers-limit` is either `auto` or a positive integer. `mcp.feedback-file: null` or a missing value leaves the `feedback` tool unavailable.
+
+### Environment Equivalents
+
+Environment variables keep their existing string syntax and override matching YAML values.
+
+| YAML | Environment |
+| :--- | :--- |
+| `session.project-root` | `LORE_PROJECT_ROOT` |
+| `session.ghc-work-dir` | `LORE_GHC_WORK_DIR` |
+| `session.custom-prelude` | `LORE_CUSTOM_PRELUDE` |
+| `session.parallel-workers-limit` | `LORE_PARALLEL_WORKERS_LIMIT` |
+| `session.log-level` | `LORE_LOG_LEVEL` |
+| `session.default-test-args` | `LORE_DEFAULT_TEST_ARGS` |
+| `mcp.enable-definition-knowledge-cache` | `LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE` |
+| `mcp.feedback-file` | `LORE_MCP_FEEDBACK_FILE` |
+| `mcp.tools.<toolName>` | `LORE_MCP_TOOL_ENABLED_<TOOL_NAME>` |
+
+`LORE_DEFAULT_TEST_ARGS` is parsed as shell-style text because it is one string, for example `--match "some test"`. YAML `session.default-test-args` should use a list and does not use shell parsing.
+
+MCP tool environment suffixes are generated from tool names. For example, `mcp.tools.runTestSuite` maps to `LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE`. By default, all MCP tools are enabled except `runTestSuite`.
+
+### Path Semantics
+
+`LORE_PROJECT_ROOT` has a bootstrap role. If it is set, Lore loads `<LORE_PROJECT_ROOT>/lore.yaml` and also uses it as the environment override for `session.project-root`. If it is not set, Lore loads `./lore.yaml` from the launch directory, and that file may set `session.project-root` to another directory. Lore does not then load a second config file from the YAML-selected project root.
+
+Relative paths are resolved as follows:
+
+*   The config file path is resolved from the startup working directory or `LORE_PROJECT_ROOT`, then converted to an absolute path before Lore changes directories.
+*   `session.project-root` in YAML is relative to the directory containing `lore.yaml`.
+*   `session.ghc-work-dir` is relative to the resolved project root.
+*   `mcp.feedback-file` is relative to the resolved project root.
+*   Absolute paths remain unchanged.
+
+### Project Settings
 
 *   **`dead-code`**: Defines explicit "alive roots" for the `findDeadCode` tool. By default, `main` functions in executables and test suites are considered alive. **Note on library code:** If a library symbol is only used within test suites, it will intentionally be reported as dead code. If you are developing a library, you must add its public API modules or entry-point symbols to `alive-modules` or `alive-symbols` to keep them from being marked as dead.
 *   **`symbol-search`**: Customizes synonym expansion for the symbol search tool. This helps natural language queries find symbols that use different but equivalent project vocabulary. Lore ships with a built-in synonym base for common programming terms, abbreviations, and phrases (`db`/`database`, `get`/`fetch`/`retrieve`, `pr`/`pull request`, and similar). Project `synonym-groups` are added on top of those defaults so project-specific vocabulary can match local naming conventions.
 *   **`symbol-search.synonym-groups`**: Each entry is a group of equivalent terms. A term may be a single word, abbreviation, operator, or phrase. Phrases must be written as one YAML string, for example `"credit line"` or `"pull request"`. Each group must contain at least two distinct normalized terms.
 
-*Note: Edits to `lore.yaml` take effect dynamically without requiring index rebuilds.*
+*Note: Edits to `dead-code` and `symbol-search` in `lore.yaml` take effect dynamically without requiring index rebuilds.*

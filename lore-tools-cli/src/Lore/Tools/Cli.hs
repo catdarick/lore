@@ -4,9 +4,10 @@ module Lore.Tools.Cli
 where
 
 import Lore
-  ( loadSessionConfigFromEnvironment,
+  ( loadStartupConfig,
     renderSessionConfigError,
     runLore,
+    startupSessionConfig,
   )
 import Lore.Tools.Cli.Interactive (runInteractive)
 import Lore.Tools.Cli.Internal.Tool (CliInvocationStatus (..))
@@ -29,7 +30,7 @@ runCli :: IO ()
 runCli = do
   options <- execParser (parserInfo cliTools)
   baseSessionConfig <-
-    loadSessionConfigFromEnvironment >>= either failWithSessionConfigError pure
+    startupSessionConfig <$> (loadStartupConfig >>= either failWithSessionConfigError pure)
   case options.cliMode of
     CliSingle format invocation -> do
       status <- runLore (sessionConfigForInvocation baseSessionConfig invocation) (runSingleShot format invocation)

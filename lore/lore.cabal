@@ -56,6 +56,7 @@ library
       Lore.Internal.Lookup.Types
   other-modules:
       Lore.Internal.BuildTool.Environment
+      Lore.Internal.Config.Document
       Lore.Internal.DeadCode
       Lore.Internal.Definition.Analysis
       Lore.Internal.Definition.Analysis.Bindings
@@ -260,6 +261,7 @@ test-suite lore-test
       Lore.HomeModules
       Lore.HomeModules.Plan
       Lore.Internal.BuildTool.Environment
+      Lore.Internal.Config.Document
       Lore.Internal.DeadCode
       Lore.Internal.Definition.Analysis
       Lore.Internal.Definition.Analysis.Bindings
