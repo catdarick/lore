@@ -1,8 +1,11 @@
 module Lore.Session
   ( SessionContext (..),
     SessionConfig (..),
+    SessionConfigError (..),
     ProjectProvider (..),
     defaultSessionConfig,
+    loadSessionConfigFromEnvironment,
+    renderSessionConfigError,
     prepareSessionContext,
     runLore,
     ParallelWorkersCount (..),
@@ -59,6 +62,11 @@ import Lore.Internal.Session
     emptyTypedModuleFactsCache,
     prepareSessionContext,
   )
+import Lore.Internal.Session.Environment
+  ( SessionConfigError (..),
+    applySessionEnvironment,
+    renderSessionConfigError,
+  )
 import Lore.Logger (noLogHandle)
 import System.Directory (createDirectoryIfMissing, getCurrentDirectory, setCurrentDirectory)
 import System.FilePath ((</>))
@@ -103,8 +111,13 @@ defaultSessionConfig =
       loggerHandle = noLogHandle,
       customPrelude = Nothing,
       parallelWorkersLimit = WorkersAsNumProcessors,
+      testSuiteDefaultArguments = [],
       isTestSuiteFunctionalityRequired = False
     }
+
+loadSessionConfigFromEnvironment :: IO (Either SessionConfigError SessionConfig)
+loadSessionConfigFromEnvironment =
+  applySessionEnvironment defaultSessionConfig
 
 runLore :: (GHCException.ExceptionMonad m) => SessionConfig -> LoreMonadT m a -> m a
 runLore sessionConfig lore = do

@@ -66,6 +66,7 @@ data SessionContext = SessionContext
     projectProvider :: ProjectProvider,
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
+    testSuiteDefaultArguments :: [String],
     sessionPackageRoots :: [PackageRoot],
     sessionCabalPackageFiles :: [FilePath],
     ghcEnvironmentSnapshot :: GhcEnvironmentSnapshot,
@@ -94,6 +95,7 @@ data SessionConfig = SessionConfig
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
     parallelWorkersLimit :: ParallelWorkersCount,
+    testSuiteDefaultArguments :: [String],
     isTestSuiteFunctionalityRequired :: Bool
   }
 
@@ -158,7 +160,7 @@ emptyTemporalModulesRegistry =
   TemporalModulesRegistry Nothing []
 
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
-prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, projectProviderOverride, loggerHandle, customPrelude, isTestSuiteFunctionalityRequired} = do
+prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, projectProviderOverride, loggerHandle, customPrelude, testSuiteDefaultArguments, isTestSuiteFunctionalityRequired} = do
   eiProvider <-
     case projectProviderOverride of
       Just provider -> pure (Right provider)
@@ -200,6 +202,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, proj
                       projectProvider,
                       loggerHandle,
                       customPrelude,
+                      testSuiteDefaultArguments,
                       sessionPackageRoots,
                       sessionCabalPackageFiles,
                       ghcEnvironmentSnapshot,

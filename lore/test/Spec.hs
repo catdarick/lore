@@ -20,8 +20,10 @@ import qualified ModulePatternSpec
 import qualified PackageDiscoverySpec
 import qualified PackageEnvironmentSpec
 import qualified RedundantImportsSpec
+import qualified SessionEnvironmentSpec
 import qualified SourceEditSpec
 import qualified TemporalModulesSpec
+import qualified TestSuiteSpec
 import Test.Hspec
 import qualified TestSupportSpec
 import qualified ValueTypeHeadSpec
@@ -44,6 +46,8 @@ main =
     LookupSpec.spec
     PackageDiscoverySpec.spec
     PackageEnvironmentSpec.spec
+    SessionEnvironmentSpec.spec
+    TestSuiteSpec.spec
     SourceEditSpec.spec
     HomeModulesSpec.spec
     TemporalModulesSpec.spec

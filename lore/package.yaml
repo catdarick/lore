@@ -109,11 +109,13 @@ tests:
     - LoggerSpec
     - ModulePatternSpec
     - RedundantImportsSpec
+    - SessionEnvironmentSpec
     - SourceEditSpec
     - HomeModulesSpec
     - PackageDiscoverySpec
     - PackageEnvironmentSpec
     - TemporalModulesSpec
+    - TestSuiteSpec
     - TestSupport
     - TestSupportSpec
     - ValueTypeHeadSpec
@@ -216,6 +218,7 @@ tests:
     - Lore.Internal.Session
     - Lore.Internal.Session.Cache.Types
     - Lore.Internal.Session.CacheInvalidation
+    - Lore.Internal.Session.Environment
     - Lore.Internal.SourceEdit
     - Lore.Internal.SourcePath
     - Lore.Internal.SourceSpan
@@ -223,6 +226,7 @@ tests:
     - Lore.Internal.SourceText
     - Lore.Internal.TemporalModules
     - Lore.Internal.TestSuite
+    - Lore.Internal.TestSuite.Arguments
     - Lore.Interpreter
     - Lore.Lib.Force
     - Lore.Lib.Text

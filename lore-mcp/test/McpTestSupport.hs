@@ -17,12 +17,13 @@ import Data.List (find, isPrefixOf, stripPrefix)
 import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Lore
-  ( ParallelWorkersCount (..),
-    ProjectProvider (..),
+  ( ProjectProvider (..),
     SessionConfig (..),
     defaultLoadHomeModulesOptions,
+    loadSessionConfigFromEnvironment,
     loadHomeModules,
     noLogHandle,
+    renderSessionConfigError,
   )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..))
 import Lore.Mcp.Monad (LoreMcpMonad, newLoreMcpContext, runLoreMcp)
@@ -46,19 +47,22 @@ fixtureLoreMcpAtWithCache :: Bool -> FilePath -> LoreMcpMonad a -> IO a
 fixtureLoreMcpAtWithCache cacheEnabled fixtureRoot action = do
   provider <- resolveFixtureProjectProvider fixtureRoot
   withClearedGhcEnvironment do
+    baseSessionConfig <-
+      loadSessionConfigFromEnvironment >>= either failWithSessionConfigError pure
     context <- newLoreMcpContext cacheEnabled
-    runLoreMcp (sessionConfig {projectProviderOverride = Just provider}) context action
+    runLoreMcp (sessionConfig baseSessionConfig provider) context action
   where
-    sessionConfig =
-      SessionConfig
+    sessionConfig baseSessionConfig provider =
+      baseSessionConfig
         { projectRoot = fixtureRoot,
           ghcWorkDir = fixtureRoot </> ".lore-work-test-mcp",
-          projectProviderOverride = Nothing,
+          projectProviderOverride = Just provider,
           loggerHandle = noLogHandle,
-          customPrelude = Nothing,
-          parallelWorkersLimit = WorkersAsNumProcessors,
           isTestSuiteFunctionalityRequired = True
         }
+
+    failWithSessionConfigError =
+      ioError . userError . T.unpack . renderSessionConfigError
 
 withFixtureCopy :: (FilePath -> IO a) -> IO a
 withFixtureCopy action = do

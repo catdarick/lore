@@ -138,6 +138,7 @@ library
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
+      Lore.Internal.Session.Environment
       Lore.Internal.SourceEdit
       Lore.Internal.SourcePath
       Lore.Internal.SourceSpan
@@ -145,6 +146,7 @@ library
       Lore.Internal.SourceText
       Lore.Internal.TemporalModules
       Lore.Internal.TestSuite
+      Lore.Internal.TestSuite.Arguments
       Lore.Lib.Force
       Lore.Lib.Text
       Lore.Module
@@ -237,11 +239,13 @@ test-suite lore-test
       LoggerSpec
       ModulePatternSpec
       RedundantImportsSpec
+      SessionEnvironmentSpec
       SourceEditSpec
       HomeModulesSpec
       PackageDiscoverySpec
       PackageEnvironmentSpec
       TemporalModulesSpec
+      TestSuiteSpec
       TestSupport
       TestSupportSpec
       ValueTypeHeadSpec
@@ -344,6 +348,7 @@ test-suite lore-test
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
+      Lore.Internal.Session.Environment
       Lore.Internal.SourceEdit
       Lore.Internal.SourcePath
       Lore.Internal.SourceSpan
@@ -351,6 +356,7 @@ test-suite lore-test
       Lore.Internal.SourceText
       Lore.Internal.TemporalModules
       Lore.Internal.TestSuite
+      Lore.Internal.TestSuite.Arguments
       Lore.Interpreter
       Lore.Lib.Force
       Lore.Lib.Text

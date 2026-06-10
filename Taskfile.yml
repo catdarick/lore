@@ -21,7 +21,7 @@ tasks:
         HOST=0.0.0.0 \
         HSPEC_FORMAT=failed-examples \
         HSPEC_COLOR=no \
-        LORE_MCP_LOG_LEVEL=debug \
+        LORE_LOG_LEVEL=debug \
         LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE=true \
         LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE=true \
         ALLOWED_ORIGINS="http://localhost:6274,http://127.0.0.1:6274${MCP_HOST_IP:+,http://$MCP_HOST_IP:6274}" \
@@ -55,7 +55,7 @@ tasks:
     desc: Run tunnel-client for lore-mcp; 
     cmds:
       - |
-        LORE_MCP_LOG_LEVEL=debug \
+        LORE_LOG_LEVEL=debug \
         LORE_MCP_FEEDBACK_FILE=./lore-tunnel-feedback.txt \
         LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE=false \
         LORE_MCP_TOOL_ENABLED_NOTIFY_KNOWLEDGE_RESET=false \

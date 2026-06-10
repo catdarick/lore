@@ -34,7 +34,7 @@ import qualified GHC.Plugins as GHC
 import qualified Lore
 import Lore.Logger (LoggerHandle, noLogHandle)
 import Lore.Monad (LoreMonadT)
-import Lore.Session (SessionConfig, runLore)
+import Lore.Session (SessionConfig (..), defaultSessionConfig, runLore)
 import qualified Lore.Session as Session
 import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory, makeAbsolute, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
@@ -107,15 +107,9 @@ fixtureLoreAtWithConfig context sessionConfig fixtureRoot action =
       action
 
 sessionConfigWithLogger :: LoggerHandle -> SessionConfig
-sessionConfigWithLogger loggerHandle =
-  Session.SessionConfig
-    { Session.projectRoot = ".",
-      Session.ghcWorkDir = ".lore-work",
-      Session.projectProviderOverride = Nothing,
-      Session.loggerHandle = loggerHandle,
-      Session.customPrelude = Nothing,
-      Session.parallelWorkersLimit = Session.WorkersAsNumProcessors,
-      Session.isTestSuiteFunctionalityRequired = False
+sessionConfigWithLogger handle =
+  defaultSessionConfig
+    { loggerHandle = handle
     }
 
 withFixtureCopy :: FixtureContext -> (FilePath -> IO a) -> IO a

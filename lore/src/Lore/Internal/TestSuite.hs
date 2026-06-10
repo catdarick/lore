@@ -1,7 +1,12 @@
 module Lore.Internal.TestSuite
   ( RunTestSuiteOptions (..),
+    RunTestSuiteResult (..),
     TestSuiteComponentStatus (..),
     TestSuiteComponentResult (..),
+    TestArgumentsParseError (..),
+    parseTestArguments,
+    renderTestArgumentsParseError,
+    effectiveTestArguments,
     runTestSuite,
   )
 where
@@ -23,6 +28,11 @@ import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries, getCachedModSum
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Package (ComponentData (..), ComponentKind (..), PackageData (..), prepareComponentsData)
 import Lore.Internal.Session (SessionContext (..))
+import Lore.Internal.TestSuite.Arguments
+  ( TestArgumentsParseError (..),
+    parseTestArguments,
+    renderTestArgumentsParseError,
+  )
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import System.FilePath (isRelative, normalise, (</>))
@@ -33,10 +43,17 @@ data RunTestSuiteOptions = RunTestSuiteOptions
     testArguments :: [String]
   }
 
+data RunTestSuiteResult = RunTestSuiteResult
+  { runTestSuiteEffectiveArguments :: [String],
+    runTestSuiteComponentResults :: [TestSuiteComponentResult]
+  }
+  deriving stock (Eq, Show)
+
 data TestSuiteComponentStatus
   = TestSuiteComponentSetupFailure String
   | TestSuiteComponentExecutionFailure [Diagnostic]
   | TestSuiteComponentExecutionSuccess String
+  deriving stock (Eq, Show)
 
 data TestSuiteComponentResult = TestSuiteComponentResult
   { packageName :: String,
@@ -44,10 +61,12 @@ data TestSuiteComponentResult = TestSuiteComponentResult
     moduleName :: Maybe String,
     status :: TestSuiteComponentStatus
   }
+  deriving stock (Eq, Show)
 
-runTestSuite :: (MonadLore m) => RunTestSuiteOptions -> m [TestSuiteComponentResult]
-runTestSuite RunTestSuiteOptions {packageName = packageFilter, testArguments} = do
+runTestSuite :: (MonadLore m) => RunTestSuiteOptions -> m RunTestSuiteResult
+runTestSuite options@RunTestSuiteOptions {packageName = packageFilter} = do
   sessionProjectRoot <- asks projectRoot
+  defaultArguments <- asks testSuiteDefaultArguments
   absoluteSessionProjectRoot <- liftIO (Dir.makeAbsolute sessionProjectRoot)
   packages <- prepareComponentsData
   generatedMainModulesByKey <- lookupGeneratedMainModulesByKey
@@ -60,7 +79,8 @@ runTestSuite RunTestSuiteOptions {packageName = packageFilter, testArguments} = 
           component <- sortOn (.componentName) pkg.components,
           component.componentKind == ComponentKindTest
         ]
-  forM testComponents \(pkgName, pkgRoot, component) -> do
+      effectiveArguments = effectiveTestArguments defaultArguments options
+  componentResults <- forM testComponents \(pkgName, pkgRoot, component) -> do
     resolvedEntryModule <-
       resolveLoadedComponentEntryModule
         pkgName
@@ -82,7 +102,7 @@ runTestSuite RunTestSuiteOptions {packageName = packageFilter, testArguments} = 
         let entryModuleName =
               GHC.moduleNameString (GHC.moduleName entryModule)
             executionDir = resolveExecutionDir absoluteSessionProjectRoot pkgRoot
-            statement = renderRunStatement executionDir entryModuleName testArguments
+            statement = renderRunStatement executionDir entryModuleName effectiveArguments
         runResult <- executeStatementRaw (T.pack statement)
         componentStatus <-
           case runResult of
@@ -98,6 +118,15 @@ runTestSuite RunTestSuiteOptions {packageName = packageFilter, testArguments} = 
               moduleName = Just entryModuleName,
               status = componentStatus
             }
+  pure
+    RunTestSuiteResult
+      { runTestSuiteEffectiveArguments = effectiveArguments,
+        runTestSuiteComponentResults = componentResults
+      }
+
+effectiveTestArguments :: [String] -> RunTestSuiteOptions -> [String]
+effectiveTestArguments defaultArguments RunTestSuiteOptions {testArguments} =
+  defaultArguments <> testArguments
 
 packageMatches :: Maybe String -> String -> Bool
 packageMatches maybePackageName packageName =

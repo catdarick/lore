@@ -3,25 +3,18 @@ module Lore.Mcp.Tools.RunTestSuite
   )
 where
 
-import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
-import Data.Maybe (catMaybes)
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
-import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.Render.Doc (LoreDoc)
-import Lore.Tools.Result
-  (
-  )
 import Lore.Tools.RunTestSuite
   ( RunTestSuiteToolOptions (..),
   )
 import qualified Lore.Tools.RunTestSuite as ToolsRunTestSuite
-import System.Environment (lookupEnv)
 
 data RunTestSuiteArgs (fieldType :: FieldType) = RunTestSuiteArgs
   { package ::
@@ -51,21 +44,10 @@ runTestSuiteTool =
 
 runTestSuiteHandler :: (MonadLore m) => RunTestSuiteArgs 'ValueType -> m LoreDoc
 runTestSuiteHandler RunTestSuiteArgs {package, testArgs} = do
-  defaultRawArgs <- liftIO (lookupEnv "LORE_MCP_DEFAULT_TEST_ARGS")
   result <-
     ToolsRunTestSuite.runTestSuite
       RunTestSuiteToolOptions
         { runTestSuitePackageFilter = package,
-          runTestSuiteRawArgs = mergeRawArgs defaultRawArgs testArgs
+          runTestSuiteRawArgs = testArgs
         }
   pure $ renderToolRun id result
-
-mergeRawArgs :: Maybe String -> Maybe Text -> Maybe Text
-mergeRawArgs maybeDefaultRawArgs maybeExplicitRawArgs =
-  case filteredArgs of
-    [] -> Nothing
-    args -> Just (T.intercalate " " args)
-  where
-    filteredArgs =
-      filter (not . T.null) $
-        T.strip <$> catMaybes [T.pack <$> maybeDefaultRawArgs, maybeExplicitRawArgs]

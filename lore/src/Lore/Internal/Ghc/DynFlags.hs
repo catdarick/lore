@@ -33,6 +33,7 @@ import System.FilePath (normalise, (</>))
 data ParallelWorkersCount
   = ThisWorkersCount Int
   | WorkersAsNumProcessors
+  deriving stock (Eq, Show)
 
 modifySessionDynFlagsM :: (GHC.GhcMonad m) => (GHC.DynFlags -> m GHC.DynFlags) -> m ()
 modifySessionDynFlagsM f = do

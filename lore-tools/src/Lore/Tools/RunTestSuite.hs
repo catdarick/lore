@@ -11,8 +11,12 @@ import Lore
     LoadHomeModulesResult (..),
     MonadLore,
     RunTestSuiteOptions (..),
+    RunTestSuiteResult (..),
+    TestArgumentsParseError (..),
     TestSuiteComponentResult (..),
     TestSuiteComponentStatus (..),
+    parseTestArguments,
+    renderTestArgumentsParseError,
   )
 import qualified Lore as Core
 import Lore.Tools.ReloadHomeModules (renderReloadHomeModulesResult)
@@ -35,20 +39,27 @@ runTestSuite options = do
   if not loadResult.loadHomeModulesSucceeded
     then ToolRunReady <$> renderReloadHomeModulesResult loadResult
     else withInterpreterSession \_ -> do
-      let parsedArgs = maybe [] (parseTestArgs . T.unpack) options.runTestSuiteRawArgs
-      componentResults <-
-        Core.runTestSuite
-          RunTestSuiteOptions
-            { packageName = T.unpack <$> options.runTestSuitePackageFilter,
-              testArguments = parsedArgs
-            }
-      pure $
-        toLoreDoc
-          RunTestSuiteOutput
-            { runTestSuitePackageFilter = options.runTestSuitePackageFilter,
-              runTestSuiteForwardedArgs = parsedArgs,
-              runTestSuiteComponents = componentResults
-            }
+      case traverse parseTestArguments options.runTestSuiteRawArgs of
+        Left parseError ->
+          pure (renderParseError parseError)
+        Right maybeParsedArgs -> do
+          result <-
+            Core.runTestSuite
+              RunTestSuiteOptions
+                { packageName = T.unpack <$> options.runTestSuitePackageFilter,
+                  testArguments = maybe [] id maybeParsedArgs
+                }
+          pure $
+            toLoreDoc
+              RunTestSuiteOutput
+                { runTestSuitePackageFilter = options.runTestSuitePackageFilter,
+                  runTestSuiteForwardedArgs = result.runTestSuiteEffectiveArguments,
+                  runTestSuiteComponents = result.runTestSuiteComponentResults
+                }
+
+renderParseError :: TestArgumentsParseError -> LoreDoc
+renderParseError parseError =
+  paragraph ("Invalid testArgs: " <> renderTestArgumentsParseError parseError <> ".")
 
 data RunTestSuiteOutput = RunTestSuiteOutput
   { runTestSuitePackageFilter :: Maybe Text,
@@ -118,65 +129,3 @@ packageFilterSuffix maybePackage =
   case maybePackage of
     Nothing -> ""
     Just packageName -> " for package " <> T.pack (show (T.unpack packageName))
-
-parseTestArgs :: String -> [String]
-parseTestArgs raw =
-  reverse (emitCurrentArg finalState.completedArgs finalState.currentArg)
-  where
-    finalState = foldl step (ParserState [] [] Outside) raw
-
-    step parserState c =
-      case parserState.mode of
-        Outside
-          | c == ' ' || c == '\t' || c == '\n' ->
-              flushCurrentArg parserState
-          | c == '"' ->
-              parserState {mode = InDoubleQuote}
-          | c == '\'' ->
-              parserState {mode = InSingleQuote}
-          | c == '\\' ->
-              parserState {mode = Escape Outside}
-          | otherwise ->
-              appendChar parserState c
-        InDoubleQuote
-          | c == '"' ->
-              parserState {mode = Outside}
-          | c == '\\' ->
-              parserState {mode = Escape InDoubleQuote}
-          | otherwise ->
-              appendChar parserState c
-        InSingleQuote
-          | c == '\'' ->
-              parserState {mode = Outside}
-          | c == '\\' ->
-              parserState {mode = Escape InSingleQuote}
-          | otherwise ->
-              appendChar parserState c
-        Escape returnMode ->
-          appendChar parserState {mode = returnMode} c
-
-    flushCurrentArg parserState@ParserState {completedArgs, currentArg} =
-      parserState
-        { completedArgs = emitCurrentArg completedArgs currentArg,
-          currentArg = []
-        }
-
-    appendChar parserState@ParserState {currentArg} c =
-      parserState {currentArg = c : currentArg}
-
-    emitCurrentArg args current =
-      if null current
-        then args
-        else reverse current : args
-
-data ParserMode
-  = Outside
-  | InDoubleQuote
-  | InSingleQuote
-  | Escape ParserMode
-
-data ParserState = ParserState
-  { completedArgs :: [String],
-    currentArg :: String,
-    mode :: ParserMode
-  }

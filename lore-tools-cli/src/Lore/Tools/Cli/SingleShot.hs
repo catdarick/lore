@@ -6,10 +6,7 @@ module Lore.Tools.Cli.SingleShot
 where
 
 import Control.Monad.IO.Class (MonadIO)
-import Lore
-  ( SessionConfig (..),
-    defaultSessionConfig,
-  )
+import Lore (SessionConfig (..))
 import Lore.Tools.Cli.Internal.Parser (OutputFormat)
 import Lore.Tools.Cli.Internal.Tool
   ( CliInvocation,
@@ -28,17 +25,17 @@ runSingleShot format invocation = do
   renderOutput format (cliInvocationName invocation) invocationResult.cliInvocationResultDoc
   pure invocationResult.cliInvocationResultStatus
 
-sessionConfigForInvocation :: CliInvocation m -> SessionConfig
-sessionConfigForInvocation invocation =
+sessionConfigForInvocation :: SessionConfig -> CliInvocation m -> SessionConfig
+sessionConfigForInvocation baseConfig invocation =
   let requirements = cliInvocationSessionRequirements invocation
    in
-  defaultSessionConfig
+  baseConfig
     { isTestSuiteFunctionalityRequired =
         requirements.requiresTestSuiteFunctionality
     }
 
-interactiveSessionConfig :: SessionConfig
-interactiveSessionConfig =
-  defaultSessionConfig
+interactiveSessionConfig :: SessionConfig -> SessionConfig
+interactiveSessionConfig baseConfig =
+  baseConfig
     { isTestSuiteFunctionalityRequired = True
     }

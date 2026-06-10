@@ -4,22 +4,27 @@ Executable package for exposing `lore` through an MCP server.
 
 ## Runtime configuration
 
-`lore-mcp` reads optional environment variables during startup:
+`lore-mcp` reads optional environment variables during startup. General `lore` session settings are resolved by the core package and then used by MCP:
 
-- `LORE_MCP_PROJECT_ROOT`: overrides `projectRoot` (default `"."`)
-- `LORE_MCP_GHC_WORK_DIR`: overrides `ghcWorkDir` (default `".lore-work"`)
-- `LORE_MCP_CUSTOM_PRELUDE`: overrides `customPrelude`
+- `LORE_PROJECT_ROOT`: overrides `projectRoot` (default `"."`)
+- `LORE_GHC_WORK_DIR`: overrides `ghcWorkDir` (default `".lore-work"`)
+- `LORE_CUSTOM_PRELUDE`: overrides `customPrelude`
   - unset: use base `Prelude`
   - non-empty module name (for example `CustomPrelude`): import that module instead of `Prelude`
-- `LORE_MCP_PARALLEL_WORKERS_LIMIT`: overrides parallel worker limit
+- `LORE_PARALLEL_WORKERS_LIMIT`: overrides parallel worker limit
   - `auto`: `WorkersAsNumProcessors` (default)
   - positive integer (for example `4`): `ThisWorkersCount 4`
-- `LORE_MCP_LOG_LEVEL`: enables server logging and sets the minimum emitted level
+- `LORE_LOG_LEVEL`: enables server logging and sets the minimum emitted level
   - unset: disable logging
   - `debug`: emit debug, info, warning, and error logs
   - `info`: emit info, warning, and error logs
   - `warn` or `warning`: emit warning and error logs
   - `error`: emit only error logs
+- `LORE_DEFAULT_TEST_ARGS`: default arguments prepended to `runTestSuite` `testArgs`
+  - unset or empty: no default args
+  - non-empty value: parsed by `lore` like `testArgs` and prepended before tool-provided args
+  - merge order: `LORE_DEFAULT_TEST_ARGS` first, then `runTestSuite.testArgs`
+  - example: `LORE_DEFAULT_TEST_ARGS="--arg1 --arg2 4"` and `testArgs="--match \"some test name\""` forwards `["--arg1","--arg2","4","--match","some test name"]`
 - `LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE`: enables `getDefinition` duplicate-suppression memory
   - unset: disabled (default)
   - truthy values: `1`, `true`, `yes`, `on`
@@ -27,11 +32,6 @@ Executable package for exposing `lore` through an MCP server.
 - `LORE_MCP_FEEDBACK_FILE`: enables/registers the `feedback` tool when set to a non-empty path
   - unset or empty: `feedback` tool is not registered
   - non-empty value: `feedback` tool appends feedback entries to the given file path
-- `LORE_MCP_DEFAULT_TEST_ARGS`: default arguments prepended to `runTestSuite` `testArgs`
-  - unset or empty: no default args
-  - non-empty value: parsed like `testArgs` and prepended before tool-provided args
-  - merge order: `LORE_MCP_DEFAULT_TEST_ARGS` first, then `runTestSuite.testArgs`
-  - example: `LORE_MCP_DEFAULT_TEST_ARGS="--arg1 --arg2 4"` and `testArgs="--match \"some test name\""` forwards `["--arg1","--arg2","4","--match","some test name"]`
 
 Tool enable/disable variables (default enabled):
 

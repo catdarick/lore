@@ -9,8 +9,7 @@ import qualified GHC
 import qualified GHC.Utils.Outputable as Outputable
 import Lore.Diagnostics (Diagnostic (..))
 import Lore.Interpreter (executeStatement, getTypeOfExpression)
-import Lore.Logger (noLogHandle)
-import qualified Lore.Session as Session
+import Lore.Session (SessionConfig (..), defaultSessionConfig)
 import System.FilePath ((</>))
 import Test.Hspec
 import TestSupport (fixtureLore, fixtureLoreAt, fixtureLoreAtWithConfig, withFixtureCopy, withFixtureSpec)
@@ -105,16 +104,10 @@ spec =
 
           renderType ty `shouldBe` "[Char]"
 
-sessionConfigWithCustomPrelude :: Maybe T.Text -> Session.SessionConfig
+sessionConfigWithCustomPrelude :: Maybe T.Text -> SessionConfig
 sessionConfigWithCustomPrelude customPrelude =
-  Session.SessionConfig
-    { Session.projectRoot = ".",
-      Session.ghcWorkDir = ".lore-work",
-      Session.projectProviderOverride = Nothing,
-      Session.loggerHandle = noLogHandle,
-      Session.customPrelude = customPrelude,
-      Session.parallelWorkersLimit = Session.WorkersAsNumProcessors,
-      Session.isTestSuiteFunctionalityRequired = False
+  defaultSessionConfig
+    { customPrelude = customPrelude
     }
 
 renderType :: GHC.Type -> String
