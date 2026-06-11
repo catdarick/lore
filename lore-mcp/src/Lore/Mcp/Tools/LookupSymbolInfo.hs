@@ -25,9 +25,7 @@ import Lore.Tools.Result
 data LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
   { symbol ::
       Field fieldType Text
-        `WithMeta` '[ Description "Symbol name to look up. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
-                      Example "lookupOrZero",
-                      Example "Some.Module.someFunction"
+        `WithMeta` '[ Description "Symbol name to look up. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope. Important: if you are not sure about the exact module, omit the module qualification, do not try to guess. Examples: \"lookupOrZero\", \"Some.Module.someFunction\"."
                     ],
     skip ::
       Maybe (Field fieldType Int)

@@ -48,10 +48,12 @@ runLoreMcpServer :: IO ()
 runLoreMcpServer = do
   startupConfig <-
     loadStartupConfig >>= either failWithSessionConfigError pure
-  let baseTools =
-        getTools False False Nothing :: [SomeTool LoreMcpMonad]
-      knownToolNames =
-        Set.fromList (map getToolName baseTools)
+  let knownToolNames =
+        Set.fromList
+          ( map
+              getToolName
+              (getTools True True (Just "__known_tool_names__") :: [SomeTool LoreMcpMonad])
+          )
   yamlMcpOverrides <-
     either failWithMcpConfigError pure (parseMcpYamlConfig knownToolNames startupConfig.startupConfigDocument)
   environmentMcpOverrides <-
