@@ -23,7 +23,7 @@ data McpRequest
   | Ping
   | Notification McpRequest'Notification
   | Tools McpRequest'Tools
-  | OtherRequest Text
+  | OtherRequest Text (Maybe Value)
   deriving (Show, Eq)
 
 data McpRequest'Notification
@@ -54,7 +54,7 @@ parseMcpRequest JsonRpcRequest {jsonRpcMethod, jsonRpcParams} =
       | isNotification ->
           Right $ Notification (OtherNotification otherMethod)
     otherMethod ->
-      Right $ OtherRequest otherMethod
+      Right $ OtherRequest otherMethod jsonRpcParams
   where
     isNotification = "notifications/" `T.isPrefixOf` jsonRpcMethod
     withParams f = case jsonRpcParams of

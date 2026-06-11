@@ -3,6 +3,7 @@ module Lore.Mcp.Server
   )
 where
 
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Lore
@@ -22,6 +23,7 @@ import Lore.Mcp.Config
     toolEnabled,
   )
 import Lore.Mcp.Internal.Tool (SomeTool, getToolName)
+import Lore.Mcp.KnowledgeCacheRpc (knowledgeCacheRequestHandlers)
 import Lore.Mcp.Monad (LoreMcpMonad, newLoreMcpContext, runLoreMcp)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
 import Lore.Mcp.Tools.CreateTemporalModule (createTemporalModuleTool)
@@ -78,12 +80,17 @@ runLoreMcpServer = do
           mcpConfig.feedbackFilePath
       enabledTools =
         filterEnabledTools mcpConfig tools
+      customRequestHandlers =
+        if definitionKnowledgeCacheEnabled
+          then knowledgeCacheRequestHandlers
+          else Map.empty
   runLoreMcp sessionConfig mcpContext do
     runMcpServer
       McpServer
         { name = "lore",
           initialize = pure (),
           tools = enabledTools,
+          customRequestHandlers,
           renderer = renderLoreDocMarkdown
         }
   where

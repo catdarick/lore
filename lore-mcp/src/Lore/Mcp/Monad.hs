@@ -2,15 +2,18 @@
 
 module Lore.Mcp.Monad
   ( MonadLoreMcp (..),
+    DefinitionCacheReplacement (..),
     LoreMcpContext (..),
     LoreMcpMonad (..),
+    getSentDefinitionHashes,
     newLoreMcpContext,
+    replaceSentDefinitionHashes,
     runLoreMcp,
     clearSentDefinitionHashes,
   )
 where
 
-import Control.Concurrent.MVar (MVar, modifyMVar, newMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, readMVar)
 import Control.Monad.Catch (MonadCatch, MonadMask, MonadThrow)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (MonadReader (..), MonadTrans (lift), ReaderT (runReaderT))
@@ -28,6 +31,12 @@ data LoreMcpContext = LoreMcpContext
   { sentDefinitionHashes :: MVar (Set.Set Text),
     enableDefinitionKnowledgeCache :: Bool
   }
+
+data DefinitionCacheReplacement = DefinitionCacheReplacement
+  { previousCachedDefinitionCount :: Int,
+    currentCachedDefinitionCount :: Int
+  }
+  deriving (Eq, Show)
 
 newLoreMcpContext :: Bool -> IO LoreMcpContext
 newLoreMcpContext enableDefinitionKnowledgeCache = do
@@ -49,9 +58,25 @@ runLoreMcp :: SessionConfig -> LoreMcpContext -> LoreMcpMonad a -> IO a
 runLoreMcp loreConfig context (LoreMcpMonad action) = do
   runReaderT (runLore loreConfig action) context
 
-clearSentDefinitionHashes :: (MonadLoreMcp m) => m Int
-clearSentDefinitionHashes = do
+getSentDefinitionHashes :: (MonadLoreMcp m) => m (Set.Set Text)
+getSentDefinitionHashes = do
+  cache <- sentDefinitionHashes <$> getLoreMcpContext
+  liftIO (readMVar cache)
+
+replaceSentDefinitionHashes :: (MonadLoreMcp m) => Set.Set Text -> m DefinitionCacheReplacement
+replaceSentDefinitionHashes newHashes = do
   cache <- sentDefinitionHashes <$> getLoreMcpContext
   liftIO $
-    modifyMVar cache \knownHashes ->
-      pure (Set.empty, Set.size knownHashes)
+    modifyMVar cache \oldHashes ->
+      pure
+        ( newHashes,
+          DefinitionCacheReplacement
+            { previousCachedDefinitionCount = Set.size oldHashes,
+              currentCachedDefinitionCount = Set.size newHashes
+            }
+        )
+
+clearSentDefinitionHashes :: (MonadLoreMcp m) => m Int
+clearSentDefinitionHashes = do
+  replacement <- replaceSentDefinitionHashes Set.empty
+  pure replacement.previousCachedDefinitionCount

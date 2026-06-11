@@ -1,5 +1,9 @@
 module Lore.Mcp.Protocol.Server
-  ( McpServer (..),
+  ( CustomRequestHandler (..),
+    McpServer (..),
+    McpServerState,
+    handleMcpRequest,
+    initialMcpServerState,
     runMcpServer,
   )
 where
@@ -12,6 +16,8 @@ import Data.Bifunctor (first)
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Lore.JsonRpc.Server
@@ -36,10 +42,15 @@ initialMcpServerState = do
   ref <- newIORef False
   pure $ McpServerState {mcpServerInitialized = ref}
 
+newtype CustomRequestHandler m = CustomRequestHandler
+  { runCustomRequestHandler :: Maybe Value -> m (Either JsonRpcError Value)
+  }
+
 data McpServer m = McpServer
   { name :: Text,
     initialize :: m (),
     tools :: [SomeTool m],
+    customRequestHandlers :: Map Text (CustomRequestHandler m),
     renderer :: LoreDoc -> Text
   }
 
@@ -92,8 +103,8 @@ handleMcpRequest state server mcpRequest = case mcpRequest of
       case eiOutput of
         Left err -> pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32602, jsonRpcErrorMessage = err}
         Right output -> pure $ JsonRpcResult (toolCallResult output)
-  OtherRequest method ->
-    pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32601, jsonRpcErrorMessage = "method not found: " <> method}
+  OtherRequest method params ->
+    withInitializedServer (handleCustomRequest method params)
   where
     withInitializedServer action = do
       isServerInitialized <- liftIO $ readIORef state.mcpServerInitialized
@@ -112,6 +123,20 @@ handleMcpRequest state server mcpRequest = case mcpRequest of
         let rendered = server.renderer (toLoreDoc output)
         _ <- liftIO (evaluate (T.length rendered))
         pure rendered
+    handleCustomRequest method params =
+      case Map.lookup method server.customRequestHandlers of
+        Nothing ->
+          pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32601, jsonRpcErrorMessage = "method not found: " <> method}
+        Just customHandler -> do
+          customResult <-
+            try @_ @SomeException (runCustomRequestHandler customHandler params)
+          case customResult of
+            Left exception ->
+              pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32603, jsonRpcErrorMessage = "internal error: " <> T.pack (show exception)}
+            Right (Left jsonRpcError) ->
+              pure $ JsonRpcErrorResponse jsonRpcError
+            Right (Right value) ->
+              pure $ JsonRpcResult value
 
 initializeResult :: Text -> Value
 initializeResult serverName =

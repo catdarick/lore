@@ -33,16 +33,19 @@ data JsonRpcRequest = JsonRpcRequest
     jsonRpcParams :: Maybe Value,
     jsonRpcExpectsResponse :: Bool
   }
+  deriving (Eq, Show)
 
 data JsonRpcResponse
   = JsonRpcResult Value
   | JsonRpcErrorResponse JsonRpcError
   | JsonRpcNoResponse
+  deriving (Eq, Show)
 
 data JsonRpcError = JsonRpcError
   { jsonRpcErrorCode :: Int,
     jsonRpcErrorMessage :: Text
   }
+  deriving (Eq, Show)
 
 data JsonRpcHandlerResult = JsonRpcHandlerResult
   { jsonRpcHandlerResponse :: JsonRpcResponse,

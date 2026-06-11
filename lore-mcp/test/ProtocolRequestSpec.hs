@@ -4,6 +4,7 @@ module ProtocolRequestSpec
 where
 
 import Data.Aeson (Value, object, (.=))
+import qualified Data.Aeson as J
 import Data.Text (Text)
 import Lore.JsonRpc.Server (JsonRpcRequest (..))
 import Lore.Mcp.Protocol.Request
@@ -61,7 +62,24 @@ spec = do
 
     it "routes unknown methods to OtherRequest" do
       parseMcpRequest (request "custom/method" (Just (object [])))
-        `shouldBe` Right (OtherRequest "custom/method")
+        `shouldBe` Right (OtherRequest "custom/method" (Just (object [])))
+
+    it "preserves object params for unknown requests" do
+      let params = object ["hashes" .= ["abc" :: String]]
+      parseMcpRequest (request "custom/object" (Just params))
+        `shouldBe` Right (OtherRequest "custom/object" (Just params))
+
+    it "preserves scalar and array params for unknown requests" do
+      let scalarParams = J.toJSON (123 :: Int)
+          arrayParams = J.toJSON ["a" :: String, "b"]
+      parseMcpRequest (request "custom/scalar" (Just scalarParams))
+        `shouldBe` Right (OtherRequest "custom/scalar" (Just scalarParams))
+      parseMcpRequest (request "custom/array" (Just arrayParams))
+        `shouldBe` Right (OtherRequest "custom/array" (Just arrayParams))
+
+    it "preserves omitted params as Nothing for unknown requests" do
+      parseMcpRequest (request "custom/no-params" Nothing)
+        `shouldBe` Right (OtherRequest "custom/no-params" Nothing)
 
 request :: Text -> Maybe Value -> JsonRpcRequest
 request method params =

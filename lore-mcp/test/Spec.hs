@@ -9,10 +9,13 @@ import qualified DiscoverProjectSpec
 import qualified FindDeadCodeSpec
 import qualified FindReferencesSpec
 import qualified GetDefinitionSpec
+import qualified KnowledgeCacheRpcSpec
 import qualified LookupInstancesSpec
 import qualified LoreDocMarkdownSpec
 import qualified McpConfigSpec
+import qualified McpMonadSpec
 import qualified ProtocolRequestSpec
+import qualified ProtocolServerSpec
 import qualified ReloadHomeModulesSpec
 import qualified ResolveInstanceSpec
 import qualified RunTestSuiteSpec
@@ -31,6 +34,7 @@ main =
     FindReferencesSpec.spec
     LoreDocMarkdownSpec.spec
     McpConfigSpec.spec
+    McpMonadSpec.spec
     LookupInstancesSpec.spec
     SearchSymbolsSpec.spec
     ResolveInstanceSpec.spec
@@ -38,3 +42,5 @@ main =
     ReloadHomeModulesSpec.spec
     RunTestSuiteSpec.spec
     ProtocolRequestSpec.spec
+    ProtocolServerSpec.spec
+    KnowledgeCacheRpcSpec.spec

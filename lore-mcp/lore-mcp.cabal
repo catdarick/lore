@@ -25,6 +25,7 @@ library
       Lore.Mcp.Config
       Lore.Mcp.Internal.Annotated
       Lore.Mcp.Internal.Tool
+      Lore.Mcp.KnowledgeCacheRpc
       Lore.Mcp.Monad
       Lore.Mcp.Protocol.Request
       Lore.Mcp.Protocol.Server
@@ -201,11 +202,14 @@ test-suite lore-mcp-test
       FindDeadCodeSpec
       FindReferencesSpec
       GetDefinitionSpec
+      KnowledgeCacheRpcSpec
       LookupInstancesSpec
       LoreDocMarkdownSpec
       McpConfigSpec
+      McpMonadSpec
       McpTestSupport
       ProtocolRequestSpec
+      ProtocolServerSpec
       ReloadHomeModulesSpec
       ResolveInstanceSpec
       RunTestSuiteSpec

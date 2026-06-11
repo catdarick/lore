@@ -1,0 +1,167 @@
+module ProtocolServerSpec
+  ( spec,
+  )
+where
+
+import Control.Exception (throwIO)
+import Data.Aeson (object, (.=))
+import qualified Data.Aeson as J
+import qualified Data.Aeson.KeyMap as KM
+import Data.IORef (newIORef, readIORef, writeIORef)
+import qualified Data.Map.Strict as Map
+import Data.Text (Text)
+import qualified Data.Vector as V
+import Lore.JsonRpc.Server (JsonRpcError (..), JsonRpcResponse (..))
+import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Tools (..))
+import Lore.Mcp.Protocol.Server
+  ( CustomRequestHandler (..),
+    McpServer (..),
+    handleMcpRequest,
+    initialMcpServerState,
+  )
+import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
+import Test.Hspec
+
+spec :: Spec
+spec =
+  describe "custom JSON-RPC request dispatch" do
+    it "calls a registered custom handler" do
+      calledRef <- newIORef False
+      let server =
+            testServer
+              ( Map.fromList
+                  [ ( "custom/ping",
+                      CustomRequestHandler $ \_ -> do
+                        writeIORef calledRef True
+                        pure (Right (object ["ok" .= True]))
+                    )
+                  ]
+              )
+      responses <- runRequests server [Initialize, OtherRequest "custom/ping" Nothing]
+
+      called <- readIORef calledRef
+      called `shouldBe` True
+      responses !! 1 `shouldBe` JsonRpcResult (object ["ok" .= True])
+
+    it "passes original params to the custom handler unchanged" do
+      paramsRef <- newIORef Nothing
+      let inputParams = Just (J.Array (V.fromList [J.Number 1, J.String "two"]))
+          server =
+            testServer
+              ( Map.fromList
+                  [ ( "custom/echoParams",
+                      CustomRequestHandler $ \params -> do
+                        writeIORef paramsRef (Just params)
+                        pure (Right J.Null)
+                    )
+                  ]
+              )
+      _ <- runRequests server [Initialize, OtherRequest "custom/echoParams" inputParams]
+
+      capturedParams <- readIORef paramsRef
+      capturedParams `shouldBe` Just inputParams
+
+    it "returns successful custom handler output as JsonRpcResult" do
+      let server =
+            testServer
+              ( Map.fromList
+                  [ ( "custom/result",
+                      CustomRequestHandler $ \_ ->
+                        pure (Right (J.String "done"))
+                    )
+                  ]
+              )
+      responses <- runRequests server [Initialize, OtherRequest "custom/result" Nothing]
+
+      responses !! 1 `shouldBe` JsonRpcResult (J.String "done")
+
+    it "converts handler-reported errors into JsonRpcErrorResponse" do
+      let reportedError =
+            JsonRpcError
+              { jsonRpcErrorCode = -32602,
+                jsonRpcErrorMessage = "bad input"
+              }
+          server =
+            testServer
+              ( Map.fromList
+                  [ ( "custom/fail",
+                      CustomRequestHandler $ \_ ->
+                        pure (Left reportedError)
+                    )
+                  ]
+              )
+      responses <- runRequests server [Initialize, OtherRequest "custom/fail" Nothing]
+
+      responses !! 1 `shouldBe` JsonRpcErrorResponse reportedError
+
+    it "returns method not found for unknown custom methods" do
+      let server = testServer Map.empty
+      responses <- runRequests server [Initialize, OtherRequest "custom/missing" Nothing]
+
+      responses !! 1
+        `shouldBe` JsonRpcErrorResponse
+          JsonRpcError
+            { jsonRpcErrorCode = -32601,
+              jsonRpcErrorMessage = "method not found: custom/missing"
+            }
+
+    it "requires initialization for custom requests" do
+      let server = testServer Map.empty
+      responses <- runRequests server [OtherRequest "custom/method" Nothing]
+
+      responses !! 0
+        `shouldBe` JsonRpcErrorResponse
+          JsonRpcError
+            { jsonRpcErrorCode = -32002,
+              jsonRpcErrorMessage = "server not initialized"
+            }
+
+    it "returns internal error when a custom handler throws unexpectedly" do
+      let server =
+            testServer
+              ( Map.fromList
+                  [ ( "custom/boom",
+                      CustomRequestHandler $ \_ -> do
+                        throwIO (userError "boom")
+                    )
+                  ]
+              )
+      responses <- runRequests server [Initialize, OtherRequest "custom/boom" Nothing]
+
+      case responses !! 1 of
+        JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode} ->
+          jsonRpcErrorCode `shouldBe` -32603
+        otherResponse ->
+          expectationFailure ("expected JsonRpcErrorResponse, got: " <> show otherResponse)
+
+    it "keeps custom methods out of tools/list" do
+      let server =
+            testServer
+              ( Map.fromList
+                  [ ( "lore/knowledge/getCachedDefinitions",
+                      CustomRequestHandler $ \_ -> pure (Right J.Null)
+                    )
+                  ]
+              )
+      responses <- runRequests server [Initialize, Tools ToolsList]
+
+      case responses !! 1 of
+        JsonRpcResult (J.Object obj) ->
+          KM.lookup "tools" obj `shouldBe` Just (J.Array V.empty)
+        otherResponse ->
+          expectationFailure ("expected JsonRpcResult object, got: " <> show otherResponse)
+
+runRequests :: McpServer IO -> [McpRequest] -> IO [JsonRpcResponse]
+runRequests server requests = do
+  state <- initialMcpServerState
+  mapM (handleMcpRequest state server) requests
+
+testServer :: Map.Map Text (CustomRequestHandler IO) -> McpServer IO
+testServer customRequestHandlers =
+  McpServer
+    { name = "test",
+      initialize = pure (),
+      tools = [],
+      customRequestHandlers,
+      renderer = renderLoreDocMarkdown
+    }
