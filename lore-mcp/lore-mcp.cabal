@@ -30,6 +30,7 @@ library
       Lore.Mcp.Protocol.Request
       Lore.Mcp.Protocol.Server
       Lore.Mcp.Server
+      Lore.Mcp.StructuredToolRpc
       Lore.Mcp.Tools.CreateTemporalModule
       Lore.Mcp.Tools.DiscoverDirectory
       Lore.Mcp.Tools.DiscoverProject
@@ -212,8 +213,10 @@ test-suite lore-mcp-test
       ProtocolServerSpec
       ReloadHomeModulesSpec
       ResolveInstanceSpec
+      RunTestSuiteOutcomeSpec
       RunTestSuiteSpec
       SearchSymbolsSpec
+      StructuredToolRpcSpec
       ToolBlockedSpec
       Paths_lore_mcp
   autogen-modules:

@@ -18,8 +18,10 @@ import qualified ProtocolRequestSpec
 import qualified ProtocolServerSpec
 import qualified ReloadHomeModulesSpec
 import qualified ResolveInstanceSpec
+import qualified RunTestSuiteOutcomeSpec
 import qualified RunTestSuiteSpec
 import qualified SearchSymbolsSpec
+import qualified StructuredToolRpcSpec
 import Test.Hspec
 import qualified ToolBlockedSpec
 
@@ -41,6 +43,8 @@ main =
     ToolBlockedSpec.spec
     ReloadHomeModulesSpec.spec
     RunTestSuiteSpec.spec
+    RunTestSuiteOutcomeSpec.spec
     ProtocolRequestSpec.spec
     ProtocolServerSpec.spec
+    StructuredToolRpcSpec.spec
     KnowledgeCacheRpcSpec.spec

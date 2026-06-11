@@ -1,6 +1,14 @@
 module Lore.Tools.RunTestSuite
   ( RunTestSuiteToolOptions (..),
+    RunTestSuiteOutcome (..),
+    RunTestSuiteExecution (..),
+    RunTestSuiteStatus (..),
+    RunTestSuiteExecutionStatus (..),
+    RunTestSuiteExecutionSummary (..),
     runTestSuite,
+    runTestSuiteStatus,
+    runTestSuiteExecutionStatus,
+    runTestSuiteExecutionSummary,
   )
 where
 
@@ -12,7 +20,7 @@ import Lore
     MonadLore,
     RunTestSuiteOptions (..),
     RunTestSuiteResult (..),
-    TestArgumentsParseError (..),
+    TestArgumentsParseError,
     TestSuiteComponentResult (..),
     TestSuiteComponentStatus (..),
     parseTestArguments,
@@ -21,9 +29,11 @@ import Lore
 import qualified Lore as Core
 import Lore.Tools.ReloadHomeModules (renderReloadHomeModulesResult)
 import Lore.Tools.Render.Diagnostics (diagnosticSummaryWithHintsDoc)
-import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc), heading2, paragraph)
+import Lore.Tools.Render.Doc (LoreDoc, heading2, paragraph)
 import Lore.Tools.Result
-  ( ToolRun (..),
+  ( RenderedResult (..),
+    ToolBlocked (..),
+    ToolRun (..),
     withInterpreterSession,
   )
 
@@ -33,15 +43,51 @@ data RunTestSuiteToolOptions = RunTestSuiteToolOptions
   }
   deriving stock (Eq, Show)
 
-runTestSuite :: (MonadLore m) => RunTestSuiteToolOptions -> m (ToolRun LoreDoc)
+data RunTestSuiteOutcome
+  = RunTestSuiteCompilationFailed LoadHomeModulesResult
+  | RunTestSuiteInvalidArguments Text
+  | RunTestSuiteExecuted RunTestSuiteExecution
+  deriving stock (Eq, Show)
+
+data RunTestSuiteExecution = RunTestSuiteExecution
+  { runTestSuitePackageFilter :: Maybe Text,
+    runTestSuiteEffectiveArguments :: [String],
+    runTestSuiteComponents :: [TestSuiteComponentResult]
+  }
+  deriving stock (Eq, Show)
+
+data RunTestSuiteExecutionSummary = RunTestSuiteExecutionSummary
+  { runTestSuiteTotalComponents :: Int,
+    runTestSuitePassedComponents :: Int,
+    runTestSuiteSetupFailures :: Int,
+    runTestSuiteExecutionFailures :: Int
+  }
+  deriving stock (Eq, Show)
+
+data RunTestSuiteExecutionStatus
+  = RunTestSuiteExecutionNoTests
+  | RunTestSuiteExecutionPassed
+  | RunTestSuiteExecutionFailed
+  deriving stock (Eq, Show)
+
+data RunTestSuiteStatus
+  = RunTestSuiteStatusCompilationFailure
+  | RunTestSuiteStatusInvalidArguments
+  | RunTestSuiteStatusNoTests
+  | RunTestSuiteStatusTestsPassed
+  | RunTestSuiteStatusTestsFailed
+  | RunTestSuiteStatusBlocked
+  deriving stock (Eq, Show)
+
+runTestSuite :: (MonadLore m) => RunTestSuiteToolOptions -> m (ToolRun (RenderedResult RunTestSuiteOutcome))
 runTestSuite options = do
   loadResult <- Core.loadHomeModules LoadHomeModulesOptions {enableAutoRefactor = True}
   if not loadResult.loadHomeModulesSucceeded
-    then ToolRunReady <$> renderReloadHomeModulesResult loadResult
-    else withInterpreterSession \_ -> do
+    then ToolRunReady <$> renderCompilationFailure loadResult
+    else withInterpreterSession \_ ->
       case traverse parseTestArguments options.runTestSuiteRawArgs of
         Left parseError ->
-          pure (renderParseError parseError)
+          pure (renderInvalidArguments parseError)
         Right maybeParsedArgs -> do
           result <-
             Core.runTestSuite
@@ -50,56 +96,122 @@ runTestSuite options = do
                   testArguments = maybe [] id maybeParsedArgs
                 }
           pure $
-            toLoreDoc
-              RunTestSuiteOutput
+            renderExecuted
+              RunTestSuiteExecution
                 { runTestSuitePackageFilter = options.runTestSuitePackageFilter,
-                  runTestSuiteForwardedArgs = result.runTestSuiteEffectiveArguments,
+                  runTestSuiteEffectiveArguments = result.runTestSuiteEffectiveArguments,
                   runTestSuiteComponents = result.runTestSuiteComponentResults
                 }
 
-renderParseError :: TestArgumentsParseError -> LoreDoc
-renderParseError parseError =
-  paragraph ("Invalid testArgs: " <> renderTestArgumentsParseError parseError <> ".")
+runTestSuiteStatus :: ToolRun (RenderedResult RunTestSuiteOutcome) -> RunTestSuiteStatus
+runTestSuiteStatus = \case
+  ToolRunBlocked InterpreterContextNotReady ->
+    RunTestSuiteStatusBlocked
+  ToolRunReady renderedResult ->
+    case renderedResult.renderedResultValue of
+      RunTestSuiteCompilationFailed {} ->
+        RunTestSuiteStatusCompilationFailure
+      RunTestSuiteInvalidArguments {} ->
+        RunTestSuiteStatusInvalidArguments
+      RunTestSuiteExecuted execution ->
+        case runTestSuiteExecutionStatus execution of
+          RunTestSuiteExecutionNoTests ->
+            RunTestSuiteStatusNoTests
+          RunTestSuiteExecutionPassed ->
+            RunTestSuiteStatusTestsPassed
+          RunTestSuiteExecutionFailed ->
+            RunTestSuiteStatusTestsFailed
 
-data RunTestSuiteOutput = RunTestSuiteOutput
-  { runTestSuitePackageFilter :: Maybe Text,
-    runTestSuiteForwardedArgs :: [String],
-    runTestSuiteComponents :: [TestSuiteComponentResult]
-  }
+runTestSuiteExecutionStatus :: RunTestSuiteExecution -> RunTestSuiteExecutionStatus
+runTestSuiteExecutionStatus execution
+  | summary.runTestSuiteTotalComponents == 0 =
+      RunTestSuiteExecutionNoTests
+  | summary.runTestSuiteSetupFailures > 0 || summary.runTestSuiteExecutionFailures > 0 =
+      RunTestSuiteExecutionFailed
+  | otherwise =
+      RunTestSuiteExecutionPassed
+  where
+    summary = runTestSuiteExecutionSummary execution
 
-instance ToLoreDoc RunTestSuiteOutput where
-  toLoreDoc output =
-    case output.runTestSuiteComponents of
-      [] ->
-        paragraph $
-          "No test components found"
-            <> packageFilterSuffix output.runTestSuitePackageFilter
-            <> "."
-      _ ->
-        paragraph (summaryLine output)
-          <> paragraph ("Forwarded arguments: " <> T.pack (show output.runTestSuiteForwardedArgs))
-          <> mconcat (map componentResultDoc output.runTestSuiteComponents)
+runTestSuiteExecutionSummary :: RunTestSuiteExecution -> RunTestSuiteExecutionSummary
+runTestSuiteExecutionSummary execution =
+  RunTestSuiteExecutionSummary
+    { runTestSuiteTotalComponents = length execution.runTestSuiteComponents,
+      runTestSuitePassedComponents =
+        length
+          [ ()
+          | TestSuiteComponentResult
+              { status = TestSuiteComponentExecutionSuccess _
+              } <-
+              execution.runTestSuiteComponents
+          ],
+      runTestSuiteSetupFailures =
+        length
+          [ ()
+          | TestSuiteComponentResult
+              { status = TestSuiteComponentSetupFailure _
+              } <-
+              execution.runTestSuiteComponents
+          ],
+      runTestSuiteExecutionFailures =
+        length
+          [ ()
+          | TestSuiteComponentResult
+              { status = TestSuiteComponentExecutionFailure _
+              } <-
+              execution.runTestSuiteComponents
+          ]
+    }
 
-summaryLine :: RunTestSuiteOutput -> Text
-summaryLine output =
+renderCompilationFailure :: (MonadLore m) => LoadHomeModulesResult -> m (RenderedResult RunTestSuiteOutcome)
+renderCompilationFailure loadResult = do
+  loreDoc <- renderReloadHomeModulesResult loadResult
+  pure
+    RenderedResult
+      { renderedResultValue = RunTestSuiteCompilationFailed loadResult,
+        renderedResultDocument = loreDoc
+      }
+
+renderInvalidArguments :: TestArgumentsParseError -> RenderedResult RunTestSuiteOutcome
+renderInvalidArguments parseError =
+  let message = renderTestArgumentsParseError parseError
+   in RenderedResult
+        { renderedResultValue = RunTestSuiteInvalidArguments message,
+          renderedResultDocument = paragraph ("Invalid testArgs: " <> message <> ".")
+        }
+
+renderExecuted :: RunTestSuiteExecution -> RenderedResult RunTestSuiteOutcome
+renderExecuted execution =
+  RenderedResult
+    { renderedResultValue = RunTestSuiteExecuted execution,
+      renderedResultDocument =
+        case execution.runTestSuiteComponents of
+          [] ->
+            paragraph $
+              "No test components found"
+                <> packageFilterSuffix execution.runTestSuitePackageFilter
+                <> "."
+          _ ->
+            paragraph (summaryLine execution)
+              <> paragraph ("Forwarded arguments: " <> T.pack (show execution.runTestSuiteEffectiveArguments))
+              <> mconcat (map componentResultDoc execution.runTestSuiteComponents)
+    }
+
+summaryLine :: RunTestSuiteExecution -> Text
+summaryLine execution =
   "Executed "
-    <> T.pack (show (length output.runTestSuiteComponents))
+    <> T.pack (show summary.runTestSuiteTotalComponents)
     <> " test components"
-    <> packageFilterSuffix output.runTestSuitePackageFilter
+    <> packageFilterSuffix execution.runTestSuitePackageFilter
     <> ". Successes: "
-    <> T.pack (show successCount)
+    <> T.pack (show summary.runTestSuitePassedComponents)
     <> ", execution failures: "
-    <> T.pack (show executionFailureCount)
+    <> T.pack (show summary.runTestSuiteExecutionFailures)
     <> ", setup failures: "
-    <> T.pack (show setupFailureCount)
+    <> T.pack (show summary.runTestSuiteSetupFailures)
     <> "."
   where
-    successCount =
-      length [() | TestSuiteComponentResult {status = TestSuiteComponentExecutionSuccess _} <- output.runTestSuiteComponents]
-    executionFailureCount =
-      length [() | TestSuiteComponentResult {status = TestSuiteComponentExecutionFailure _} <- output.runTestSuiteComponents]
-    setupFailureCount =
-      length [() | TestSuiteComponentResult {status = TestSuiteComponentSetupFailure _} <- output.runTestSuiteComponents]
+    summary = runTestSuiteExecutionSummary execution
 
 componentResultDoc :: TestSuiteComponentResult -> LoreDoc
 componentResultDoc TestSuiteComponentResult {packageName, componentName, moduleName, status} =

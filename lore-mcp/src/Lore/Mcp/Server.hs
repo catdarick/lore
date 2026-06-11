@@ -4,6 +4,7 @@ module Lore.Mcp.Server
 where
 
 import qualified Data.Map.Strict as Map
+import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Lore
@@ -26,6 +27,7 @@ import Lore.Mcp.Internal.Tool (SomeTool, getToolName)
 import Lore.Mcp.KnowledgeCacheRpc (knowledgeCacheRequestHandlers)
 import Lore.Mcp.Monad (LoreMcpMonad, newLoreMcpContext, runLoreMcp)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
+import Lore.Mcp.StructuredToolRpc (structuredToolRequestHandlers)
 import Lore.Mcp.Tools.CreateTemporalModule (createTemporalModuleTool)
 import Lore.Mcp.Tools.DiscoverDirectory (discoverDirectoryTool)
 import Lore.Mcp.Tools.DiscoverProject (discoverProjectTool)
@@ -81,9 +83,14 @@ runLoreMcpServer = do
       enabledTools =
         filterEnabledTools mcpConfig tools
       customRequestHandlers =
-        if definitionKnowledgeCacheEnabled
-          then knowledgeCacheRequestHandlers
-          else Map.empty
+        Map.unions
+          ( catMaybes
+              [ Just (structuredToolRequestHandlers enabledTools renderLoreDocMarkdown),
+                if definitionKnowledgeCacheEnabled
+                  then Just knowledgeCacheRequestHandlers
+                  else Nothing
+              ]
+          )
   runLoreMcp sessionConfig mcpContext do
     runMcpServer
       McpServer

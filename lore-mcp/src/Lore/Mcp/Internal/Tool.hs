@@ -35,15 +35,27 @@ data SomeTool m where
     (ToSchema (r 'MetadataType), J.FromJSON (r 'ValueType), ToLoreDoc output) =>
     ToolWithArgs m r output ->
     SomeTool m
+  SomeToolWithArgsStructured ::
+    (ToSchema (r 'MetadataType), J.FromJSON (r 'ValueType), ToLoreDoc output) =>
+    ToolWithArgs m r output ->
+    (r 'ValueType -> output -> J.Value) ->
+    SomeTool m
   SomeToolWithoutArgs ::
     (ToLoreDoc output) =>
     ToolWithoutArgs m output ->
+    SomeTool m
+  SomeToolWithoutArgsStructured ::
+    (ToLoreDoc output) =>
+    ToolWithoutArgs m output ->
+    (output -> J.Value) ->
     SomeTool m
 
 getToolName :: SomeTool m -> Text
 getToolName = \case
   SomeToolWithArgs tool -> tool.name
+  SomeToolWithArgsStructured tool _ -> tool.name
   SomeToolWithoutArgs tool -> tool.name
+  SomeToolWithoutArgsStructured tool _ -> tool.name
 
 renderToolRun :: (output -> LoreDoc) -> ToolRun output -> LoreDoc
 renderToolRun renderReady = \case
@@ -55,7 +67,9 @@ renderToolRun renderReady = \case
 getToolDescription :: SomeTool m -> Maybe Text
 getToolDescription = \case
   SomeToolWithArgs tool -> tool.description
+  SomeToolWithArgsStructured tool _ -> tool.description
   SomeToolWithoutArgs tool -> tool.description
+  SomeToolWithoutArgsStructured tool _ -> tool.description
 
 getSomeToolSpec :: SomeTool m -> J.Value
 getSomeToolSpec someTool =
@@ -71,7 +85,18 @@ getSomeToolSpec someTool =
           J.toJSON $
             moveFieldsAnnotationsIntoDescription $
               toInlinedSchema @(r 'MetadataType) Proxy
+      SomeToolWithArgsStructured (_tool :: ToolWithArgs m r output) _ ->
+        openApiNullableToJsonSchemaNullable $
+          J.toJSON $
+            moveFieldsAnnotationsIntoDescription $
+              toInlinedSchema @(r 'MetadataType) Proxy
       SomeToolWithoutArgs _ ->
+        J.object
+          [ "type" J..= ("object" :: Text),
+            "properties" J..= J.object [],
+            "additionalProperties" J..= False
+          ]
+      SomeToolWithoutArgsStructured _ _ ->
         J.object
           [ "type" J..= ("object" :: Text),
             "properties" J..= J.object [],

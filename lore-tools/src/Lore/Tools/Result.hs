@@ -1,5 +1,6 @@
 module Lore.Tools.Result
   ( ToolRun (..),
+    RenderedResult (..),
     ToolBlocked (..),
     ResultLimit (..),
     PageRequest (..),
@@ -36,6 +37,11 @@ import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc), paragraph)
 data ToolRun a
   = ToolRunBlocked ToolBlocked
   | ToolRunReady a
+
+data RenderedResult a = RenderedResult
+  { renderedResultValue :: a,
+    renderedResultDocument :: LoreDoc
+  }
 
 data ToolBlocked
   = InterpreterContextNotReady
@@ -97,6 +103,10 @@ instance (ToLoreDoc a) => ToLoreDoc (ToolRun a) where
       toLoreDoc blocked
     ToolRunReady value ->
       toLoreDoc value
+
+instance ToLoreDoc (RenderedResult a) where
+  toLoreDoc renderedResult =
+    renderedResult.renderedResultDocument
 
 instance ToLoreDoc ToolBlocked where
   toLoreDoc = \case

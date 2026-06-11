@@ -3,6 +3,7 @@ module Lore.Tools.Cli.Tools.Reload
   )
 where
 
+import Lore (LoadHomeModulesResult (..))
 import Lore.Tools.Cli.Internal.Annotated (CliArgs)
 import Lore.Tools.Cli.Internal.Tool
   ( CliInvocationResult (..),
@@ -12,7 +13,7 @@ import Lore.Tools.Cli.Internal.Tool
     defaultSessionRequirements,
   )
 import Lore.Tools.Cli.Tools.Common (limitArg, offsetArg)
-import Lore.Tools.Result (PageRequest (..), ResultLimit)
+import Lore.Tools.Result (PageRequest (..), RenderedResult (..), ResultLimit)
 import qualified Lore.Tools.ReloadHomeModules as ReloadHomeModules
 
 data ReloadArgs = ReloadArgs
@@ -44,17 +45,19 @@ reloadArgs =
 
 runReload :: ReloadArgs -> LoreCliM CliInvocationResult
 runReload args = do
-  (succeeded, loreDoc) <-
-    ReloadHomeModules.reloadHomeModulesWithResult
+  result <-
+    ReloadHomeModules.reloadHomeModules
       ReloadHomeModules.ReloadHomeModulesOptions
         { reloadHomeModulesDiagnosticsPageRequest =
             Just (PageRequest args.reloadOffset args.reloadLimit)
         }
+  let loadResult = result.renderedResultValue
+      loreDoc = result.renderedResultDocument
   pure
     CliInvocationResult
       { cliInvocationResultDoc = loreDoc,
         cliInvocationResultStatus =
-          if succeeded
+          if loadResult.loadHomeModulesSucceeded
             then CliInvocationSucceeded
             else CliInvocationFailed
       }

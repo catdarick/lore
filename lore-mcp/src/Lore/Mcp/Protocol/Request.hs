@@ -3,6 +3,7 @@
 
 module Lore.Mcp.Protocol.Request
   ( parseMcpRequest,
+    parseToolCallParams,
     McpRequest (..),
     McpRequest'Notification (..),
     McpRequest'Tools (..),
@@ -46,7 +47,7 @@ parseMcpRequest JsonRpcRequest {jsonRpcMethod, jsonRpcParams} =
     "tools/list" ->
       Right $ Tools ToolsList
     "tools/call" -> withParams $ \params -> do
-      (name, args) <- parseToolsCall params
+      (name, args) <- parseToolCallParams "tools/call" params
       Right $ Tools (ToolsCall name args)
     "notifications/initialized" ->
       Right $ Notification Initialized
@@ -61,13 +62,13 @@ parseMcpRequest JsonRpcRequest {jsonRpcMethod, jsonRpcParams} =
       Nothing -> Left $ "method " <> jsonRpcMethod <> " requires params"
       Just params -> f params
 
-    parseToolsCall :: Value -> Either Text (Text, Maybe Value)
-    parseToolsCall (J.Object obj) = do
-      name <- case KM.lookup "name" obj of
-        Just (J.String t) -> Right t
-        Just _ -> Left "tools/call.params.name must be a string"
-        Nothing -> Left "tools/call.params.name is missing"
-      let args = KM.lookup "arguments" obj
-      Right (name, args)
-    parseToolsCall _ =
-      Left "tools/call params must be an object"
+parseToolCallParams :: Text -> Value -> Either Text (Text, Maybe Value)
+parseToolCallParams methodName (J.Object obj) = do
+  name <- case KM.lookup "name" obj of
+    Just (J.String t) -> Right t
+    Just _ -> Left (methodName <> ".params.name must be a string")
+    Nothing -> Left (methodName <> ".params.name is missing")
+  let args = KM.lookup "arguments" obj
+  Right (name, args)
+parseToolCallParams methodName _ =
+  Left (methodName <> " params must be an object")

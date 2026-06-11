@@ -3,13 +3,45 @@ module ReloadHomeModulesSpec
   )
 where
 
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.Set as Set
 import qualified Data.Text as T
+import qualified Data.Vector as V
+import GHC.Generics (Generic)
+import Lore (LoadHomeModulesResult (..))
+import Lore.JsonRpc.Server (JsonRpcResponse (..))
+import Lore.Mcp.Monad (LoreMcpMonad)
+import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Tools (..))
+import Lore.Mcp.Protocol.Server (McpServer (..), handleMcpRequest, initialMcpServerState)
+import Lore.Mcp.StructuredToolRpc (structuredToolRequestHandlers)
 import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
-import qualified Lore.Tools.ReloadHomeModules as ToolsReload
+import Lore.Tools.ReloadHomeModules
+  ( ReloadHomeModulesOptions (..),
+    ReloadHomeModulesStatus (..),
+    reloadHomeModules,
+    reloadHomeModulesStatus,
+    renderReloadHomeModulesResult,
+    truncateDiagnosticMessage,
+  )
+import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
+import Lore.Tools.Result (RenderedResult (..))
 import McpTestSupport (callToolWithArgs, fixtureLoreMcpAtWithCache, withFixtureCopy)
 import System.FilePath ((</>))
 import Test.Hspec
+
+data ReloadStructuredContent = ReloadStructuredContent
+  { status :: T.Text,
+    loadedModules :: Int,
+    failedModules :: Int,
+    totalModules :: Int,
+    autofixedModules :: Int,
+    autofixedFiles :: [FilePath]
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance J.FromJSON ReloadStructuredContent
 
 spec :: Spec
 spec =
@@ -60,8 +92,110 @@ spec =
 
     it "truncates diagnostic message text over 700 symbols" do
       let longMessage = T.replicate 1200 "x"
-          truncatedMessage = ToolsReload.truncateDiagnosticMessage longMessage
+          truncatedMessage = truncateDiagnosticMessage longMessage
       T.length truncatedMessage `shouldBe` 700
+
+    it "returns structured producer data for successful reloads and keeps Markdown unchanged" do
+      withFixtureCopy \fixtureRoot -> do
+        (status, loadedModules, failedModules, totalModules, renderedMarkdown, rerenderedMarkdown) <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            renderedResult <-
+              reloadHomeModules
+                ReloadHomeModulesOptions
+                  { reloadHomeModulesDiagnosticsPageRequest = Nothing
+                  }
+            let loadResult = renderedResultValue renderedResult
+                renderedDoc = renderedResultDocument renderedResult
+            rerendered <- renderReloadHomeModulesResult loadResult
+            pure
+              ( reloadHomeModulesStatus loadResult,
+                loadHomeModulesLoaded loadResult,
+                loadHomeModulesFailed loadResult,
+                loadHomeModulesTotal loadResult,
+                renderLoreDocMarkdown renderedDoc,
+                renderLoreDocMarkdown rerendered
+              )
+
+        status `shouldBe` ReloadHomeModulesStatusSuccess
+        loadedModules + failedModules `shouldBe` totalModules
+        renderedMarkdown `shouldBe` rerenderedMarkdown
+
+    it "returns structured producer data for compilation failures" do
+      withFixtureCopy \fixtureRoot -> do
+        writeBrokenModule fixtureRoot 999
+
+        (status, failedModules) <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            renderedResult <-
+              reloadHomeModules
+                ReloadHomeModulesOptions
+                  { reloadHomeModulesDiagnosticsPageRequest = Nothing
+                  }
+            let loadResult = renderedResultValue renderedResult
+            pure
+              ( reloadHomeModulesStatus loadResult,
+                loadHomeModulesFailed loadResult
+              )
+
+        status `shouldBe` ReloadHomeModulesStatusCompilationFailure
+        failedModules `shouldSatisfy` (> 0)
+
+    it "preserves autofix file information in the structured producer result" do
+      withFixtureCopy \fixtureRoot -> do
+        writeFile
+          (fixtureRoot </> "src" </> "AutoFixUnusedImport.hs")
+          ( unlines
+              [ "module AutoFixUnusedImport where",
+                "",
+                "import Data.List (nub)",
+                "",
+                "values :: [Int]",
+                "values = [1, 2, 3]"
+              ]
+          )
+
+        (autofixedCount, autofixedFiles, summaryFiles) <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            renderedResult <-
+              reloadHomeModules
+                ReloadHomeModulesOptions
+                  { reloadHomeModulesDiagnosticsPageRequest = Nothing
+                  }
+            let loadResult = renderedResultValue renderedResult
+            pure
+              ( loadHomeModulesAutofixed loadResult,
+                loadHomeModulesAutofixedFiles loadResult,
+                map fst (loadHomeModulesAutofixSummaryByFile loadResult)
+              )
+
+        autofixedCount `shouldBe` length autofixedFiles
+        Set.fromList autofixedFiles `shouldBe` Set.fromList summaryFiles
+
+    it "returns private structured status for successful reloads and preserves public Markdown" do
+      withFixtureCopy \fixtureRoot -> do
+        (publicMarkdown, privateMarkdown, structuredContent) <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            (publicResponse, privateResponse) <- runReloadPublicAndStructuredCall
+            publicMarkdown <- liftIO (extractContentText publicResponse)
+            privateMarkdown <- liftIO (extractContentText privateResponse)
+            structuredContent <- liftIO (decodeStructuredReload privateResponse)
+            pure (publicMarkdown, privateMarkdown, structuredContent)
+
+        publicMarkdown `shouldBe` privateMarkdown
+        structuredContent.status `shouldBe` "success"
+        structuredContent.loadedModules + structuredContent.failedModules `shouldBe` structuredContent.totalModules
+
+    it "returns private structured compilation-failure status for failed reloads" do
+      withFixtureCopy \fixtureRoot -> do
+        writeBrokenModule fixtureRoot 1000
+
+        structuredContent <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            (_publicResponse, privateResponse) <- runReloadPublicAndStructuredCall
+            liftIO (decodeStructuredReload privateResponse)
+
+        structuredContent.status `shouldBe` "compilation-failure"
+        structuredContent.failedModules `shouldSatisfy` (> 0)
 
 shouldContainText :: T.Text -> T.Text -> Expectation
 shouldContainText actual expected =
@@ -97,3 +231,57 @@ writeBrokenModule fixtureRoot index =
           "brokenValue = \"oops\""
         ]
     )
+
+runReloadPublicAndStructuredCall :: LoreMcpMonad (JsonRpcResponse, JsonRpcResponse)
+runReloadPublicAndStructuredCall = do
+  state <- liftIO initialMcpServerState
+  let tools = [reloadHomeModulesTool]
+      server =
+        McpServer
+          { name = "test",
+            initialize = pure (),
+            tools,
+            customRequestHandlers = structuredToolRequestHandlers tools renderLoreDocMarkdown,
+            renderer = renderLoreDocMarkdown
+          }
+      args = J.object []
+  _ <- handleMcpRequest state server Initialize
+  publicResponse <- handleMcpRequest state server (Tools (ToolsCall "reloadHomeModules" (Just args)))
+  privateResponse <-
+    handleMcpRequest
+      state
+      server
+      (OtherRequest "lore/tools/callStructured" (Just (J.object ["name" J..= ("reloadHomeModules" :: String), "arguments" J..= args])))
+  pure (publicResponse, privateResponse)
+
+extractContentText :: JsonRpcResponse -> IO T.Text
+extractContentText response =
+  case response of
+    JsonRpcResult (J.Object obj) ->
+      case KM.lookup "content" obj of
+        Just (J.Array contentItems)
+          | Just (J.Object firstItem) <- contentItems V.!? 0,
+            Just (J.String textValue) <- KM.lookup "text" firstItem ->
+              pure textValue
+        _ ->
+          expectationFailure ("unexpected tool response payload: " <> show response) >> pure ""
+    _ ->
+      expectationFailure ("expected JsonRpcResult, got: " <> show response) >> pure ""
+
+decodeStructuredReload :: JsonRpcResponse -> IO ReloadStructuredContent
+decodeStructuredReload response =
+  case response of
+    JsonRpcResult (J.Object obj) ->
+      case KM.lookup "structuredContent" obj of
+        Just structuredValue ->
+          case J.fromJSON structuredValue of
+            J.Error err ->
+              expectationFailure ("failed to decode structuredContent: " <> err <> "\nResponse: " <> show response)
+                >> pure (ReloadStructuredContent "" 0 0 0 0 [])
+            J.Success decoded ->
+              pure decoded
+        Nothing ->
+          expectationFailure ("missing structuredContent field in response: " <> show response)
+            >> pure (ReloadStructuredContent "" 0 0 0 0 [])
+    _ ->
+      expectationFailure ("expected JsonRpcResult, got: " <> show response) >> pure (ReloadStructuredContent "" 0 0 0 0 [])

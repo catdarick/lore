@@ -105,7 +105,22 @@ callToolWithArgs someTool args =
               <> errorMessage
         J.Success parsedArgs ->
           renderLoreDocMarkdown . toLoreDoc <$> tool.handler parsedArgs
+    SomeToolWithArgsStructured tool _ ->
+      case J.fromJSON args of
+        J.Error errorMessage ->
+          error $
+            "Failed to parse arguments for tool "
+              <> T.unpack tool.name
+              <> ": "
+              <> errorMessage
+        J.Success parsedArgs ->
+          renderLoreDocMarkdown . toLoreDoc <$> tool.handler parsedArgs
     SomeToolWithoutArgs tool ->
+      error $
+        "Tool "
+          <> T.unpack tool.name
+          <> " does not accept arguments."
+    SomeToolWithoutArgsStructured tool _ ->
       error $
         "Tool "
           <> T.unpack tool.name
@@ -116,7 +131,14 @@ callToolWithoutArgs someTool =
   case someTool of
     SomeToolWithoutArgs tool ->
       renderLoreDocMarkdown . toLoreDoc <$> tool.handler
+    SomeToolWithoutArgsStructured tool _ ->
+      renderLoreDocMarkdown . toLoreDoc <$> tool.handler
     SomeToolWithArgs tool ->
+      error $
+        "Tool "
+          <> T.unpack tool.name
+          <> " requires arguments."
+    SomeToolWithArgsStructured tool _ ->
       error $
         "Tool "
           <> T.unpack tool.name

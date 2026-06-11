@@ -1,7 +1,9 @@
 module Lore.Mcp.Protocol.Server
   ( CustomRequestHandler (..),
+    ExecutedToolResult (..),
     McpServer (..),
     McpServerState,
+    executeToolCall,
     handleMcpRequest,
     initialMcpServerState,
     runMcpServer,
@@ -13,6 +15,7 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Aeson (Value, object, (.=))
 import qualified Data.Aeson as J
 import Data.Bifunctor (first)
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (find)
@@ -54,6 +57,11 @@ data McpServer m = McpServer
     renderer :: LoreDoc -> Text
   }
 
+data ExecutedToolResult = ExecutedToolResult
+  { executedToolContent :: Text,
+    executedToolStructuredContent :: Maybe Value
+  }
+
 runMcpServer :: (MonadUnliftIO m, Log.MonadLogger m) => McpServer m -> m ()
 runMcpServer mcpServer = do
   state <- liftIO initialMcpServerState
@@ -72,7 +80,7 @@ handleJsonRpcRequest state server jsonRpcRequest = do
     Right mcpRequest -> do
       response <- handleMcpRequest state server mcpRequest
       pure $ JsonRpcHandlerResult {jsonRpcHandlerResponse = response, jsonRpcShouldExit = False}
-  Log.debug $ "Finished handling request"
+  Log.debug "Finished handling request"
   pure res
 
 handleMcpRequest :: forall m. (MonadUnliftIO m) => McpServerState -> McpServer m -> McpRequest -> m JsonRpcResponse
@@ -89,20 +97,14 @@ handleMcpRequest state server mcpRequest = case mcpRequest of
     pure $ JsonRpcResult (object [])
   Tools ToolsList -> withInitializedServer do
     pure $ JsonRpcResult (object ["tools" .= toolsSpecs])
-  Tools (ToolsCall name args) -> withInitializedServer do
-    withTool name $ \someTool -> do
-      eiOutput <- case someTool of
-        SomeToolWithArgs tool -> do
-          case J.fromJSON <$> args of
-            Nothing -> pure $ Left "missing arguments"
-            Just (J.Error e) -> pure $ Left ("invalid arguments: " <> T.pack e)
-            Just (J.Success parsedArgs) ->
-              runToolHandler (tool.handler parsedArgs)
-        SomeToolWithoutArgs tool ->
-          runToolHandler tool.handler
-      case eiOutput of
-        Left err -> pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32602, jsonRpcErrorMessage = err}
-        Right output -> pure $ JsonRpcResult (toolCallResult output)
+  Tools (ToolsCall toolName toolArgs) -> withInitializedServer do
+    executedResult <- executeToolCall server.tools server.renderer toolName toolArgs
+    pure $
+      case executedResult of
+        Left jsonRpcError ->
+          JsonRpcErrorResponse jsonRpcError
+        Right output ->
+          JsonRpcResult (toolCallResult output)
   OtherRequest method params ->
     withInitializedServer (handleCustomRequest method params)
   where
@@ -112,17 +114,6 @@ handleMcpRequest state server mcpRequest = case mcpRequest of
         then action
         else pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32002, jsonRpcErrorMessage = "server not initialized"}
     toolsSpecs = map getSomeToolSpec server.tools
-    withTool name action = do
-      case find (\someTool -> name == getToolName someTool) server.tools of
-        Just someTool -> action someTool
-        Nothing -> pure $ JsonRpcErrorResponse JsonRpcError {jsonRpcErrorCode = -32602, jsonRpcErrorMessage = "tool not found: " <> name}
-    runToolHandler :: forall output. (ToLoreDoc output) => m output -> m (Either Text Text)
-    runToolHandler action =
-      first (T.pack . show) <$> try @_ @SomeException do
-        output <- action
-        let rendered = server.renderer (toLoreDoc output)
-        _ <- liftIO (evaluate (T.length rendered))
-        pure rendered
     handleCustomRequest method params =
       case Map.lookup method server.customRequestHandlers of
         Nothing ->
@@ -137,6 +128,74 @@ handleMcpRequest state server mcpRequest = case mcpRequest of
               pure $ JsonRpcErrorResponse jsonRpcError
             Right (Right value) ->
               pure $ JsonRpcResult value
+
+executeToolCall ::
+  forall m.
+  (MonadUnliftIO m) =>
+  [SomeTool m] ->
+  (LoreDoc -> Text) ->
+  Text ->
+  Maybe Value ->
+  m (Either JsonRpcError ExecutedToolResult)
+executeToolCall tools render toolName toolArgs =
+  case find ((== toolName) . getToolName) tools of
+    Nothing ->
+      pure (Left (invalidParamsError ("tool not found: " <> toolName)))
+    Just someTool -> do
+      toolResult <- executeSomeTool someTool
+      pure (first invalidParamsError toolResult)
+  where
+    executeSomeTool :: SomeTool m -> m (Either Text ExecutedToolResult)
+    executeSomeTool someTool =
+      case someTool of
+        SomeToolWithArgs ToolWithArgs {handler = toolHandler} ->
+          case decodeArguments toolArgs of
+            Left err ->
+              pure (Left err)
+            Right parsedArgs ->
+              runToolHandler (toolHandler parsedArgs) Nothing
+        SomeToolWithArgsStructured ToolWithArgs {handler = toolHandler} structuredProjection ->
+          case decodeArguments toolArgs of
+            Left err ->
+              pure (Left err)
+            Right parsedArgs ->
+              runToolHandler (toolHandler parsedArgs) (Just (structuredProjection parsedArgs))
+        SomeToolWithoutArgs ToolWithoutArgs {handler = toolHandler} ->
+          runToolHandler toolHandler Nothing
+        SomeToolWithoutArgsStructured ToolWithoutArgs {handler = toolHandler} structuredProjection ->
+          runToolHandler toolHandler (Just structuredProjection)
+
+    decodeArguments :: forall args. (J.FromJSON args) => Maybe Value -> Either Text args
+    decodeArguments maybeArguments =
+      case maybeArguments of
+        Nothing ->
+          Left "missing arguments"
+        Just rawArguments ->
+          case J.fromJSON rawArguments of
+            J.Error errorMessage ->
+              Left ("invalid arguments: " <> T.pack errorMessage)
+            J.Success parsedArguments ->
+              Right parsedArguments
+
+    runToolHandler :: forall output. (ToLoreDoc output) => m output -> Maybe (output -> Value) -> m (Either Text ExecutedToolResult)
+    runToolHandler action maybeStructuredProjection =
+      first (T.pack . show) <$> try @_ @SomeException do
+        output <- action
+        let rendered = render (toLoreDoc output)
+            structuredContent = fmap ($ output) maybeStructuredProjection
+        _ <- liftIO (evaluate (T.length rendered))
+        case structuredContent of
+          Nothing ->
+            pure ()
+          Just value -> do
+            let encoded = J.encode value
+            _ <- liftIO (evaluate (LBS.length encoded))
+            pure ()
+        pure
+          ExecutedToolResult
+            { executedToolContent = rendered,
+              executedToolStructuredContent = structuredContent
+            }
 
 initializeResult :: Text -> Value
 initializeResult serverName =
@@ -153,14 +212,21 @@ initializeResult serverName =
           ]
     ]
 
-toolCallResult :: Text -> Value
+toolCallResult :: ExecutedToolResult -> Value
 toolCallResult output =
   object
     [ "content"
         .= [ object
                [ "type" .= ("text" :: Text),
-                 "text" .= output
+                 "text" .= output.executedToolContent
                ]
            ],
       "isError" .= False
     ]
+
+invalidParamsError :: Text -> JsonRpcError
+invalidParamsError message =
+  JsonRpcError
+    { jsonRpcErrorCode = -32602,
+      jsonRpcErrorMessage = message
+    }

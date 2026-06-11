@@ -1,7 +1,8 @@
 module Lore.Tools.ReloadHomeModules
   ( ReloadHomeModulesOptions (..),
+    ReloadHomeModulesStatus (..),
     reloadHomeModules,
-    reloadHomeModulesWithResult,
+    reloadHomeModulesStatus,
     renderReloadHomeModulesResult,
     truncateDiagnosticMessage,
   )
@@ -27,25 +28,37 @@ import Lore.Tools.Render.Doc (LoreDoc, bulletList, heading2, heading3, paragraph
 import Lore.Tools.Result
   ( Paginated (..),
     PageRequest (..),
+    RenderedResult (..),
     defaultPageRequest,
     paginateItemsWithPageRequest,
   )
+
+data ReloadHomeModulesStatus
+  = ReloadHomeModulesStatusSuccess
+  | ReloadHomeModulesStatusCompilationFailure
+  deriving stock (Eq, Show)
 
 newtype ReloadHomeModulesOptions = ReloadHomeModulesOptions
   { reloadHomeModulesDiagnosticsPageRequest :: Maybe PageRequest
   }
   deriving stock (Eq, Show)
 
-reloadHomeModules :: (MonadLore m) => ReloadHomeModulesOptions -> m LoreDoc
+reloadHomeModules :: (MonadLore m) => ReloadHomeModulesOptions -> m (RenderedResult LoadHomeModulesResult)
 reloadHomeModules options = do
-  (_succeeded, loreDoc) <- reloadHomeModulesWithResult options
-  pure loreDoc
-
-reloadHomeModulesWithResult :: (MonadLore m) => ReloadHomeModulesOptions -> m (Bool, LoreDoc)
-reloadHomeModulesWithResult options = do
   loadResult <- Core.loadHomeModules LoadHomeModulesOptions {enableAutoRefactor = True}
   loreDoc <- renderReloadHomeModulesResultWithPageRequest options.reloadHomeModulesDiagnosticsPageRequest loadResult
-  pure (loadResult.loadHomeModulesSucceeded, loreDoc)
+  pure
+    RenderedResult
+      { renderedResultValue = loadResult,
+        renderedResultDocument = loreDoc
+      }
+
+reloadHomeModulesStatus :: LoadHomeModulesResult -> ReloadHomeModulesStatus
+reloadHomeModulesStatus loadResult
+  | loadResult.loadHomeModulesSucceeded =
+      ReloadHomeModulesStatusSuccess
+  | otherwise =
+      ReloadHomeModulesStatusCompilationFailure
 
 renderReloadHomeModulesResult :: (MonadLore m) => LoadHomeModulesResult -> m LoreDoc
 renderReloadHomeModulesResult =
