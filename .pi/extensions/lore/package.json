@@ -1,0 +1,16 @@
+{
+  "name": "@pi/lore-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

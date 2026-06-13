@@ -16,3 +16,6 @@ lore-code.zip
 .env
 
 mcp-stdio-wrapper
+.pi/extensions/lore/state
+.pi/extensions/lore/state-test
+.clones/
