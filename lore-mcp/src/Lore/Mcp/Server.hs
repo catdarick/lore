@@ -15,7 +15,9 @@ import Lore
     startupSessionConfig,
   )
 import Lore.Mcp.Config
-  ( McpConfig (..),
+  ( CustomCommandToolConfig (..),
+    McpConfig (..),
+    McpConfigOverrides (..),
     defaultMcpConfig,
     loadMcpEnvironmentOverrides,
     parseMcpYamlConfig,
@@ -29,6 +31,7 @@ import Lore.Mcp.Monad (LoreMcpMonad, newLoreMcpContext, runLoreMcp)
 import Lore.Mcp.Protocol.Server (McpServer (..), runMcpServer)
 import Lore.Mcp.StructuredToolRpc (structuredToolRequestHandlers)
 import Lore.Mcp.Tools.CreateTemporalModule (createTemporalModuleTool)
+import Lore.Mcp.Tools.CustomCommand (customCommandTool)
 import Lore.Mcp.Tools.DiscoverDirectory (discoverDirectoryTool)
 import Lore.Mcp.Tools.DiscoverProject (discoverProjectTool)
 import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
@@ -56,12 +59,14 @@ runLoreMcpServer = do
         Set.fromList
           ( map
               getToolName
-              (getTools True True (Just "__known_tool_names__") :: [SomeTool LoreMcpMonad])
+              (getTools True True (Just "__known_tool_names__") [] :: [SomeTool LoreMcpMonad])
           )
   yamlMcpOverrides <-
     either failWithMcpConfigError pure (parseMcpYamlConfig knownToolNames startupConfig.startupConfigDocument)
+  let allKnownToolNames =
+        knownToolNames <> Set.fromList (map (.name) yamlMcpOverrides.customCommandToolsOverride)
   environmentMcpOverrides <-
-    loadMcpEnvironmentOverrides knownToolNames >>= either failWithMcpConfigError pure
+    loadMcpEnvironmentOverrides allKnownToolNames >>= either failWithMcpConfigError pure
   let mcpConfig =
         resolveMcpConfig defaultMcpConfig yamlMcpOverrides environmentMcpOverrides
       runTestSuiteToolEnabled =
@@ -80,6 +85,7 @@ runLoreMcpServer = do
           definitionKnowledgeCacheEnabled
           notifyKnowledgeResetToolEnabled
           mcpConfig.feedbackFilePath
+          mcpConfig.customCommandTools
       enabledTools =
         filterEnabledTools mcpConfig tools
       customRequestHandlers =
@@ -101,7 +107,7 @@ runLoreMcpServer = do
           renderer = renderLoreDocMarkdown
         }
   where
-    getTools definitionKnowledgeCacheEnabled notifyKnowledgeResetToolEnabled maybeFeedbackFilePath =
+    getTools definitionKnowledgeCacheEnabled notifyKnowledgeResetToolEnabled maybeFeedbackFilePath customCommandToolConfigs =
       let feedbackTools =
             case maybeFeedbackFilePath of
               Just feedbackFilePath
@@ -117,6 +123,8 @@ runLoreMcpServer = do
             if definitionKnowledgeCacheEnabled
               then cachedGetDefinitionTool notifyKnowledgeResetToolEnabled
               else regularGetDefinitionTool
+          customCommandTools =
+            map customCommandTool customCommandToolConfigs
        in [ reloadHomeModulesTool,
             discoverProjectTool,
             discoverDirectoryTool,
@@ -135,6 +143,7 @@ runLoreMcpServer = do
           ]
             <> definitionKnowledgeTools
             <> feedbackTools
+            <> customCommandTools
 
     filterEnabledTools :: McpConfig -> [SomeTool m] -> [SomeTool m]
     filterEnabledTools config =

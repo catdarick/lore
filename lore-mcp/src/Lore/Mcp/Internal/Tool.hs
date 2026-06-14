@@ -30,6 +30,13 @@ data ToolWithoutArgs m output = ToolWithoutArgs
     handler :: m output
   }
 
+data DynamicTool m output = DynamicTool
+  { name :: Text,
+    description :: Maybe Text,
+    inputSchema :: J.Value,
+    handler :: J.Value -> m output
+  }
+
 data SomeTool m where
   SomeToolWithArgs ::
     (ToSchema (r 'MetadataType), J.FromJSON (r 'ValueType), ToLoreDoc output) =>
@@ -49,6 +56,10 @@ data SomeTool m where
     ToolWithoutArgs m output ->
     (output -> J.Value) ->
     SomeTool m
+  SomeDynamicTool ::
+    (ToLoreDoc output) =>
+    DynamicTool m output ->
+    SomeTool m
 
 getToolName :: SomeTool m -> Text
 getToolName = \case
@@ -56,6 +67,7 @@ getToolName = \case
   SomeToolWithArgsStructured tool _ -> tool.name
   SomeToolWithoutArgs tool -> tool.name
   SomeToolWithoutArgsStructured tool _ -> tool.name
+  SomeDynamicTool tool -> tool.name
 
 renderToolRun :: (output -> LoreDoc) -> ToolRun output -> LoreDoc
 renderToolRun renderReady = \case
@@ -70,6 +82,7 @@ getToolDescription = \case
   SomeToolWithArgsStructured tool _ -> tool.description
   SomeToolWithoutArgs tool -> tool.description
   SomeToolWithoutArgsStructured tool _ -> tool.description
+  SomeDynamicTool tool -> tool.description
 
 getSomeToolSpec :: SomeTool m -> J.Value
 getSomeToolSpec someTool =
@@ -102,6 +115,8 @@ getSomeToolSpec someTool =
             "properties" J..= J.object [],
             "additionalProperties" J..= False
           ]
+      SomeDynamicTool tool ->
+        tool.inputSchema
 
 -- | Convert OpenAPI 3.0-style nullable schemas:
 --

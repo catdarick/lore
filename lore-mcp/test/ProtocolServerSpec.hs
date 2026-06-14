@@ -10,15 +10,20 @@ import qualified Data.Aeson.KeyMap as KM
 import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Vector as V
 import Lore.JsonRpc.Server (JsonRpcError (..), JsonRpcResponse (..))
+import Lore.Mcp.Config (CustomCommandToolArgConfig (..), CustomCommandToolArgQuoteMode (..), CustomCommandToolConfig (..))
 import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Tools (..))
 import Lore.Mcp.Protocol.Server
   ( CustomRequestHandler (..),
+    ExecutedToolResult (..),
     McpServer (..),
+    executeToolCall,
     handleMcpRequest,
     initialMcpServerState,
   )
+import Lore.Mcp.Tools.CustomCommand (customCommandTool)
 import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
 import Test.Hspec
 
@@ -151,6 +156,95 @@ spec =
         otherResponse ->
           expectationFailure ("expected JsonRpcResult object, got: " <> show otherResponse)
 
+    it "executes custom command tools with shell-quoted arguments" do
+      result <-
+        executeToolCall
+          [ customCommandTool
+              CustomCommandToolConfig
+                { name = "echoLiteral",
+                  description = Nothing,
+                  command = "printf '%s' @{value}",
+                  args = [stringArg "value"]
+                }
+          ]
+          renderLoreDocMarkdown
+          "echoLiteral"
+          (Just (object ["value" .= ("hello; exit 7" :: Text)]))
+
+      case result of
+        Right ExecutedToolResult {executedToolContent} -> do
+          executedToolContent `shouldSatisfy` T.isInfixOf "exit: 0"
+          executedToolContent `shouldSatisfy` T.isInfixOf "hello; exit 7"
+        Left err ->
+          expectationFailure ("expected successful custom command, got: " <> show err)
+
+    it "passes nullable custom command arguments as empty strings" do
+      result <-
+        executeToolCall
+          [ customCommandTool
+              CustomCommandToolConfig
+                { name = "nullableEcho",
+                  description = Nothing,
+                  command = "printf '<%s>' @{value}",
+                  args = [nullableArg "value"]
+                }
+          ]
+          renderLoreDocMarkdown
+          "nullableEcho"
+          (Just (object ["value" .= J.Null]))
+
+      case result of
+        Right ExecutedToolResult {executedToolContent} -> do
+          executedToolContent `shouldSatisfy` T.isInfixOf "exit: 0"
+          executedToolContent `shouldSatisfy` T.isInfixOf "<>"
+        Left err ->
+          expectationFailure ("expected successful custom command, got: " <> show err)
+
+    it "escapes double quotes for custom command args that request quote escaping" do
+      result <-
+        executeToolCall
+          [ customCommandTool
+              CustomCommandToolConfig
+                { name = "quoteEscape",
+                  description = Nothing,
+                  command = "printf '%s' @{value}",
+                  args = [(stringArg "value") {escapeQuotes = True}]
+                }
+          ]
+          renderLoreDocMarkdown
+          "quoteEscape"
+          (Just (object ["value" .= ("say \"hello\"" :: Text)]))
+
+      case result of
+        Right ExecutedToolResult {executedToolContent} -> do
+          executedToolContent `shouldSatisfy` T.isInfixOf "exit: 0"
+          executedToolContent `shouldSatisfy` T.isInfixOf "say \\\"hello\\\""
+        Left err ->
+          expectationFailure ("expected successful custom command, got: " <> show err)
+
+    it "passes unquoted custom command args directly when quote mode is none" do
+      result <-
+        executeToolCall
+          [ customCommandTool
+              CustomCommandToolConfig
+                { name = "directArgs",
+                  description = Nothing,
+                  command = "printf '%s' @{extraArgs}",
+                  args = [(stringArg "extraArgs") {quoteMode = CustomCommandToolArgQuoteNone}]
+                }
+          ]
+          renderLoreDocMarkdown
+          "directArgs"
+          (Just (object ["extraArgs" .= ("first second" :: Text)]))
+
+      case result of
+        Right ExecutedToolResult {executedToolContent} -> do
+          executedToolContent `shouldSatisfy` T.isInfixOf "exit: 0"
+          executedToolContent `shouldSatisfy` T.isInfixOf "first"
+          executedToolContent `shouldNotSatisfy` T.isInfixOf "first second"
+        Left err ->
+          expectationFailure ("expected successful custom command, got: " <> show err)
+
 runRequests :: McpServer IO -> [McpRequest] -> IO [JsonRpcResponse]
 runRequests server requests = do
   state <- initialMcpServerState
@@ -164,4 +258,24 @@ testServer customRequestHandlers =
       tools = [],
       customRequestHandlers,
       renderer = renderLoreDocMarkdown
+    }
+
+stringArg :: Text -> CustomCommandToolArgConfig
+stringArg argName =
+  CustomCommandToolArgConfig
+    { name = argName,
+      description = Nothing,
+      nullable = False,
+      escapeQuotes = False,
+      quoteMode = CustomCommandToolArgQuoteSingle
+    }
+
+nullableArg :: Text -> CustomCommandToolArgConfig
+nullableArg argName =
+  CustomCommandToolArgConfig
+    { name = argName,
+      description = Nothing,
+      nullable = True,
+      escapeQuotes = False,
+      quoteMode = CustomCommandToolArgQuoteSingle
     }

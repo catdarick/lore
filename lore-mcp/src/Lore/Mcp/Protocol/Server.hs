@@ -31,7 +31,7 @@ import Lore.JsonRpc.Server
     runJsonRpcLoop,
   )
 import qualified Lore.Logger as Log
-import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..), getSomeToolSpec, getToolName)
+import Lore.Mcp.Internal.Tool (DynamicTool (..), SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..), getSomeToolSpec, getToolName)
 import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Notification (..), McpRequest'Tools (..), parseMcpRequest)
 import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
 import UnliftIO (MonadUnliftIO, try)
@@ -164,6 +164,12 @@ executeToolCall tools render toolName toolArgs =
           runToolHandler toolHandler Nothing
         SomeToolWithoutArgsStructured ToolWithoutArgs {handler = toolHandler} structuredProjection ->
           runToolHandler toolHandler (Just structuredProjection)
+        SomeDynamicTool DynamicTool {handler = toolHandler} ->
+          case toolArgs of
+            Nothing ->
+              pure (Left "missing arguments")
+            Just rawArguments ->
+              runToolHandler (toolHandler rawArguments) Nothing
 
     decodeArguments :: forall args. (J.FromJSON args) => Maybe Value -> Either Text args
     decodeArguments maybeArguments =

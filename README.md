@@ -124,12 +124,72 @@ symbol-search:
 mcp:
   enable-definition-knowledge-cache: true
   feedback-file: .lore-work/mcp-feedback.md
+  custom-tools:
+    - name: stackTestMatch
+      description: Run one Hspec matcher through stack test
+      command: stack test @{package} --cabal-verbosity 0 --ta "--format=failed-examples --no-color @{test-args}"
+      args:
+        - name: package
+          description: Optional Stack package target
+          nullable: true
+          quote-mode: none
+        - name: test-args
+          description: Hspec test arguments, for example --match "some test"
+          nullable: true
+          escape-quotes: true
+          quote-mode: none
   tools:
     runTestSuite: true
     notifyKnowledgeReset: false
+    stackTestMatch: true
 ```
 
 YAML values use native YAML types. Booleans are booleans, `session.default-test-args` is a list of arguments, and `session.parallel-workers-limit` is either `auto` or a positive integer. `mcp.feedback-file: null` or a missing value leaves the `feedback` tool unavailable.
+
+#### MCP custom command tools
+
+`mcp.custom-tools` declares extra MCP tools backed by shell commands. This is intentionally configuration-level MCP behavior, not core Lore analysis logic.
+
+```yaml
+mcp:
+  custom-tools:
+    - name: toolName
+      description: Tool description shown to MCP clients
+      command: somecommand @{arg1} @{arg2}
+      args:
+        - name: arg1
+          description: Description for arg1
+          nullable: false
+          escape-quotes: false
+          quote-mode: single
+        - name: arg2
+          description: Optional raw CLI fragment
+          nullable: true
+          quote-mode: none
+```
+
+Rules and defaults:
+
+*   `name` must not duplicate a built-in tool or another custom tool.
+*   `command` is executed through the shell. Placeholders use `@{argName}` syntax.
+*   Every placeholder in `command` must be declared in `args`.
+*   Argument values are strings. `nullable: true` also allows `null`, which is substituted as an empty string.
+*   `description`, `nullable`, `escape-quotes`, and `quote-mode` are optional for args.
+*   `escape-quotes` defaults to `false`; when `true`, double quotes in the argument value are converted to `\"` before insertion.
+*   `quote-mode` defaults to `single` and controls shell wrapping after any quote escaping:
+    *   `single`: shell-safe single-quote wrapping. This is the safest default for normal single arguments.
+    *   `double`: double-quote wrapping with shell-sensitive characters escaped.
+    *   `none`: no wrapping; use only when the value intentionally contains multiple CLI arguments or must be inserted into an already quoted command fragment.
+
+For simple required string arguments, a short form is accepted:
+
+```yaml
+args:
+  - arg1
+  - arg2
+```
+
+The short form means no description, `nullable: false`, `escape-quotes: false`, and `quote-mode: single`.
 
 ### Environment Equivalents
 

@@ -1,6 +1,9 @@
 module Lore.Mcp.Config
   ( McpConfig (..),
     McpConfigOverrides (..),
+    CustomCommandToolConfig (..),
+    CustomCommandToolArgConfig (..),
+    CustomCommandToolArgQuoteMode (..),
     McpConfigError (..),
     defaultMcpConfig,
     parseMcpYamlConfig,
@@ -17,6 +20,7 @@ import Control.Monad (forM)
 import Data.Aeson ((.:?))
 import qualified Data.Aeson as J
 import qualified Data.Aeson.KeyMap as JKM
+import qualified Data.Aeson.Types as JT
 import Data.Char (isAlpha, isAlphaNum, isDigit, isLower, isUpper, toUpper)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
@@ -29,20 +33,46 @@ import System.Environment (lookupEnv)
 data McpConfig = McpConfig
   { definitionKnowledgeCacheEnabled :: Bool,
     feedbackFilePath :: Maybe FilePath,
-    toolEnabledOverrides :: Map.Map Text Bool
+    toolEnabledOverrides :: Map.Map Text Bool,
+    customCommandTools :: [CustomCommandToolConfig]
   }
   deriving stock (Eq, Show)
 
 data McpConfigOverrides = McpConfigOverrides
   { definitionKnowledgeCacheEnabledOverride :: Maybe Bool,
     feedbackFilePathOverride :: Maybe (Maybe FilePath),
-    toolEnabledOverridesOverride :: Map.Map Text Bool
+    toolEnabledOverridesOverride :: Map.Map Text Bool,
+    customCommandToolsOverride :: [CustomCommandToolConfig]
   }
+  deriving stock (Eq, Show)
+
+data CustomCommandToolConfig = CustomCommandToolConfig
+  { name :: Text,
+    description :: Maybe Text,
+    command :: Text,
+    args :: [CustomCommandToolArgConfig]
+  }
+  deriving stock (Eq, Show)
+
+data CustomCommandToolArgConfig = CustomCommandToolArgConfig
+  { name :: Text,
+    description :: Maybe Text,
+    nullable :: Bool,
+    escapeQuotes :: Bool,
+    quoteMode :: CustomCommandToolArgQuoteMode
+  }
+  deriving stock (Eq, Show)
+
+data CustomCommandToolArgQuoteMode
+  = CustomCommandToolArgQuoteSingle
+  | CustomCommandToolArgQuoteDouble
+  | CustomCommandToolArgQuoteNone
   deriving stock (Eq, Show)
 
 data McpConfigError
   = InvalidMcpEnvironmentVariable String String Text
   | InvalidMcpConfig FilePath Text
+  | DuplicateMcpToolName FilePath Text
   | UnknownMcpToolName FilePath Text
   deriving stock (Eq, Show)
 
@@ -51,7 +81,8 @@ defaultMcpConfig =
   McpConfig
     { definitionKnowledgeCacheEnabled = False,
       feedbackFilePath = Nothing,
-      toolEnabledOverrides = mempty
+      toolEnabledOverrides = mempty,
+      customCommandTools = []
     }
 
 parseMcpYamlConfig :: Set.Set Text -> LoadedConfigDocument -> Either McpConfigError McpConfigOverrides
@@ -60,11 +91,18 @@ parseMcpYamlConfig knownToolNames document =
     J.Error err ->
       Left (InvalidMcpConfig document.configFilePath (T.pack err))
     J.Success overrides ->
-      case filter (`Set.notMember` knownToolNames) (Map.keys overrides.toolEnabledOverridesOverride) of
-        unknownToolName : _ ->
-          Left (UnknownMcpToolName document.configFilePath unknownToolName)
-        [] ->
-          Right overrides
+      case firstDuplicateOrKnown knownToolNames customToolNames of
+        Just duplicateToolName ->
+          Left (DuplicateMcpToolName document.configFilePath duplicateToolName)
+        Nothing ->
+          case filter (`Set.notMember` allToolNames) (Map.keys overrides.toolEnabledOverridesOverride) of
+            unknownToolName : _ ->
+              Left (UnknownMcpToolName document.configFilePath unknownToolName)
+            [] ->
+              Right overrides
+      where
+        customToolNames = map (.name) overrides.customCommandToolsOverride
+        allToolNames = knownToolNames <> Set.fromList customToolNames
 
 loadMcpEnvironmentOverrides :: Set.Set Text -> IO (Either McpConfigError McpConfigOverrides)
 loadMcpEnvironmentOverrides toolNames = do
@@ -79,6 +117,7 @@ loadMcpEnvironmentOverrides toolNames = do
       <$> maybeDefinitionCache
       <*> pure (Just <$> maybeFeedbackFile)
       <*> (Map.fromList . foldMap maybeToList <$> sequence toolOverrideResults)
+      <*> pure []
 
 resolveMcpConfig :: McpConfig -> McpConfigOverrides -> McpConfigOverrides -> McpConfig
 resolveMcpConfig defaults yamlOverrides environmentOverrides =
@@ -111,6 +150,12 @@ renderMcpConfigError = \case
       <> T.pack path
       <> " MCP configuration: "
       <> message
+  DuplicateMcpToolName path toolName ->
+    "Invalid "
+      <> T.pack path
+      <> " MCP configuration: duplicate tool "
+      <> quote toolName
+      <> "."
   UnknownMcpToolName path toolName ->
     "Invalid "
       <> T.pack path
@@ -126,7 +171,9 @@ applyMcpConfigOverrides overrides config =
       feedbackFilePath =
         fromMaybe config.feedbackFilePath overrides.feedbackFilePathOverride,
       toolEnabledOverrides =
-        Map.union overrides.toolEnabledOverridesOverride config.toolEnabledOverrides
+        Map.union overrides.toolEnabledOverridesOverride config.toolEnabledOverrides,
+      customCommandTools =
+        config.customCommandTools <> overrides.customCommandToolsOverride
     }
 
 lookupOptionalEnvParsed :: String -> (String -> Maybe a) -> IO (Either McpConfigError (Maybe a))
@@ -207,3 +254,101 @@ instance J.FromJSON McpConfigOverrides where
         <$> obj .:? "enable-definition-knowledge-cache"
         <*> (fmap Just <$> obj .:? "feedback-file")
         <*> obj .:? "tools" J..!= mempty
+        <*> obj .:? "custom-tools" J..!= []
+
+instance J.FromJSON CustomCommandToolConfig where
+  parseJSON =
+    J.withObject "CustomCommandToolConfig" \obj -> do
+      config <-
+        CustomCommandToolConfig
+          <$> obj J..: "name"
+          <*> obj .:? "description"
+          <*> obj J..: "command"
+          <*> obj J..: "args"
+      validateCustomCommandToolConfig config
+      pure config
+
+validateCustomCommandToolConfig :: CustomCommandToolConfig -> JT.Parser ()
+validateCustomCommandToolConfig config = do
+  whenParser (T.null config.name) "custom tool name must not be empty"
+  whenParser (T.null config.command) ("custom tool " <> quote config.name <> " command must not be empty")
+  case firstDuplicate argNames of
+    Just duplicateArg ->
+      failText ("custom tool " <> quote config.name <> " declares duplicate arg " <> quote duplicateArg)
+    Nothing ->
+      pure ()
+  case filter (`Set.notMember` declaredArgs) (extractCommandPlaceholders config.command) of
+    undeclaredArg : _ ->
+      failText ("custom tool " <> quote config.name <> " command references undeclared arg " <> quote undeclaredArg)
+    [] ->
+      pure ()
+  where
+    argNames = map (.name) config.args
+    declaredArgs = Set.fromList argNames
+
+instance J.FromJSON CustomCommandToolArgConfig where
+  parseJSON = \case
+    J.String argName ->
+      pure
+        CustomCommandToolArgConfig
+          { name = argName,
+            description = Nothing,
+            nullable = False,
+            escapeQuotes = False,
+            quoteMode = CustomCommandToolArgQuoteSingle
+          }
+    J.Object obj -> do
+      config <-
+        CustomCommandToolArgConfig
+          <$> obj J..: "name"
+          <*> obj .:? "description"
+          <*> obj .:? "nullable" J..!= False
+          <*> obj .:? "escape-quotes" J..!= False
+          <*> obj .:? "quote-mode" J..!= CustomCommandToolArgQuoteSingle
+      whenParser (T.null config.name) "custom tool arg name must not be empty"
+      pure config
+    _ ->
+      failText "custom tool args must be strings or objects"
+
+instance J.FromJSON CustomCommandToolArgQuoteMode where
+  parseJSON =
+    J.withText "CustomCommandToolArgQuoteMode" \case
+      "single" -> pure CustomCommandToolArgQuoteSingle
+      "double" -> pure CustomCommandToolArgQuoteDouble
+      "none" -> pure CustomCommandToolArgQuoteNone
+      rawValue -> failText ("custom tool arg quote-mode must be one of single, double, or none, got " <> quote rawValue)
+
+whenParser :: Bool -> Text -> JT.Parser ()
+whenParser condition message =
+  if condition then failText message else pure ()
+
+failText :: Text -> JT.Parser a
+failText = fail . T.unpack
+
+firstDuplicate :: (Ord a) => [a] -> Maybe a
+firstDuplicate = go Set.empty
+  where
+    go _ [] = Nothing
+    go seen (x : xs)
+      | x `Set.member` seen = Just x
+      | otherwise = go (Set.insert x seen) xs
+
+firstDuplicateOrKnown :: (Ord a) => Set.Set a -> [a] -> Maybe a
+firstDuplicateOrKnown known = go known
+  where
+    go _ [] = Nothing
+    go seen (x : xs)
+      | x `Set.member` seen = Just x
+      | otherwise = go (Set.insert x seen) xs
+
+extractCommandPlaceholders :: Text -> [Text]
+extractCommandPlaceholders text =
+  case T.breakOn "@{" text of
+    (_, rest)
+      | T.null rest -> []
+      | otherwise ->
+          let afterOpen = T.drop 2 rest
+              (argName, afterName) = T.breakOn "}" afterOpen
+           in if T.null afterName
+                then []
+                else argName : extractCommandPlaceholders (T.drop 1 afterName)

@@ -11,7 +11,8 @@ import qualified Data.Text as T
 import qualified Data.Yaml as Y
 import Lore.Config (LoadedConfigDocument (..))
 import Lore.Mcp.Config
-  ( McpConfig (..),
+  ( CustomCommandToolArgQuoteMode (..),
+    McpConfig (..),
     McpConfigError (..),
     defaultMcpConfig,
     loadMcpEnvironmentOverrides,
@@ -42,6 +43,51 @@ spec =
       config.feedbackFilePath `shouldBe` Just ".lore-work/mcp-feedback.md"
       toolEnabled config "runTestSuite" `shouldBe` True
       toolEnabled config "notifyKnowledgeReset" `shouldBe` False
+
+    it "parses custom command tools" do
+      overrides <-
+        shouldParseMcpYaml
+          "mcp:\n  custom-tools:\n    - name: echoArgs\n      description: Echo two arguments\n      command: echo @{first} @{second}\n      args:\n        - first\n        - second\n  tools:\n    echoArgs: true\n"
+      let config = resolveMcpConfig defaultMcpConfig overrides emptyOverrides
+      map (.name) config.customCommandTools `shouldBe` ["echoArgs"]
+      toolEnabled config "echoArgs" `shouldBe` True
+
+    it "parses custom command arg descriptions, nullability, quote escaping, and quote mode" do
+      overrides <-
+        shouldParseMcpYaml
+          "mcp:\n  custom-tools:\n    - name: describeArgs\n      command: echo @{maybeValue}\n      args:\n        - name: maybeValue\n          description: Optional value to print\n          nullable: true\n          escape-quotes: true\n          quote-mode: none\n"
+      let config = resolveMcpConfig defaultMcpConfig overrides emptyOverrides
+      case config.customCommandTools of
+        [tool] ->
+          case tool.args of
+            [arg] -> do
+              arg.name `shouldBe` "maybeValue"
+              arg.description `shouldBe` Just "Optional value to print"
+              arg.nullable `shouldBe` True
+              arg.escapeQuotes `shouldBe` True
+              arg.quoteMode `shouldBe` CustomCommandToolArgQuoteNone
+            otherArgs ->
+              expectationFailure ("expected one custom arg, got: " <> show otherArgs)
+        otherTools ->
+          expectationFailure ("expected one custom tool, got: " <> show otherTools)
+
+    it "rejects custom tools that shadow built-in tools" do
+      parseMcpYaml "mcp:\n  custom-tools:\n    - name: runTestSuite\n      command: echo nope\n      args: []\n"
+        `shouldSatisfy` \case
+          Left (DuplicateMcpToolName "lore.yaml" "runTestSuite") -> True
+          _ -> False
+
+    it "rejects duplicate custom tool names" do
+      parseMcpYaml "mcp:\n  custom-tools:\n    - name: same\n      command: echo one\n      args: []\n    - name: same\n      command: echo two\n      args: []\n"
+        `shouldSatisfy` \case
+          Left (DuplicateMcpToolName "lore.yaml" "same") -> True
+          _ -> False
+
+    it "rejects command placeholders not declared as args" do
+      parseMcpYaml "mcp:\n  custom-tools:\n    - name: badPlaceholder\n      command: echo @{missing}\n      args: []\n"
+        `shouldSatisfy` \case
+          Left (InvalidMcpConfig "lore.yaml" message) -> "undeclared arg \"missing\"" `T.isInfixOf` message
+          _ -> False
 
     it "lets environment variables override YAML" do
       yamlOverrides <-
@@ -79,7 +125,8 @@ emptyOverrides =
   Lore.Mcp.Config.McpConfigOverrides
     { definitionKnowledgeCacheEnabledOverride = Nothing,
       feedbackFilePathOverride = Nothing,
-      toolEnabledOverridesOverride = Map.empty
+      toolEnabledOverridesOverride = Map.empty,
+      customCommandToolsOverride = []
     }
 
 shouldLoadMcpEnvironmentOverrides :: IO Lore.Mcp.Config.McpConfigOverrides

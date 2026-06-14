@@ -32,6 +32,7 @@ library
       Lore.Mcp.Server
       Lore.Mcp.StructuredToolRpc
       Lore.Mcp.Tools.CreateTemporalModule
+      Lore.Mcp.Tools.CustomCommand
       Lore.Mcp.Tools.DiscoverDirectory
       Lore.Mcp.Tools.DiscoverProject
       Lore.Mcp.Tools.ExecuteCode
