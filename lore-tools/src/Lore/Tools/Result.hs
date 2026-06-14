@@ -25,7 +25,8 @@ where
 import Data.Text (Text)
 import qualified Data.Text as T
 import Lore
-  ( LoadHomeModulesOptions (..),
+  ( HomeModulesLoadSummary (..),
+    LoadHomeModulesOptions (..),
     LoadHomeModulesResult (..),
     MonadLore,
     interpreterContextIsReady,
@@ -129,16 +130,18 @@ data PartialLoadWarning = PartialLoadWarning
   }
 
 partialLoadWarningFromLoadResult :: LoadHomeModulesResult -> Text -> Maybe PartialLoadWarning
-partialLoadWarningFromLoadResult loadResult partialLoadSuffix
-  | loadResult.loadHomeModulesFailed > 0 =
+partialLoadWarningFromLoadResult (LoadHomeModulesCompleted summary) partialLoadSuffix
+  | summary.homeModulesFailed > 0 =
       Just
         PartialLoadWarning
-          { partialLoadLoaded = loadResult.loadHomeModulesLoaded,
-            partialLoadTotal = loadResult.loadHomeModulesTotal,
+          { partialLoadLoaded = summary.homeModulesLoaded,
+            partialLoadTotal = summary.homeModulesTotal,
             partialLoadSuffix
           }
   | otherwise =
       Nothing
+partialLoadWarningFromLoadResult (LoadHomeModulesPreparationFailed _) _ =
+  Nothing
 
 partialLoadWarningDoc :: Maybe PartialLoadWarning -> LoreDoc
 partialLoadWarningDoc =

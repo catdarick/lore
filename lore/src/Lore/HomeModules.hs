@@ -1,5 +1,9 @@
 module Lore.HomeModules
-  ( LoadHomeModulesResult (..),
+  ( HomeModulesLoadSummary (..),
+    LoadHomeModulesResult (..),
+    ProjectEnvironmentFailure (..),
+    projectEnvironmentFailureMessage,
+    projectEnvironmentFailureRequiresRestart,
     LoadHomeModulesOptions (..),
     defaultLoadHomeModulesOptions,
     lookupLastLoadHomeModulesResult,
@@ -8,12 +12,14 @@ module Lore.HomeModules
 where
 
 import Lore.Internal.HomeModules
-  ( LoadHomeModulesOptions (..),
+  ( HomeModulesLoadSummary (..),
+    LoadHomeModulesOptions (..),
     LoadHomeModulesResult (..),
     defaultLoadHomeModulesOptions,
     loadHomeModules,
     lookupLastLoadHomeModulesResultCache,
   )
+import Lore.Internal.ProjectEnvironment.Types (ProjectEnvironmentFailure (..), projectEnvironmentFailureMessage, projectEnvironmentFailureRequiresRestart)
 import Lore.Monad (MonadLore)
 
 lookupLastLoadHomeModulesResult :: (MonadLore m) => m (Maybe LoadHomeModulesResult)

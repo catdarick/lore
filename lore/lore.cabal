@@ -1,6 +1,6 @@
 cabal-version: 2.2
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.39.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -54,6 +54,7 @@ library
       Lore.Internal.Lookup.TypeQuery
       Lore.Internal.Lookup.Types
   other-modules:
+      Lore.Internal.BuildTool.Dependencies
       Lore.Internal.BuildTool.Environment
       Lore.Internal.Config.Document
       Lore.Internal.DeadCode
@@ -134,6 +135,9 @@ library
       Lore.Internal.Package.Path
       Lore.Internal.Package.Root
       Lore.Internal.Package.Types
+      Lore.Internal.ProjectEnvironment.Prepare
+      Lore.Internal.ProjectEnvironment.Refresh
+      Lore.Internal.ProjectEnvironment.Types
       Lore.Internal.ProjectProvider
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
@@ -259,6 +263,7 @@ test-suite lore-test
       Lore.Diagnostics
       Lore.HomeModules
       Lore.HomeModules.Plan
+      Lore.Internal.BuildTool.Dependencies
       Lore.Internal.BuildTool.Environment
       Lore.Internal.Config.Document
       Lore.Internal.DeadCode
@@ -345,6 +350,9 @@ test-suite lore-test
       Lore.Internal.Package.Path
       Lore.Internal.Package.Root
       Lore.Internal.Package.Types
+      Lore.Internal.ProjectEnvironment.Types
+      Lore.Internal.ProjectEnvironment.Prepare
+      Lore.Internal.ProjectEnvironment.Refresh
       Lore.Internal.ProjectProvider
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types

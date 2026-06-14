@@ -26,7 +26,8 @@ import Lore.Internal.HomeModules.EntryModules
 import Lore.Internal.Interpreter (executeStatementRaw)
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries, getCachedModSummariesByFile)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
-import Lore.Internal.Package (ComponentData (..), ComponentKind (..), PackageData (..), prepareComponentsData)
+import Lore.Internal.Package (ComponentData (..), ComponentKind (..), PackageData (..))
+import Lore.Internal.ProjectEnvironment.Types (ProjectEnvironmentState (..))
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.TestSuite.Arguments
   ( TestArgumentsParseError (..),
@@ -37,6 +38,7 @@ import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import System.FilePath (isRelative, normalise, (</>))
 import qualified UnliftIO.Directory as Dir
+import qualified UnliftIO.MVar as MVar
 
 data RunTestSuiteOptions = RunTestSuiteOptions
   { packageName :: Maybe String,
@@ -68,7 +70,25 @@ runTestSuite options@RunTestSuiteOptions {packageName = packageFilter} = do
   sessionProjectRoot <- asks projectRoot
   defaultArguments <- asks testSuiteDefaultArguments
   absoluteSessionProjectRoot <- liftIO (Dir.makeAbsolute sessionProjectRoot)
-  packages <- prepareComponentsData
+  maybeProjectEnvironment <- asks projectEnvironmentStateVar >>= liftIO . MVar.readMVar
+  case maybeProjectEnvironment of
+    Nothing ->
+      pure
+        RunTestSuiteResult
+          { runTestSuiteEffectiveArguments = effectiveTestArguments defaultArguments options,
+            runTestSuiteComponentResults =
+              [ TestSuiteComponentResult
+                  { packageName = maybe "<all-packages>" id packageFilter,
+                    componentName = "test-suite",
+                    moduleName = Nothing,
+                    status = TestSuiteComponentSetupFailure "No successfully loaded project environment is available. Run reloadHomeModules before runTestSuite."
+                  }
+              ]
+          }
+    Just projectEnvironment -> runTestSuiteWithPackages options sessionProjectRoot absoluteSessionProjectRoot defaultArguments projectEnvironment.projectEnvironmentPackages
+
+runTestSuiteWithPackages :: (MonadLore m) => RunTestSuiteOptions -> FilePath -> FilePath -> [String] -> [PackageData] -> m RunTestSuiteResult
+runTestSuiteWithPackages options@RunTestSuiteOptions {packageName = packageFilter} _sessionProjectRoot absoluteSessionProjectRoot defaultArguments packages = do
   generatedMainModulesByKey <- lookupGeneratedMainModulesByKey
   modSummariesByFile <- getCachedModSummariesByFile
   ModSummaries modSummariesByModule <- getCachedModSummaries

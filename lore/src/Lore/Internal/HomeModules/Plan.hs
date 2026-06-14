@@ -6,9 +6,8 @@ module Lore.Internal.HomeModules.Plan
     HomeModulesComponentPlan (..),
     HomeModuleKey (..),
     ComponentSpecificOptions (..),
-    prepareHomeModulesLoadInputs,
+    prepareHomeModulesLoadInputsFromProjectEnvironment,
     prepareHomeModulesLoadPlan,
-    computeExternalHomeModuleDependencies,
     computeHomeModuleSourceDirs,
     buildHomeModulesSelection,
     homeModulesSelectionTotal,
@@ -21,20 +20,14 @@ module Lore.Internal.HomeModules.Plan
 where
 
 import Control.Monad (foldM, forM)
-import Control.Monad.RWS (asks)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Plugins as GHC
-import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..), setGhcOptionsAndExtensions)
-import Lore.Internal.Ghc.PackageEnvironment.Resolve
-  ( packageEnvironmentCacheKey,
-    renderPackageResolutionError,
-    resolveDependencyPackageEnvironment,
-  )
+import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..))
+import Lore.Internal.Ghc.PackageEnvironment.Resolve (packageEnvironmentCacheKey)
 import Lore.Internal.Ghc.PackageEnvironment.Types
-  ( GhcEnvironmentSnapshot,
-    ResolvedPackageEnvironment,
+  ( ResolvedPackageEnvironment,
   )
 import Lore.Internal.HomeModules.SyntheticMain (entryHomeModuleSource)
 import Lore.Internal.Package
@@ -43,17 +36,14 @@ import Lore.Internal.Package
     commonSetIntersection,
     componentMainModulePathCandidates,
     defaultExtensions,
-    extractDependencies,
     extractSourceDirs,
     firstExistingPath,
-    prepareComponentsData,
   )
-import Lore.Internal.Session (SessionContext (..))
+import Lore.Internal.ProjectEnvironment.Types (ProjectEnvironmentState (..))
 import Lore.Internal.TemporalModules (TemporalModule (..), listExistingTemporalModules)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import System.FilePath (takeDirectory)
-import UnliftIO.Exception (throwString)
 
 data HomeModuleKey
   = HomeModuleName GHC.ModuleName
@@ -70,16 +60,14 @@ data HomeModulesComponentPlan = HomeModulesComponentPlan
 data ComponentSpecificOptions = ComponentSpecificOptions
   { language :: Maybe Language,
     extensions :: Set.Set Extension,
-    ghcOptions :: Set.Set GhcOption,
-    baseDynFlags :: GHC.DynFlags
+    ghcOptions :: Set.Set GhcOption
   }
 
 data HomeModulesLoadInputs = HomeModulesLoadInputs
   { homeModulesHomeUnitId :: GHC.UnitId,
-    homeModulesGhcEnvironmentSnapshot :: GhcEnvironmentSnapshot,
+    homeModulesProjectEnvironment :: ProjectEnvironmentState,
     homeModulesPackages :: [PackageData],
-    homeModulesTemporalModules :: [TemporalModule],
-    homeModulesTestSuiteRequired :: Bool
+    homeModulesTemporalModules :: [TemporalModule]
   }
 
 data HomeModulesLoadConfig = HomeModulesLoadConfig
@@ -104,40 +92,22 @@ data HomeModulesLoadPlan = HomeModulesLoadPlan
     homeModulesComponentOptions :: Map.Map HomeModuleKey ComponentSpecificOptions
   }
 
-prepareHomeModulesLoadInputs :: (MonadLore m) => m HomeModulesLoadInputs
-prepareHomeModulesLoadInputs = do
+prepareHomeModulesLoadInputsFromProjectEnvironment :: (MonadLore m) => ProjectEnvironmentState -> m HomeModulesLoadInputs
+prepareHomeModulesLoadInputsFromProjectEnvironment projectEnvironment = do
   dflags <- GHC.getSessionDynFlags
-  ghcEnvironmentSnapshot <- asks ghcEnvironmentSnapshot
-  testSuiteRequired <- asks isTestSuiteFunctionalityRequired
-  packages <- prepareComponentsData
   temporalModules <- listExistingTemporalModules
   pure
     HomeModulesLoadInputs
       { homeModulesHomeUnitId = GHC.homeUnitId_ dflags,
-        homeModulesGhcEnvironmentSnapshot = ghcEnvironmentSnapshot,
-        homeModulesPackages = packages,
-        homeModulesTemporalModules = temporalModules,
-        homeModulesTestSuiteRequired = testSuiteRequired
+        homeModulesProjectEnvironment = projectEnvironment,
+        homeModulesPackages = projectEnvironment.projectEnvironmentPackages,
+        homeModulesTemporalModules = temporalModules
       }
 
 prepareHomeModulesLoadPlan :: (MonadLore m) => HomeModulesLoadInputs -> m HomeModulesLoadPlan
 prepareHomeModulesLoadPlan inputs = do
   componentPlan <- prepareHomeModulesComponentPlan inputs.homeModulesPackages
-  let dependencyNames =
-        computeExternalHomeModuleDependencies
-          inputs.homeModulesTestSuiteRequired
-          inputs.homeModulesPackages
-  packageEnvironment <-
-    case resolveDependencyPackageEnvironment
-      inputs.homeModulesGhcEnvironmentSnapshot
-      dependencyNames of
-      Left packageResolutionError ->
-        throwString
-          ( "Failed to resolve dependency package environment. "
-              <> renderPackageResolutionError packageResolutionError
-          )
-      Right resolvedEnvironment ->
-        pure resolvedEnvironment
+  let packageEnvironment = inputs.homeModulesProjectEnvironment.projectEnvironmentResolvedPackages
   let environmentCacheKey = packageEnvironmentCacheKey packageEnvironment
       sourceDirs =
         computeHomeModuleSourceDirs
@@ -153,7 +123,7 @@ prepareHomeModulesLoadPlan inputs = do
       { homeModulesLoadConfig =
           HomeModulesLoadConfig
             { homeModulesSourceDirs = sourceDirs,
-              homeModulesDependencyNames = dependencyNames,
+              homeModulesDependencyNames = inputs.homeModulesProjectEnvironment.projectEnvironmentRequiredDependencies,
               homeModulesPackageEnvironmentCacheKey = environmentCacheKey,
               homeModulesPackageEnvironment = packageEnvironment,
               homeModulesCommonLanguage = componentPlan.commonLanguage,
@@ -163,18 +133,6 @@ prepareHomeModulesLoadPlan inputs = do
         homeModulesSelection = selection,
         homeModulesComponentOptions = componentPlan.homeModulesWithComponentOptions
       }
-
-computeExternalHomeModuleDependencies :: Bool -> [PackageData] -> Set.Set String
-computeExternalHomeModuleDependencies testSuiteRequired packages =
-  runtimeDependencies Set.\\ localPackageNames
-  where
-    allComponents = concatMap (.components) packages
-    localPackageNames = Set.fromList (map (.packageName) packages)
-    dependencies = extractDependencies allComponents
-    runtimeDependencies =
-      if testSuiteRequired
-        then Set.insert "directory" dependencies
-        else dependencies
 
 computeHomeModuleSourceDirs :: [PackageData] -> [TemporalModule] -> Set.Set FilePath
 computeHomeModuleSourceDirs packages temporalModules =
@@ -218,7 +176,6 @@ homeModulesSelectionTotal selection =
 
 prepareHomeModulesComponentPlan :: (MonadLore m) => [PackageData] -> m HomeModulesComponentPlan
 prepareHomeModulesComponentPlan packages = do
-  sessionDynFlags <- GHC.getSessionDynFlags
   let rootedComponents =
         [ (pkg.packageName, pkg.packageRoot, component)
         | pkg <- packages,
@@ -230,12 +187,6 @@ prepareHomeModulesComponentPlan packages = do
       commonGhcOptions = commonSetIntersection (map (.ghcOptions) components)
 
   homeModulesWithComponentOptionsByComponent <- forM rootedComponents \(packageName, packageRoot, component) -> do
-    componentFlags <-
-      setGhcOptionsAndExtensions
-        component.language
-        (Set.toList component.ghcOptions)
-        (Set.toList component.defaultExtensions)
-        sessionDynFlags
     let componentSpecificExtensions = component.defaultExtensions Set.\\ commonExtensions
         componentSpecificGhcOptions = component.ghcOptions Set.\\ commonGhcOptions
         componentSpecificLanguage =
@@ -246,8 +197,7 @@ prepareHomeModulesComponentPlan packages = do
           ComponentSpecificOptions
             { language = componentSpecificLanguage,
               extensions = componentSpecificExtensions,
-              ghcOptions = componentSpecificGhcOptions,
-              baseDynFlags = componentFlags
+              ghcOptions = componentSpecificGhcOptions
             }
     componentHomeModules <- homeModuleKeysForComponent packageName packageRoot component
     pure (Map.fromSet (const componentSpecificOptions) componentHomeModules)

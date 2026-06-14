@@ -8,12 +8,14 @@ import Control.Applicative ((<|>))
 import Control.Monad.IO.Class (MonadIO (..))
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust)
+import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Data.StringBuffer as GHC
 import qualified GHC.Driver.Config.Parser as GHC
 import qualified GHC.Driver.Session as GHC
 import qualified GHC.Parser.Header as GHC
 import qualified GHC.Unit.Module.Graph as GHC
+import Lore.Internal.Ghc.DynFlags (addGhcOptionsAndExtensions)
 import Lore.Internal.HomeModules.Plan (ComponentSpecificOptions (..), HomeModuleKey (..))
 import Lore.Internal.SourcePath (normalizeSourceFilePathM)
 import Lore.Monad (MonadLore)
@@ -66,10 +68,16 @@ applySourcePragmas summary compOptions summaryFile = do
         pure buffer
       Nothing ->
         liftIO (GHC.hGetStringBuffer summaryFile)
+  componentDynFlags <-
+    addGhcOptionsAndExtensions
+      compOptions.language
+      (Set.toList compOptions.ghcOptions)
+      (Set.toList compOptions.extensions)
+      (GHC.ms_hspp_opts summary)
   let (_warnings, options) =
         GHC.getOptions
-          (GHC.initParserOpts compOptions.baseDynFlags)
+          (GHC.initParserOpts componentDynFlags)
           contents
           summaryFile
-  (dynFlags, _, _) <- liftIO (GHC.parseDynamicFilePragma compOptions.baseDynFlags options)
+  (dynFlags, _, _) <- liftIO (GHC.parseDynamicFilePragma componentDynFlags options)
   pure dynFlags

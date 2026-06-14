@@ -128,6 +128,7 @@ tests:
     - Lore.Diagnostics
     - Lore.HomeModules
     - Lore.HomeModules.Plan
+    - Lore.Internal.BuildTool.Dependencies
     - Lore.Internal.BuildTool.Environment
     - Lore.Internal.Config.Document
     - Lore.Internal.DeadCode
@@ -214,6 +215,9 @@ tests:
     - Lore.Internal.Package.Path
     - Lore.Internal.Package.Root
     - Lore.Internal.Package.Types
+    - Lore.Internal.ProjectEnvironment.Types
+    - Lore.Internal.ProjectEnvironment.Prepare
+    - Lore.Internal.ProjectEnvironment.Refresh
     - Lore.Internal.ProjectProvider
     - Lore.Internal.Session
     - Lore.Internal.Session.Cache.Types

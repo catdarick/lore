@@ -5,7 +5,7 @@ module Lore.Internal.Lookup.SymbolsMap
     ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
     SymbolSearchIndexCache (..),
-    SymbolsDependencySetCache (..),
+    ExternalSymbolsEnvironmentKeyCache (..),
     emptyHomeSymbolsIndexCache,
     emptyExternalSymbolsIndexCache,
     emptySymbolSearchIndexCache,
@@ -14,8 +14,8 @@ module Lore.Internal.Lookup.SymbolsMap
     getCachedExternalSymbolsIndex,
     prepareHomeSymbolsIndex,
     prepareExternalSymbolsIndex,
-    setSymbolsDependencySetCache,
-    readSymbolsDependencySetCache,
+    setExternalSymbolsEnvironmentKey,
+    readExternalSymbolsEnvironmentKey,
     invalidateHomeSymbolsIndexCache,
     invalidateExternalSymbolsIndexCache,
     findMatchingSymbolsInMap,
@@ -46,11 +46,11 @@ import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (..), TypedDefini
 import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfosNameSet, greNameFieldAliasText)
 import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames (..), mergeValueTypeHeadNames, valueTypeHeadNamesFromIfaceType)
 import Lore.Internal.Lookup.Cache.Types
-  ( ExternalSymbolsIndexCache (..),
+  ( ExternalSymbolsEnvironmentKeyCache (..),
+    ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
     HomeSymbolsIndexCache (..),
     SymbolSearchIndexCache (..),
-    SymbolsDependencySetCache (..),
   )
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.ModulePattern (ModulePattern)
@@ -143,19 +143,19 @@ invalidateSymbolSearchIndexCache = do
   cacheVar <- asks symbolSearchIndexCacheVar
   modifyMVar cacheVar $ \_ -> pure (emptySymbolSearchIndexCache, ())
 
-setSymbolsDependencySetCache :: (MonadLore m) => Set.Set String -> m ()
-setSymbolsDependencySetCache dependencies = do
-  dependencyVar <- asks symbolsDependencySetCacheVar
-  dependenciesChanged <- modifyMVar dependencyVar $ \(SymbolsDependencySetCache cachedDependencies) ->
-    pure (SymbolsDependencySetCache dependencies, cachedDependencies /= dependencies)
+setExternalSymbolsEnvironmentKey :: (MonadLore m) => Set.Set String -> m ()
+setExternalSymbolsEnvironmentKey dependencies = do
+  dependencyVar <- asks externalSymbolsEnvironmentKeyCacheVar
+  dependenciesChanged <- modifyMVar dependencyVar $ \(ExternalSymbolsEnvironmentKeyCache cachedDependencies) ->
+    pure (ExternalSymbolsEnvironmentKeyCache dependencies, cachedDependencies /= dependencies)
   when dependenciesChanged do
     Log.debug $ "External symbol cache dependencies changed to " <> show (Set.toList dependencies) <> ". Invalidating external symbols cache."
     invalidateExternalSymbolsIndexCache
 
-readSymbolsDependencySetCache :: (MonadLore m) => m (Set.Set String)
-readSymbolsDependencySetCache = do
-  dependencyVar <- asks symbolsDependencySetCacheVar
-  SymbolsDependencySetCache dependencies <- liftIO (readMVar dependencyVar)
+readExternalSymbolsEnvironmentKey :: (MonadLore m) => m (Set.Set String)
+readExternalSymbolsEnvironmentKey = do
+  dependencyVar <- asks externalSymbolsEnvironmentKeyCacheVar
+  ExternalSymbolsEnvironmentKeyCache dependencies <- liftIO (readMVar dependencyVar)
   pure dependencies
 
 getCachedHomeSymbolsIndex :: (MonadLore m) => m SymbolsIndex
@@ -170,18 +170,18 @@ getCachedHomeSymbolsIndex = do
 
 getCachedExternalSymbolsIndex :: (MonadLore m) => m SymbolsIndex
 getCachedExternalSymbolsIndex = do
-  currentDependencies <- readSymbolsDependencySetCache
+  currentDependencies <- readExternalSymbolsEnvironmentKey
   cacheVar <- asks externalSymbolsIndexCacheVar
   modifyMVar cacheVar $ \cacheState ->
     case cacheState.cachedExternalSymbolsSnapshot of
       Just cachedSnapshot
-        | cachedSnapshot.externalSymbolsSnapshotDependencies == currentDependencies ->
+        | cachedSnapshot.externalSymbolsSnapshotEnvironmentKey == currentDependencies ->
             pure (cacheState, cachedSnapshot.externalSymbolsSnapshotIndex)
       _ -> do
         symbolsMap <- prepareExternalSymbolsIndex currentDependencies
         let snapshot =
               ExternalSymbolsSnapshot
-                { externalSymbolsSnapshotDependencies = currentDependencies,
+                { externalSymbolsSnapshotEnvironmentKey = currentDependencies,
                   externalSymbolsSnapshotIndex = symbolsMap
                 }
         pure (ExternalSymbolsIndexCache (Just snapshot), symbolsMap)

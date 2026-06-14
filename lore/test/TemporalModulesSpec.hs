@@ -5,7 +5,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Lore (createTemporalModule)
 import Lore.Diagnostics (Diagnostic (..))
-import Lore.HomeModules (LoadHomeModulesResult (..), defaultLoadHomeModulesOptions, loadHomeModules)
+import Lore.HomeModules (HomeModulesLoadSummary (..), LoadHomeModulesResult (..), defaultLoadHomeModulesOptions, loadHomeModules)
 import Lore.Interpreter (executeStatement)
 import System.Directory (doesFileExist, removeFile)
 import System.FilePath ((</>))
@@ -60,7 +60,7 @@ spec =
               evalResult <- executeStatement "warningValue"
               pure (loadResult, evalResult)
 
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
+          loadSucceeded loadResult `shouldBe` True
           evalResult `shouldBe` Right "5"
 
 writeModule :: FilePath -> String -> String -> IO ()
@@ -97,3 +97,7 @@ isMissingSymbolFailure = \case
     any (T.isInfixOf "not in scope" . diagnosticMessage) diagnostics
   Right _ ->
     False
+
+loadSucceeded :: LoadHomeModulesResult -> Bool
+loadSucceeded (LoadHomeModulesCompleted summary) = summary.homeModulesCompilationSucceeded
+loadSucceeded (LoadHomeModulesPreparationFailed failure) = error ("Expected completed load, got preparation failure: " <> show failure)

@@ -19,12 +19,11 @@ where
 
 import Control.Concurrent (MVar, modifyMVar_, readMVar, threadDelay)
 import Control.Exception (evaluate)
+import Control.Monad ((<=<))
 import Control.Monad.Catch (bracket)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ReaderT (runReaderT), asks)
-import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
-import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Word (Word32, Word64)
 import qualified GHC
@@ -39,10 +38,7 @@ import Lore.Internal.Ghc.DynFlags
     setGhciLikeDynFlags,
     setPackageEnvironmentM,
   )
-import Lore.Internal.Ghc.PackageEnvironment.Types
-  ( GhcEnvironmentSnapshot (..),
-    ResolvedPackageEnvironment (..),
-  )
+import Lore.Internal.Ghc.PackageEnvironment.Types (GhcToolchain (..))
 import Lore.Internal.Monad (LoreMonadT (..), MonadLore)
 import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import Lore.Internal.Session
@@ -50,6 +46,7 @@ import Lore.Internal.Session
     SessionContext (..),
     emptyCoreModuleFactsCache,
     emptyDefinitionModuleIndexCache,
+    emptyExternalSymbolsEnvironmentKeyCache,
     emptyExternalSymbolsIndexCache,
     emptyGeneratedMainModulesRegistry,
     emptyHomeSymbolsIndexCache,
@@ -60,7 +57,6 @@ import Lore.Internal.Session
     emptyParsedModuleFactsCache,
     emptyParsedOccurrenceModuleIndexCache,
     emptySymbolSearchIndexCache,
-    emptySymbolsDependencySetCache,
     emptyTemporalModulesRegistry,
     emptyTypedModuleFactsCache,
     prepareSessionContext,
@@ -189,16 +185,9 @@ runLore sessionConfig lore = do
             pure cwd
         )
         (liftIO . setCurrentDirectory)
-        (\_ -> GHC.runGhcT (Just sessionContext.ghcEnvironmentSnapshot.ghcEnvironmentLibDir) $ setupGhcSession sessionContext >> runReaderT (unLoreMonadT lore) sessionContext)
+        (\_ -> GHC.runGhcT (Just sessionContext.ghcToolchain.ghcToolchainLibDir) $ setupGhcSession sessionContext >> runReaderT (unLoreMonadT lore) sessionContext)
   where
     setupGhcSession sessionContext = do
-      let initialPackageEnvironment =
-            ResolvedPackageEnvironment
-              { resolvedPackageDbStack = sessionContext.ghcEnvironmentSnapshot.ghcEnvironmentPackageDbStack,
-                resolvedExposedUnitIds =
-                  Set.unions
-                    (Map.elems sessionContext.ghcEnvironmentSnapshot.ghcEnvironmentSelectedUnitIdsByPackageName)
-              }
       liftIO $ do
         let workDir = ghcWorkDir sessionConfig
         mapM_
@@ -211,9 +200,10 @@ runLore sessionConfig lore = do
             workDir </> "tmp"
           ]
       modifySessionDynFlagsM
-        ( setPackageEnvironmentM initialPackageEnvironment
-            . setGhciLikeDynFlags (parallelWorkersLimit sessionConfig)
-            . setGhcWorkDirs (ghcWorkDir sessionConfig)
+        ( setPackageEnvironmentM sessionContext.startupPackageEnvironment
+            <=< pure
+              . setGhciLikeDynFlags (parallelWorkersLimit sessionConfig)
+              . setGhcWorkDirs (ghcWorkDir sessionConfig)
         )
       session <- GHC.getSession
       GHC.setSession (installDefinitionCallbacks sessionContext session)
@@ -271,9 +261,9 @@ sessionCacheResetActions =
           setCacheVarStrict sessionContext.symbolSearchIndexCacheVar emptySymbolSearchIndexCache
       },
     SessionCacheResetAction
-      { sessionCacheResetActionName = "symbolsDependencySetCacheVar",
+      { sessionCacheResetActionName = "externalSymbolsEnvironmentKeyCacheVar",
         sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.symbolsDependencySetCacheVar emptySymbolsDependencySetCache
+          setCacheVarStrict sessionContext.externalSymbolsEnvironmentKeyCacheVar emptyExternalSymbolsEnvironmentKeyCache
       },
     SessionCacheResetAction
       { sessionCacheResetActionName = "modSummariesCacheVar",

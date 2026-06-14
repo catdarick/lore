@@ -6,18 +6,19 @@ module Lore.Internal.Package
     ComponentData (..),
     PackageData (..),
     prepareComponentsData,
+    preparePackagesIO,
+    processCabalPackage,
     discoverProject,
     componentMainModulePathCandidates,
     normalizeRelativePath,
     firstExistingPath,
     commonSetIntersection,
-    extractDependencies,
     extractSourceDirs,
   )
 where
 
 import Control.Exception (IOException, try)
-import Control.Monad (forM, unless)
+import Control.Monad (forM)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.RWS (asks)
 import qualified Data.ByteString as BS
@@ -31,6 +32,7 @@ import qualified Distribution.Package as CabalPackage
 import qualified Distribution.PackageDescription as Cabal
 import qualified Distribution.PackageDescription.Configuration as CabalConfig
 import qualified Distribution.PackageDescription.Parsec as CabalParsec
+import Distribution.Pretty (prettyShow)
 import qualified Distribution.System as CabalSystem
 import qualified Distribution.Types.ComponentRequestedSpec as CabalRequested
 import qualified Distribution.Types.Dependency as CabalDependency
@@ -42,18 +44,21 @@ import qualified Distribution.Version as CabalVersion
 import qualified GHC
 import qualified Language.Haskell.Extension as CabalExtension
 import Lore.Internal.Ghc.DynFlags (Extension (..), GhcOption (..), Language (..))
-import Lore.Internal.Ghc.PackageEnvironment.Types (GhcEnvironmentSnapshot (..))
-import Lore.Internal.Package.Materialize (materializeCabalPackageFiles)
+import Lore.Internal.Ghc.PackageEnvironment.Types (GhcToolchain (..))
+import Lore.Internal.Package.Discovery (discoverPackageRoots)
+import Lore.Internal.Package.Materialize (PackageMaterializeRunner, defaultPackageMaterializeRunnerFor, materializeCabalPackageFilesIO)
 import Lore.Internal.Package.Path
   ( commonSetIntersection,
     componentMainModulePathCandidates,
-    extractDependencies,
     extractSourceDirs,
     firstExistingPath,
     normalizeRelativePath,
   )
+import Lore.Internal.Package.Root (PackageRoot)
 import Lore.Internal.Package.Types (ComponentData (..), ComponentKind (..), PackageData (..))
+import Lore.Internal.ProjectProvider (ProjectProvider)
 import Lore.Internal.Session (SessionContext (..))
+import Lore.Internal.SourceText (relativeSourcePath)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import System.FilePath (takeDirectory)
@@ -61,19 +66,25 @@ import UnliftIO.Exception (throwString)
 
 prepareComponentsData :: (MonadLore m) => m [PackageData]
 prepareComponentsData = do
-  ghcVersion <- asks (ghcEnvironmentCompilerVersion . ghcEnvironmentSnapshot)
-  packageRoots <- asks sessionPackageRoots
-  cabalFiles <- materializeCabalPackageFiles packageRoots
+  ghcVersion <- asks (ghcToolchainCompilerVersion . ghcToolchain)
+  provider <- asks projectProvider
+  root <- asks projectRoot
+  packagesResult <-
+    liftIO $
+      preparePackagesIO
+        (defaultPackageMaterializeRunnerFor provider)
+        (const (pure ()))
+        (relativeSourcePath root)
+        provider
+        root
+        ghcVersion
+  (cabalFiles, packages) <-
+    case packagesResult of
+      Left err -> throwString err
+      Right (_packageRoots, preparedCabalFiles, preparedPackages) -> pure (preparedCabalFiles, preparedPackages)
   Log.debug $
     "Loading .cabal manifests and extracting package/component data: "
       <> show cabalFiles
-  eiPackages <- forM cabalFiles (processCabalPackage ghcVersion)
-  let (errors, packages) = partitionEithers eiPackages
-  unless (null errors) $
-    throwString $
-      intercalate
-        "\n  -"
-        ("Errors encountered while loading package .cabal files:" : errors)
   let componentsCount = length (concatMap (.components) packages)
   Log.debug $
     "Successfully loaded "
@@ -82,6 +93,30 @@ prepareComponentsData = do
       <> show componentsCount
       <> " components"
   pure packages
+
+preparePackagesIO ::
+  PackageMaterializeRunner ->
+  (String -> IO ()) ->
+  (FilePath -> FilePath) ->
+  ProjectProvider ->
+  FilePath ->
+  CabalVersion.Version ->
+  IO (Either String ([PackageRoot], [FilePath], [PackageData]))
+preparePackagesIO materializeRunner logInfo displayPath provider root ghcVersion = do
+  packageRootsResult <- discoverPackageRoots provider root
+  case packageRootsResult of
+    Left err -> pure (Left err)
+    Right packageRoots -> do
+      cabalFilesResult <- materializeCabalPackageFilesIO materializeRunner logInfo displayPath packageRoots
+      case cabalFilesResult of
+        Left err -> pure (Left err)
+        Right cabalFiles -> do
+          eiPackages <- forM cabalFiles (processCabalPackage ghcVersion)
+          let (errors, packages) = partitionEithers eiPackages
+          pure $
+            if null errors
+              then Right (packageRoots, cabalFiles, packages)
+              else Left (intercalate "\n  -" ("Errors encountered while loading package .cabal files:" : errors))
 
 discoverProject :: (MonadLore m) => m [PackageData]
 discoverProject =
@@ -209,9 +244,14 @@ mkComponentData kind name maybeMainPath buildInfo modulesToLoad =
       ghcOptions = Set.fromList (map GhcOption (Cabal.hcOptions CabalCompiler.GHC buildInfo)),
       defaultExtensions = Set.fromList (map (Extension . renderCabalExtension) (buildInfo.defaultExtensions <> buildInfo.otherExtensions)),
       dependencies = Set.fromList (map (CabalPackageName.unPackageName . CabalDependency.depPkgName) buildInfo.targetBuildDepends),
+      dependencyRequirements = Set.fromList (map dependencyRequirementFromCabal buildInfo.targetBuildDepends),
       sourceDirs = normalizeSourceDirs (Set.fromList (map CabalPath.getSymbolicPath buildInfo.hsSourceDirs)),
       modules = modulesToLoad
     }
+
+dependencyRequirementFromCabal :: CabalDependency.Dependency -> String
+dependencyRequirementFromCabal dependency =
+  prettyShow dependency
 
 extractLibraryModules :: Cabal.Library -> Set.Set GHC.ModuleName
 extractLibraryModules libraryComponent =

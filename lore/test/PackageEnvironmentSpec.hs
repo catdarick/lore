@@ -1,9 +1,12 @@
 module PackageEnvironmentSpec (spec) where
 
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.RWS (asks)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Distribution.Version as CabalVersion
 import Lore.Internal.Ghc.PackageEnvironment.Index (parsePackageEntries)
 import Lore.Internal.Ghc.PackageEnvironment.Parse
@@ -12,16 +15,18 @@ import Lore.Internal.Ghc.PackageEnvironment.Parse
   )
 import Lore.Internal.Ghc.PackageEnvironment.Probe
   ( GhcEnvironmentProbeRunner (..),
-    captureGhcEnvironmentSnapshotWithRunner,
+    captureGhcEnvironmentWithRunner,
   )
 import Lore.Internal.Ghc.PackageEnvironment.Resolve
   ( packageEnvironmentCacheKey,
     resolveDependencyPackageEnvironment,
   )
 import Lore.Internal.Ghc.PackageEnvironment.Types
-  ( GhcEnvironmentSnapshot (..),
+  ( CapturedGhcEnvironment (..),
+    GhcToolchain (..),
     PackageDb (..),
     PackageDbStack (..),
+    PackageEnvironmentSnapshot (..),
     PackageIndex (..),
     PackageIndexEntry (..),
     PackageNameText (..),
@@ -30,9 +35,21 @@ import Lore.Internal.Ghc.PackageEnvironment.Types
     ResolvedPackageEnvironment (..),
     UnitIdText (..),
   )
+import Lore.Internal.Package.Types (ComponentIdentity (..))
+import Lore.Internal.ProjectEnvironment.Refresh (ProjectEnvironmentRefreshRunners (..), refreshProjectEnvironmentWith)
+import Lore.Internal.ProjectEnvironment.Types
+  ( PreparedProjectDescription (..),
+    ProjectConfigurationSnapshot (..),
+    ProjectEnvironmentFailure (..),
+    ProjectEnvironmentRefresh (..),
+    ProjectEnvironmentState (..),
+  )
 import Lore.Internal.ProjectProvider (ProjectProvider (..))
+import Lore.Internal.Session (SessionContext (..))
+import Lore.Monad (LoreMonadT)
 import System.FilePath (normalise, (</>))
 import Test.Hspec
+import TestSupport (fixtureLoreAt, withFixtureCopy, withFixtureSpec)
 
 spec :: Spec
 spec = do
@@ -269,7 +286,148 @@ spec = do
               }
           ]
 
-  describe "captureGhcEnvironmentSnapshotWithRunner" do
+  withFixtureSpec do
+    describe "refreshProjectEnvironmentWith" do
+      it "first refresh prepares dependencies, captures the environment, and commits state" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          (prepCount, captureCount, committedSnapshot) <-
+            fixtureLoreAt fixture fixtureRoot do
+              provider <- asks projectProvider
+              stableToolchain <- asks ghcToolchain
+              let prepared = mkPreparedProject provider "initial"
+              preparedRef <- liftIO $ newIORef [Right prepared, Right prepared]
+              prepCountRef <- liftIO $ newIORef (0 :: Int)
+              captureCountRef <- liftIO $ newIORef (0 :: Int)
+              let runners =
+                    mkRefreshRunners
+                      stableToolchain
+                      preparedRef
+                      prepCountRef
+                      (pure (Right ()))
+                      captureCountRef
+                      (pure Nothing)
+              refreshResult <- refreshProjectEnvironmentWith runners
+              case refreshResult of
+                Left failure -> error ("Expected successful refresh, got: " <> show failure)
+                Right refresh -> do
+                  prepCount <- liftIO $ readIORef prepCountRef
+                  captureCount <- liftIO $ readIORef captureCountRef
+                  pure (prepCount, captureCount, refresh.refreshedProjectEnvironment.projectEnvironmentConfigurationSnapshot)
+
+          prepCount `shouldBe` 1
+          captureCount `shouldBe` 1
+          committedSnapshot `shouldBe` (mkPreparedSnapshot CabalProject "initial") {projectConfigurationProvider = projectConfigurationProvider committedSnapshot}
+
+      it "unchanged configuration reuses the previous package environment without preparation" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          (prepCount, captureCount, secondChanged) <-
+            fixtureLoreAt fixture fixtureRoot do
+              provider <- asks projectProvider
+              stableToolchain <- asks ghcToolchain
+              let prepared = mkPreparedProject provider "same"
+              preparedRef <- liftIO $ newIORef [Right prepared, Right prepared, Right prepared]
+              prepCountRef <- liftIO $ newIORef (0 :: Int)
+              captureCountRef <- liftIO $ newIORef (0 :: Int)
+              let runners =
+                    mkRefreshRunners
+                      stableToolchain
+                      preparedRef
+                      prepCountRef
+                      (pure (Right ()))
+                      captureCountRef
+                      (pure Nothing)
+              _ <- refreshProjectEnvironmentWith runners
+              secondResult <- refreshProjectEnvironmentWith runners
+              case secondResult of
+                Left failure -> error ("Expected successful refresh, got: " <> show failure)
+                Right refresh -> do
+                  prepCount <- liftIO $ readIORef prepCountRef
+                  captureCount <- liftIO $ readIORef captureCountRef
+                  pure (prepCount, captureCount, refresh.projectEnvironmentChanged)
+
+          prepCount `shouldBe` 1
+          captureCount `shouldBe` 1
+          secondChanged `shouldBe` False
+
+      it "changed configuration prepares dependencies and commits the second post-build project description" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          (prepCount, captureCount, committedSnapshot) <-
+            fixtureLoreAt fixture fixtureRoot do
+              provider <- asks projectProvider
+              stableToolchain <- asks ghcToolchain
+              let initialA = mkPreparedProject provider "initial-a"
+                  postA = mkPreparedProject provider "post-a"
+                  initialB = mkPreparedProject provider "initial-b"
+                  postB = mkPreparedProject provider "post-b"
+              preparedRef <- liftIO $ newIORef [Right initialA, Right postA, Right initialB, Right postB]
+              prepCountRef <- liftIO $ newIORef (0 :: Int)
+              captureCountRef <- liftIO $ newIORef (0 :: Int)
+              let runners =
+                    mkRefreshRunners
+                      stableToolchain
+                      preparedRef
+                      prepCountRef
+                      (pure (Right ()))
+                      captureCountRef
+                      (pure Nothing)
+              _ <- refreshProjectEnvironmentWith runners
+              secondResult <- refreshProjectEnvironmentWith runners
+              case secondResult of
+                Left failure -> error ("Expected successful refresh, got: " <> show failure)
+                Right refresh -> do
+                  prepCount <- liftIO $ readIORef prepCountRef
+                  captureCount <- liftIO $ readIORef captureCountRef
+                  pure (prepCount, captureCount, refresh.refreshedProjectEnvironment.projectEnvironmentConfigurationSnapshot)
+
+          prepCount `shouldBe` 2
+          captureCount `shouldBe` 2
+          projectConfigurationProviderFiles committedSnapshot `shouldBe` projectConfigurationProviderFiles (mkPreparedSnapshot (projectConfigurationProvider committedSnapshot) "post-b")
+
+      it "preparation or capture failure leaves the previous state unchanged" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          (prepCount, captureCount, stateAfterPrepFailure, stateAfterCaptureFailure) <-
+            fixtureLoreAt fixture fixtureRoot do
+              provider <- asks projectProvider
+              stableToolchain <- asks ghcToolchain
+              let baseline = mkPreparedProject provider "baseline"
+                  changedForPrepFailure = mkPreparedProject provider "prep-failure"
+                  changedForCaptureFailure = mkPreparedProject provider "capture-failure"
+              preparedRef <- liftIO $ newIORef [Right baseline, Right baseline, Right changedForPrepFailure, Right baseline, Right changedForCaptureFailure, Right changedForCaptureFailure, Right baseline]
+              prepResultsRef <- liftIO $ newIORef [Right (), Left "prep failed", Right ()]
+              captureResultsRef <- liftIO $ newIORef [Nothing, Just "capture failed"]
+              prepCountRef <- liftIO $ newIORef (0 :: Int)
+              captureCountRef <- liftIO $ newIORef (0 :: Int)
+              let runners =
+                    mkRefreshRunners
+                      stableToolchain
+                      preparedRef
+                      prepCountRef
+                      (popIO prepResultsRef)
+                      captureCountRef
+                      (popIO captureResultsRef)
+              _ <- refreshProjectEnvironmentWith runners
+              prepFailureResult <- refreshProjectEnvironmentWith runners
+              stateAfterPrepFailure <- refreshProjectEnvironmentWith runners
+              captureFailureResult <- refreshProjectEnvironmentWith runners
+              stateAfterCaptureFailure <- refreshProjectEnvironmentWith runners
+              case (prepFailureResult, captureFailureResult, stateAfterPrepFailure, stateAfterCaptureFailure) of
+                (Left (ProjectEnvironmentFailed _), Left (ProjectEnvironmentFailed _), Right afterPrep, Right afterCapture) -> do
+                  prepCount <- liftIO $ readIORef prepCountRef
+                  captureCount <- liftIO $ readIORef captureCountRef
+                  pure
+                    ( prepCount,
+                      captureCount,
+                      afterPrep.refreshedProjectEnvironment.projectEnvironmentConfigurationSnapshot,
+                      afterCapture.refreshedProjectEnvironment.projectEnvironmentConfigurationSnapshot
+                    )
+                other -> error ("Unexpected refresh results: " <> showRefreshResults other)
+
+          prepCount `shouldBe` 3
+          captureCount `shouldBe` 2
+          projectConfigurationProviderFiles stateAfterPrepFailure `shouldBe` projectConfigurationProviderFiles (mkPreparedSnapshot (projectConfigurationProvider stateAfterPrepFailure) "baseline")
+          projectConfigurationProviderFiles stateAfterCaptureFailure `shouldBe` projectConfigurationProviderFiles (mkPreparedSnapshot (projectConfigurationProvider stateAfterCaptureFailure) "baseline")
+
+  describe "captureGhcEnvironmentWithRunner" do
     it "fails when selected unit-id is not in the package index" do
       let runner =
             GhcEnvironmentProbeRunner
@@ -285,7 +443,7 @@ spec = do
                 runBuildPackageIndex = \_ _ _ -> pure (Right (mkPackageIndex []))
               }
 
-      result <- captureGhcEnvironmentSnapshotWithRunner runner StackProject "/tmp/project"
+      result <- captureGhcEnvironmentWithRunner runner StackProject "/tmp/project"
       result `shouldSatisfy` isLeft
       either id (const "") result `shouldContain` "not present in the ghc-pkg package index dump"
 
@@ -320,24 +478,30 @@ spec = do
                     )
               }
 
-      result <- captureGhcEnvironmentSnapshotWithRunner runner StackProject "/tmp/project"
+      result <- captureGhcEnvironmentWithRunner runner StackProject "/tmp/project"
       result
         `shouldBe` Right
-          GhcEnvironmentSnapshot
-            { ghcEnvironmentCompilerExe = "/tmp/fake-ghc",
-              ghcEnvironmentCompilerVersion = CabalVersion.mkVersion [9, 6, 5],
-              ghcEnvironmentGhcPkgExe = "/tmp/fake-ghc-pkg",
-              ghcEnvironmentLibDir = "/tmp/fake-libdir",
-              ghcEnvironmentPackageDbStack = PackageDbStack [GlobalPackageDb],
-              ghcEnvironmentPackageIndex =
-                mkPackageIndex
-                  [ mkEntry "text" "text-2.0.2-old",
-                    mkEntry "text" "text-2.1.1-new"
-                  ],
-              ghcEnvironmentSelectedUnitIdsByPackageName =
-                Map.singleton
-                  (PackageNameText "text")
-                  (Set.fromList [UnitIdText "text-2.0.2-old", UnitIdText "text-2.1.1-new"])
+          CapturedGhcEnvironment
+            { capturedGhcToolchain =
+                GhcToolchain
+                  { ghcToolchainCompilerExe = "/tmp/fake-ghc",
+                    ghcToolchainCompilerVersion = CabalVersion.mkVersion [9, 6, 5],
+                    ghcToolchainGhcPkgExe = "/tmp/fake-ghc-pkg",
+                    ghcToolchainLibDir = "/tmp/fake-libdir"
+                  },
+              capturedPackageEnvironment =
+                PackageEnvironmentSnapshot
+                  { packageEnvironmentPackageDbStack = PackageDbStack [GlobalPackageDb],
+                    packageEnvironmentPackageIndex =
+                      mkPackageIndex
+                        [ mkEntry "text" "text-2.0.2-old",
+                          mkEntry "text" "text-2.1.1-new"
+                        ],
+                    packageEnvironmentSelectedUnitIdsByPackageName =
+                      Map.singleton
+                        (PackageNameText "text")
+                        (Set.fromList [UnitIdText "text-2.0.2-old", UnitIdText "text-2.1.1-new"])
+                  }
             }
 
     it "passes normalized package DB stack to the package-index runner" do
@@ -366,7 +530,7 @@ spec = do
                   pure (Right (mkPackageIndex [mkEntry "text" "text-2.1.1-selected"]))
               }
 
-      result <- captureGhcEnvironmentSnapshotWithRunner runner CabalProject "/tmp/work"
+      result <- captureGhcEnvironmentWithRunner runner CabalProject "/tmp/work"
       result `shouldSatisfy` isRight
 
       capturedPackageDbStack <- readIORef capturedPackageDbStackRef
@@ -385,7 +549,7 @@ spec = do
                   pure (Right (mkPackageIndex []))
               }
 
-      result <- captureGhcEnvironmentSnapshotWithRunner runner StackProject "/tmp/work"
+      result <- captureGhcEnvironmentWithRunner runner StackProject "/tmp/work"
       result `shouldSatisfy` isRight
 
       capturedPackageDbStack <- readIORef capturedPackageDbStackRef
@@ -400,7 +564,7 @@ spec = do
                 runBuildPackageIndex = \_ _ _ -> pure (Left "package index should not be called")
               }
 
-      result <- captureGhcEnvironmentSnapshotWithRunner runner StackProject "/tmp/work"
+      result <- captureGhcEnvironmentWithRunner runner StackProject "/tmp/work"
       result `shouldSatisfy` isLeft
       either id (const "") result `shouldContain` "referenced file does not exist"
 
@@ -416,15 +580,75 @@ spec = do
       cacheKey
         `shouldBe` Set.fromList ["package-db:0:global", "package-db:1:path:/db", "package:id:text-2.1.1-aaaa"]
 
-snapshotWithoutText :: GhcEnvironmentSnapshot
+snapshotWithoutText :: PackageEnvironmentSnapshot
 snapshotWithoutText =
   mkSnapshot [] Map.empty
 
-snapshotUniqueText :: GhcEnvironmentSnapshot
+mkRefreshRunners ::
+  GhcToolchain ->
+  IORef [Either ProjectEnvironmentFailure PreparedProjectDescription] ->
+  IORef Int ->
+  IO (Either String ()) ->
+  IORef Int ->
+  IO (Maybe String) ->
+  ProjectEnvironmentRefreshRunners (LoreMonadT IO)
+mkRefreshRunners stableToolchain preparedRef prepCountRef prepResult captureCountRef captureFailure =
+  ProjectEnvironmentRefreshRunners
+    { refreshRunnerPrepareDescription = liftIO (popIO preparedRef),
+      refreshRunnerPrepareDependencies = \_ _ -> do
+        modifyIORef' prepCountRef (+ 1)
+        prepResult,
+      refreshRunnerCaptureEnvironment = \_ _ -> do
+        modifyIORef' captureCountRef (+ 1)
+        maybeFailure <- captureFailure
+        pure case maybeFailure of
+          Just failure -> Left failure
+          Nothing -> Right (mkCapturedEnvironment stableToolchain)
+    }
+
+popIO :: IORef [a] -> IO a
+popIO ref = do
+  values <- readIORef ref
+  case values of
+    [] -> fail "Unexpected empty fake runner result queue."
+    value : remaining -> do
+      writeIORef ref remaining
+      pure value
+
+mkCapturedEnvironment :: GhcToolchain -> CapturedGhcEnvironment
+mkCapturedEnvironment stableToolchain =
+  CapturedGhcEnvironment
+    { capturedGhcToolchain = stableToolchain,
+      capturedPackageEnvironment = mkSnapshot [] Map.empty
+    }
+
+mkPreparedProject :: ProjectProvider -> String -> PreparedProjectDescription
+mkPreparedProject provider tag =
+  PreparedProjectDescription
+    { preparedPackageRoots = [],
+      preparedCabalFiles = [],
+      preparedPackages = [],
+      preparedRequiredExternalDependencies = Set.empty,
+      preparedConfigurationSnapshot = mkPreparedSnapshot provider tag
+    }
+
+mkPreparedSnapshot :: ProjectProvider -> String -> ProjectConfigurationSnapshot
+mkPreparedSnapshot provider tag =
+  ProjectConfigurationSnapshot
+    { projectConfigurationProvider = provider,
+      projectConfigurationPackageRoots = [],
+      projectConfigurationDependencies = Map.singleton (ComponentIdentity "pkg" "library") (Set.singleton tag),
+      projectConfigurationProviderFiles = [("provider", TE.encodeUtf8 (T.pack tag))]
+    }
+
+showRefreshResults :: (Either ProjectEnvironmentFailure ProjectEnvironmentRefresh, Either ProjectEnvironmentFailure ProjectEnvironmentRefresh, Either ProjectEnvironmentFailure ProjectEnvironmentRefresh, Either ProjectEnvironmentFailure ProjectEnvironmentRefresh) -> String
+showRefreshResults = show
+
+snapshotUniqueText :: PackageEnvironmentSnapshot
 snapshotUniqueText =
   mkSnapshot [mkEntry "text" "text-2.1.1-aaaa"] Map.empty
 
-snapshotAmbiguousText :: GhcEnvironmentSnapshot
+snapshotAmbiguousText :: PackageEnvironmentSnapshot
 snapshotAmbiguousText =
   mkSnapshot
     [ mkEntry "text" "text-2.0.2-old",
@@ -432,7 +656,7 @@ snapshotAmbiguousText =
     ]
     Map.empty
 
-snapshotAmbiguousWithSelection :: GhcEnvironmentSnapshot
+snapshotAmbiguousWithSelection :: PackageEnvironmentSnapshot
 snapshotAmbiguousWithSelection =
   mkSnapshot
     [ mkEntry "text" "text-2.0.2-old",
@@ -440,16 +664,12 @@ snapshotAmbiguousWithSelection =
     ]
     (Map.singleton (PackageNameText "text") (Set.singleton (UnitIdText "text-2.1.1-new")))
 
-mkSnapshot :: [PackageIndexEntry] -> Map.Map PackageNameText (Set.Set UnitIdText) -> GhcEnvironmentSnapshot
+mkSnapshot :: [PackageIndexEntry] -> Map.Map PackageNameText (Set.Set UnitIdText) -> PackageEnvironmentSnapshot
 mkSnapshot packageEntries selectedUnitIdsByPackageName =
-  GhcEnvironmentSnapshot
-    { ghcEnvironmentCompilerExe = "ghc",
-      ghcEnvironmentCompilerVersion = CabalVersion.mkVersion [9, 6, 5],
-      ghcEnvironmentGhcPkgExe = "ghc-pkg",
-      ghcEnvironmentLibDir = "/libdir",
-      ghcEnvironmentPackageDbStack = PackageDbStack [GlobalPackageDb],
-      ghcEnvironmentPackageIndex = mkPackageIndex packageEntries,
-      ghcEnvironmentSelectedUnitIdsByPackageName = selectedUnitIdsByPackageName
+  PackageEnvironmentSnapshot
+    { packageEnvironmentPackageDbStack = PackageDbStack [GlobalPackageDb],
+      packageEnvironmentPackageIndex = mkPackageIndex packageEntries,
+      packageEnvironmentSelectedUnitIdsByPackageName = selectedUnitIdsByPackageName
     }
 
 mkPackageIndex :: [PackageIndexEntry] -> PackageIndex

@@ -1,5 +1,6 @@
 module Lore.Internal.HomeModules
-  ( LoadHomeModulesResult (..),
+  ( HomeModulesLoadSummary (..),
+    LoadHomeModulesResult (..),
     LoadHomeModulesOptions (..),
     defaultLoadHomeModulesOptions,
     lookupLastLoadHomeModulesResultCache,
@@ -9,12 +10,13 @@ module Lore.Internal.HomeModules
 where
 
 import qualified Control.Concurrent.MVar as MVar
-import Control.Monad ((<=<))
+import Control.Monad (when, (<=<))
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.RWS (asks)
 import qualified Data.Set as Set
 import qualified GHC
-import Lore.Internal.Ghc.DynFlags (modifySessionDynFlagsM, setGhcOptionsAndExtensions, setGhcSourceDirs, setPackageEnvironmentM)
+import qualified GHC.Driver.Make as GHC
+import Lore.Internal.Ghc.DynFlags (invalidatePackageDbCacheM, modifySessionDynFlagsM, setGhcOptionsAndExtensions, setGhcSourceDirs, setPackageEnvironmentM)
 import Lore.Internal.HomeModules.AutoRefactorLoop (loadHomeModulesWithAutoRefactorRetries)
 import Lore.Internal.HomeModules.LoadAttempt (HomeModulesLoadAttempt (..), countLoadedHomeModules)
 import Lore.Internal.HomeModules.Plan
@@ -22,12 +24,14 @@ import Lore.Internal.HomeModules.Plan
     HomeModulesLoadPlan (..),
     HomeModulesSelection (..),
     homeModulesSelectionTotal,
-    prepareHomeModulesLoadInputs,
+    prepareHomeModulesLoadInputsFromProjectEnvironment,
     prepareHomeModulesLoadPlan,
   )
-import Lore.Internal.HomeModules.Result (LoadHomeModulesResult (..))
+import Lore.Internal.HomeModules.Result (HomeModulesLoadSummary (..), LoadHomeModulesResult (..))
 import Lore.Internal.Interpreter (refreshInterpreterContext)
-import Lore.Internal.Lookup.SymbolsMap (setSymbolsDependencySetCache)
+import Lore.Internal.Lookup.SymbolsMap (setExternalSymbolsEnvironmentKey)
+import Lore.Internal.ProjectEnvironment.Refresh (refreshProjectEnvironment)
+import Lore.Internal.ProjectEnvironment.Types (ProjectEnvironmentRefresh (..))
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.Session.Cache.Types (LastLoadHomeModulesResultCache (..))
 import Lore.Internal.Session.CacheInvalidation (invalidateCachesForHomeModuleConfigurationChange)
@@ -60,19 +64,27 @@ storeLastLoadHomeModulesResultCache loadHomeModulesResult = do
 
 loadHomeModules :: (MonadLore m) => LoadHomeModulesOptions -> m LoadHomeModulesResult
 loadHomeModules options = do
-  inputs <- prepareHomeModulesLoadInputs
-  plan <- prepareHomeModulesLoadPlan inputs
-  configureHomeModulesSession plan
-  attempt <- runHomeModulesLoad options plan
-  result <- finalizeHomeModulesLoad plan attempt
+  refreshResult <- refreshProjectEnvironment
+  result <- case refreshResult of
+    Left failure -> pure (LoadHomeModulesPreparationFailed failure)
+    Right refresh -> do
+      inputs <- prepareHomeModulesLoadInputsFromProjectEnvironment refresh.refreshedProjectEnvironment
+      plan <- prepareHomeModulesLoadPlan inputs
+      configureHomeModulesSession refresh.projectEnvironmentChanged plan
+      attempt <- runHomeModulesLoad options plan
+      finalizeHomeModulesLoad plan attempt
   storeLastLoadHomeModulesResultCache result
   pure result
 
-configureHomeModulesSession :: (MonadLore m) => HomeModulesLoadPlan -> m ()
-configureHomeModulesSession plan = do
+configureHomeModulesSession :: (MonadLore m) => Bool -> HomeModulesLoadPlan -> m ()
+configureHomeModulesSession packageEnvironmentChanged plan = do
   logHomeModulesLoadPlanDetails plan
+  when packageEnvironmentChanged do
+    replaceIfaceCache
+    invalidatePackageDbCacheM
+    Log.debug "Invalidated GHC package database cache after package environment change."
   invalidateCachesForHomeModuleConfigurationChange
-  setSymbolsDependencySetCache plan.homeModulesLoadConfig.homeModulesPackageEnvironmentCacheKey
+  setExternalSymbolsEnvironmentKey plan.homeModulesLoadConfig.homeModulesPackageEnvironmentCacheKey
   modifySessionDynFlagsM
     ( setGhcOptionsAndExtensions
         plan.homeModulesLoadConfig.homeModulesCommonLanguage
@@ -82,6 +94,13 @@ configureHomeModulesSession plan = do
         <=< setPackageEnvironmentM plan.homeModulesLoadConfig.homeModulesPackageEnvironment
     )
   GHC.setTargets plan.homeModulesSelection.ghcTargets
+
+replaceIfaceCache :: (MonadLore m) => m ()
+replaceIfaceCache = do
+  cacheVar <- asks ifaceCacheVar
+  newCache <- liftIO GHC.newIfaceCache
+  liftIO $ MVar.modifyMVar_ cacheVar (const (pure newCache))
+  Log.debug "Created a fresh GHC interface cache after package environment change."
 
 runHomeModulesLoad ::
   (MonadLore m) =>
@@ -123,19 +142,21 @@ finalizeHomeModulesLoad plan attempt = do
       Log.err "Failed to load GHC targets after updating. Please check the provided GHC options, source directories, and dependencies for correctness."
 
   pure
-    LoadHomeModulesResult
-      { loadHomeModulesDiagnostics = attempt.homeModulesLoadAttemptDiagnostics,
-        loadHomeModulesSucceeded =
-          case attempt.homeModulesLoadAttemptResult of
-            GHC.Succeeded -> True
-            GHC.Failed -> False,
-        loadHomeModulesLoaded = loadedModulesCount,
-        loadHomeModulesFailed = failedModulesCount,
-        loadHomeModulesAutofixed = Set.size attempt.homeModulesLoadAttemptAutoRefactFiles,
-        loadHomeModulesAutofixedFiles = autofixedFilesDisplay,
-        loadHomeModulesAutofixSummaryByFile = autofixSummaryDisplay,
-        loadHomeModulesTotal = totalModulesCount
-      }
+    ( LoadHomeModulesCompleted
+        HomeModulesLoadSummary
+          { homeModulesDiagnostics = attempt.homeModulesLoadAttemptDiagnostics,
+            homeModulesCompilationSucceeded =
+              case attempt.homeModulesLoadAttemptResult of
+                GHC.Succeeded -> True
+                GHC.Failed -> False,
+            homeModulesLoaded = loadedModulesCount,
+            homeModulesFailed = failedModulesCount,
+            homeModulesAutofixed = Set.size attempt.homeModulesLoadAttemptAutoRefactFiles,
+            homeModulesAutofixedFiles = autofixedFilesDisplay,
+            homeModulesAutofixSummaryByFile = autofixSummaryDisplay,
+            homeModulesTotal = totalModulesCount
+          }
+    )
 
 logHomeModulesLoadPlanDetails :: (MonadLore m) => HomeModulesLoadPlan -> m ()
 logHomeModulesLoadPlanDetails plan = do

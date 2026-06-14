@@ -13,7 +13,7 @@ module Lore.Internal.Session
     emptyParsedModuleFactsCache,
     emptyParsedOccurrenceModuleIndexCache,
     emptySymbolSearchIndexCache,
-    emptySymbolsDependencySetCache,
+    emptyExternalSymbolsEnvironmentKeyCache,
     emptyTemporalModulesRegistry,
     emptyTypedModuleFactsCache,
     preparePackageMaterializationBeforeEnvironmentProbe,
@@ -32,17 +32,20 @@ import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
 import Lore.Internal.Definition.Cache.Types (CoreModuleFactsCache, DefinitionModuleIndexCache (..), ModuleCache (..), ParsedModuleFactsCache, ParsedOccurrenceModuleIndexCache (..), TypedModuleFactsCache)
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
-import Lore.Internal.Ghc.PackageEnvironment.Probe (captureGhcEnvironmentSnapshot)
+import Lore.Internal.Ghc.PackageEnvironment.Probe (captureGhcEnvironment)
 import Lore.Internal.Ghc.PackageEnvironment.Types
-  ( GhcEnvironmentSnapshot,
+  ( CapturedGhcEnvironment (..),
+    GhcToolchain,
+    PackageEnvironmentSnapshot (..),
+    ResolvedPackageEnvironment (..),
   )
 import Lore.Internal.Lookup.Cache.Types
-  ( ExternalSymbolsIndexCache (..),
+  ( ExternalSymbolsEnvironmentKeyCache (..),
+    ExternalSymbolsIndexCache (..),
     HomeSymbolsIndexCache (..),
     ModSummariesCache (..),
     NameToInstancesIndexCache (..),
     SymbolSearchIndexCache (..),
-    SymbolsDependencySetCache (..),
   )
 import Lore.Internal.Package.Discovery (discoverPackageRoots)
 import Lore.Internal.Package.Materialize
@@ -51,6 +54,7 @@ import Lore.Internal.Package.Materialize
     materializeCabalPackageFilesIO,
   )
 import Lore.Internal.Package.Root (PackageRoot)
+import Lore.Internal.ProjectEnvironment.Types (ProjectEnvironmentState)
 import Lore.Internal.ProjectProvider
   ( ProjectProvider,
     detectProjectProvider,
@@ -68,14 +72,14 @@ data SessionContext = SessionContext
     loggerHandle :: LoggerHandle,
     customPrelude :: Maybe Text,
     testSuiteDefaultArguments :: [String],
-    sessionPackageRoots :: [PackageRoot],
-    sessionCabalPackageFiles :: [FilePath],
-    ghcEnvironmentSnapshot :: GhcEnvironmentSnapshot,
-    ifaceCache :: GHC.ModIfaceCache,
+    ghcToolchain :: GhcToolchain,
+    startupPackageEnvironment :: ResolvedPackageEnvironment,
+    projectEnvironmentStateVar :: MVar (Maybe ProjectEnvironmentState),
+    ifaceCacheVar :: MVar GHC.ModIfaceCache,
     homeSymbolsIndexCacheVar :: MVar HomeSymbolsIndexCache,
     externalSymbolsIndexCacheVar :: MVar ExternalSymbolsIndexCache,
     symbolSearchIndexCacheVar :: MVar SymbolSearchIndexCache,
-    symbolsDependencySetCacheVar :: MVar SymbolsDependencySetCache,
+    externalSymbolsEnvironmentKeyCacheVar :: MVar ExternalSymbolsEnvironmentKeyCache,
     modSummariesCacheVar :: MVar ModSummariesCache,
     nameToInstancesIndexCacheVar :: MVar NameToInstancesIndexCache,
     parsedOccurrenceModuleIndexCacheVar :: MVar ParsedOccurrenceModuleIndexCache,
@@ -113,9 +117,9 @@ emptySymbolSearchIndexCache :: SymbolSearchIndexCache
 emptySymbolSearchIndexCache =
   SymbolSearchIndexCache Nothing
 
-emptySymbolsDependencySetCache :: SymbolsDependencySetCache
-emptySymbolsDependencySetCache =
-  SymbolsDependencySetCache Set.empty
+emptyExternalSymbolsEnvironmentKeyCache :: ExternalSymbolsEnvironmentKeyCache
+emptyExternalSymbolsEnvironmentKeyCache =
+  ExternalSymbolsEnvironmentKeyCache Set.empty
 
 emptyModSummariesCache :: ModSummariesCache
 emptyModSummariesCache =
@@ -174,16 +178,19 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, conf
         preparePackageMaterializationBeforeEnvironmentProbe loggerHandle projectProvider projectRoot
       case eiMaterializedPackages of
         Left err -> pure (Left err)
-        Right (sessionPackageRoots, sessionCabalPackageFiles) -> do
-          eiGhcEnvironmentSnapshot <- captureGhcEnvironmentSnapshot projectProvider projectRoot
-          case eiGhcEnvironmentSnapshot of
+        Right _ -> do
+          eiGhcEnvironment <- captureGhcEnvironment projectProvider projectRoot
+          case eiGhcEnvironment of
             Left err -> pure (Left err)
-            Right ghcEnvironmentSnapshot -> do
+            Right capturedEnvironment -> do
+              let startupPackageEnvironment = resolvedEnvironmentFromSnapshot capturedEnvironment.capturedPackageEnvironment
+              projectEnvironmentStateVar <- GHC.newMVar Nothing
               ifaceCache <- GHC.newIfaceCache
+              ifaceCacheVar <- GHC.newMVar ifaceCache
               homeSymbolsIndexCacheVar <- GHC.newMVar emptyHomeSymbolsIndexCache
               externalSymbolsIndexCacheVar <- GHC.newMVar emptyExternalSymbolsIndexCache
               symbolSearchIndexCacheVar <- GHC.newMVar emptySymbolSearchIndexCache
-              symbolsDependencySetCacheVar <- GHC.newMVar emptySymbolsDependencySetCache
+              externalSymbolsEnvironmentKeyCacheVar <- GHC.newMVar emptyExternalSymbolsEnvironmentKeyCache
               modSummariesCacheVar <- GHC.newMVar emptyModSummariesCache
               nameToInstancesIndexCacheVar <- GHC.newMVar emptyNameToInstancesIndexCache
               parsedOccurrenceModuleIndexCacheVar <- GHC.newMVar emptyParsedOccurrenceModuleIndexCache
@@ -206,14 +213,14 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, conf
                       loggerHandle,
                       customPrelude,
                       testSuiteDefaultArguments,
-                      sessionPackageRoots,
-                      sessionCabalPackageFiles,
-                      ghcEnvironmentSnapshot,
-                      ifaceCache,
+                      ghcToolchain = capturedEnvironment.capturedGhcToolchain,
+                      startupPackageEnvironment,
+                      projectEnvironmentStateVar,
+                      ifaceCacheVar,
                       homeSymbolsIndexCacheVar,
                       externalSymbolsIndexCacheVar,
                       symbolSearchIndexCacheVar,
-                      symbolsDependencySetCacheVar,
+                      externalSymbolsEnvironmentKeyCacheVar,
                       modSummariesCacheVar,
                       nameToInstancesIndexCacheVar,
                       parsedOccurrenceModuleIndexCacheVar,
@@ -270,3 +277,10 @@ preparePackageMaterializationBeforeEnvironmentProbeWithRunner runner loggerHandl
             level = Info,
             content = message
           }
+
+resolvedEnvironmentFromSnapshot :: PackageEnvironmentSnapshot -> ResolvedPackageEnvironment
+resolvedEnvironmentFromSnapshot snapshot =
+  ResolvedPackageEnvironment
+    { resolvedPackageDbStack = snapshot.packageEnvironmentPackageDbStack,
+      resolvedExposedUnitIds = Set.unions (Map.elems snapshot.packageEnvironmentSelectedUnitIdsByPackageName)
+    }

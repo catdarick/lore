@@ -1,7 +1,6 @@
 module Lore.Internal.Package.Path
   ( commonSetIntersection,
     componentMainModulePathCandidates,
-    extractDependencies,
     extractSourceDirs,
     firstExistingPath,
     isAncestorPath,
@@ -64,10 +63,6 @@ firstExistingPath (path : rest) = do
 commonSetIntersection :: (Ord a) => [Set.Set a] -> Set.Set a
 commonSetIntersection [] = Set.empty
 commonSetIntersection sets = foldr1 Set.intersection sets
-
-extractDependencies :: [ComponentData] -> Set.Set String
-extractDependencies components =
-  Set.unions (map dependencies components)
 
 extractSourceDirs :: PackageData -> Set.Set FilePath
 extractSourceDirs packageData = do

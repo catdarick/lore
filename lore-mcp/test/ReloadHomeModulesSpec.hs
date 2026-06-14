@@ -10,7 +10,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import GHC.Generics (Generic)
-import Lore (LoadHomeModulesResult (..))
+import Lore (HomeModulesLoadSummary (..), LoadHomeModulesResult (..))
 import Lore.JsonRpc.Server (JsonRpcResponse (..))
 import Lore.Mcp.Monad (LoreMcpMonad)
 import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Tools (..))
@@ -285,3 +285,25 @@ decodeStructuredReload response =
             >> pure (ReloadStructuredContent "" 0 0 0 0 [])
     _ ->
       expectationFailure ("expected JsonRpcResult, got: " <> show response) >> pure (ReloadStructuredContent "" 0 0 0 0 [])
+
+loadSummary :: LoadHomeModulesResult -> HomeModulesLoadSummary
+loadSummary (LoadHomeModulesCompleted summary) = summary
+loadSummary (LoadHomeModulesPreparationFailed failure) = error ("Expected completed load, got preparation failure: " <> show failure)
+
+loadHomeModulesLoaded :: LoadHomeModulesResult -> Int
+loadHomeModulesLoaded = (.homeModulesLoaded) . loadSummary
+
+loadHomeModulesFailed :: LoadHomeModulesResult -> Int
+loadHomeModulesFailed = (.homeModulesFailed) . loadSummary
+
+loadHomeModulesTotal :: LoadHomeModulesResult -> Int
+loadHomeModulesTotal = (.homeModulesTotal) . loadSummary
+
+loadHomeModulesAutofixed :: LoadHomeModulesResult -> Int
+loadHomeModulesAutofixed = (.homeModulesAutofixed) . loadSummary
+
+loadHomeModulesAutofixedFiles :: LoadHomeModulesResult -> [FilePath]
+loadHomeModulesAutofixedFiles = (.homeModulesAutofixedFiles) . loadSummary
+
+loadHomeModulesAutofixSummaryByFile :: LoadHomeModulesResult -> [(FilePath, [String])]
+loadHomeModulesAutofixSummaryByFile = (.homeModulesAutofixSummaryByFile) . loadSummary

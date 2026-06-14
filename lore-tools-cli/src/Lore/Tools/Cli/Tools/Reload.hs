@@ -3,7 +3,7 @@ module Lore.Tools.Cli.Tools.Reload
   )
 where
 
-import Lore (LoadHomeModulesResult (..))
+import Lore (HomeModulesLoadSummary (..), LoadHomeModulesResult (..))
 import Lore.Tools.Cli.Internal.Annotated (CliArgs)
 import Lore.Tools.Cli.Internal.Tool
   ( CliInvocationResult (..),
@@ -57,7 +57,8 @@ runReload args = do
     CliInvocationResult
       { cliInvocationResultDoc = loreDoc,
         cliInvocationResultStatus =
-          if loadResult.loadHomeModulesSucceeded
-            then CliInvocationSucceeded
-            else CliInvocationFailed
+          case loadResult of
+            LoadHomeModulesCompleted summary
+              | summary.homeModulesCompilationSucceeded -> CliInvocationSucceeded
+            _ -> CliInvocationFailed
       }

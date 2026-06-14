@@ -4,7 +4,9 @@ module RunTestSuiteOutcomeSpec
 where
 
 import Lore
-  ( LoadHomeModulesResult (..),
+  ( HomeModulesLoadSummary (..),
+    LoadHomeModulesResult (..),
+    ProjectEnvironmentFailure (..),
     TestSuiteComponentResult (..),
     TestSuiteComponentStatus (..),
   )
@@ -29,10 +31,18 @@ spec =
       let toolRun =
             ToolRunReady
               RenderedResult
-                { renderedResultValue = RunTestSuiteCompilationFailed (mkLoadResult False),
+                { renderedResultValue = RunTestSuiteLoadFailed (LoadHomeModulesCompleted (mkLoadSummary False)),
                   renderedResultDocument = paragraph "compile failed"
                 }
       runTestSuiteStatus toolRun `shouldBe` RunTestSuiteStatusCompilationFailure
+
+    it "classifies project environment failures" do
+      runTestSuiteStatus (loadFailedToolRun (LoadHomeModulesPreparationFailed (ProjectEnvironmentFailed "bad project")))
+        `shouldBe` RunTestSuiteStatusEnvironmentFailure
+
+    it "classifies project toolchain changes as restart-required" do
+      runTestSuiteStatus (loadFailedToolRun (LoadHomeModulesPreparationFailed (ProjectEnvironmentRestartRequired "restart Lore")))
+        `shouldBe` RunTestSuiteStatusRestartRequired
 
     it "classifies invalid test arguments" do
       let toolRun =
@@ -131,6 +141,14 @@ executedToolRun execution =
         renderedResultDocument = paragraph "executed"
       }
 
+loadFailedToolRun :: LoadHomeModulesResult -> ToolRun (RenderedResult RunTestSuiteOutcome)
+loadFailedToolRun loadResult =
+  ToolRunReady
+    RenderedResult
+      { renderedResultValue = RunTestSuiteLoadFailed loadResult,
+        renderedResultDocument = paragraph "load failed"
+      }
+
 componentResult :: TestSuiteComponentStatus -> TestSuiteComponentResult
 componentResult status =
   TestSuiteComponentResult
@@ -140,15 +158,15 @@ componentResult status =
       status
     }
 
-mkLoadResult :: Bool -> LoadHomeModulesResult
-mkLoadResult succeeded =
-  LoadHomeModulesResult
-    { loadHomeModulesDiagnostics = [],
-      loadHomeModulesSucceeded = succeeded,
-      loadHomeModulesLoaded = if succeeded then 3 else 2,
-      loadHomeModulesFailed = if succeeded then 0 else 1,
-      loadHomeModulesAutofixed = 0,
-      loadHomeModulesAutofixedFiles = [],
-      loadHomeModulesAutofixSummaryByFile = [],
-      loadHomeModulesTotal = 3
+mkLoadSummary :: Bool -> HomeModulesLoadSummary
+mkLoadSummary succeeded =
+  HomeModulesLoadSummary
+    { homeModulesDiagnostics = [],
+      homeModulesCompilationSucceeded = succeeded,
+      homeModulesLoaded = if succeeded then 3 else 2,
+      homeModulesFailed = if succeeded then 0 else 1,
+      homeModulesAutofixed = 0,
+      homeModulesAutofixedFiles = [],
+      homeModulesAutofixSummaryByFile = [],
+      homeModulesTotal = 3
     }

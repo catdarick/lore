@@ -6,6 +6,7 @@ module Lore.Internal.Package.Discovery
   )
 where
 
+import Control.Exception (IOException, try)
 import Control.Monad (filterM)
 import qualified Data.ByteString as BS
 import Data.List (isPrefixOf, sort, stripPrefix)
@@ -63,18 +64,22 @@ discoverPackageRoots provider projectRoot =
 
 discoverStackPackageRoots :: FilePath -> IO (Either String [PackageRoot])
 discoverStackPackageRoots projectRoot = do
-  stackYamlContent <- BS.readFile (projectRoot </> "stack.yaml")
-  case Yaml.decodeEither' stackYamlContent of
-    Left parseError ->
-      pure (Left ("Failed to parse stack.yaml: " <> show parseError))
-    Right StackConfig {packages = packageEntries} -> do
-      let configuredPackageEntries = map packagePath (filter (not . extraDep) packageEntries)
-          localPackageEntries =
-            if null configuredPackageEntries
-              then ["."]
-              else configuredPackageEntries
-      eiRoots <- mapM (resolveStackPackageRootFromEntry projectRoot) localPackageEntries
-      pure (normalizePackageRoots <$> sequence eiRoots)
+  let stackYamlPath = projectRoot </> "stack.yaml"
+  eiStackYamlContent <- try (BS.readFile stackYamlPath) :: IO (Either IOException BS.ByteString)
+  case eiStackYamlContent of
+    Left ioErr -> pure (Left ("Failed to read stack project file " <> stackYamlPath <> ": " <> show ioErr))
+    Right stackYamlContent ->
+      case Yaml.decodeEither' stackYamlContent of
+        Left parseError ->
+          pure (Left ("Failed to parse stack.yaml: " <> show parseError))
+        Right StackConfig {packages = packageEntries} -> do
+          let configuredPackageEntries = map packagePath (filter (not . extraDep) packageEntries)
+              localPackageEntries =
+                if null configuredPackageEntries
+                  then ["."]
+                  else configuredPackageEntries
+          eiRoots <- mapM (resolveStackPackageRootFromEntry projectRoot) localPackageEntries
+          pure (normalizePackageRoots <$> sequence eiRoots)
 
 resolveStackPackageRootFromEntry :: FilePath -> FilePath -> IO (Either String PackageRoot)
 resolveStackPackageRootFromEntry projectRoot packageEntry
@@ -141,15 +146,19 @@ discoverCabalPackageRoots projectRoot = do
 
 resolveCabalPackageRootsFromProjectFile :: FilePath -> IO (Either String [PackageRoot])
 resolveCabalPackageRootsFromProjectFile projectRoot = do
-  cabalProjectText <- readFile (projectRoot </> "cabal.project")
-  let packageEntries = extractCabalProjectPackageEntries cabalProjectText
-  if null packageEntries
-    then pure (Left "Detected Cabal project, but 'cabal.project' does not define any package entries in the packages: section.")
-    else do
-      eiRoots <- mapM (resolveCabalPackageRootsFromEntry projectRoot) packageEntries
-      pure $ do
-        roots <- sequence eiRoots
-        pure (normalizePackageRoots (concat roots))
+  let cabalProjectPath = projectRoot </> "cabal.project"
+  eiCabalProjectText <- try (readFile cabalProjectPath) :: IO (Either IOException String)
+  case eiCabalProjectText of
+    Left ioErr -> pure (Left ("Failed to read Cabal project file " <> cabalProjectPath <> ": " <> show ioErr))
+    Right cabalProjectText -> do
+      let packageEntries = extractCabalProjectPackageEntries cabalProjectText
+      if null packageEntries
+        then pure (Left "Detected Cabal project, but 'cabal.project' does not define any package entries in the packages: section.")
+        else do
+          eiRoots <- mapM (resolveCabalPackageRootsFromEntry projectRoot) packageEntries
+          pure $ do
+            roots <- sequence eiRoots
+            pure (normalizePackageRoots (concat roots))
 
 resolveCabalPackageRootsFromEntry :: FilePath -> FilePath -> IO (Either String [PackageRoot])
 resolveCabalPackageRootsFromEntry projectRoot packageEntry

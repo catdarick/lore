@@ -11,6 +11,7 @@ module Lore.Internal.Ghc.DynFlags
     setGhcOptionsAndExtensions,
     addGhcOptionsAndExtensions,
     setGhcSourceDirs,
+    invalidatePackageDbCacheM,
     setPackageEnvironmentM,
   )
 where
@@ -19,7 +20,10 @@ import Control.Monad.IO.Class (MonadIO)
 import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Data.EnumSet as EnumSet
+import qualified GHC.Driver.Env.Types as GHC
+import qualified GHC.Driver.Monad as GHC
 import qualified GHC.Driver.Session as GHC
+import qualified GHC.Unit.Env as GHC
 import qualified GHC.Utils.Logger as GHC
 import qualified GHC.Utils.TmpFs as GHC
 import Lore.Internal.Ghc.PackageEnvironment.Types
@@ -40,6 +44,16 @@ modifySessionDynFlagsM f = do
   dflags <- GHC.getSessionDynFlags
   dflags' <- f dflags
   GHC.setSessionDynFlags dflags'
+
+invalidatePackageDbCacheM :: (GHC.GhcMonad m) => m ()
+invalidatePackageDbCacheM =
+  GHC.modifySession \hscEnv ->
+    hscEnv
+      { GHC.hsc_unit_env =
+          GHC.ue_setUnitDbs
+            Nothing
+            (GHC.hsc_unit_env hscEnv)
+      }
 
 setGhciLikeDynFlags :: ParallelWorkersCount -> GHC.DynFlags -> GHC.DynFlags
 setGhciLikeDynFlags parallelWorkersLimit dflags0 =

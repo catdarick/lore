@@ -5,23 +5,16 @@ module Lore.Internal.Package.Materialize
     defaultPackageMaterializeRunnerFor,
     materializeCabalPackageFilesIO,
     materializeCabalPackageFileIO,
-    materializeCabalPackageFiles,
     findSingleTopLevelCabalFile,
   )
 where
 
 import Control.Exception (IOException, try)
 import Control.Monad (when)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.RWS (MonadReader, asks)
 import Data.List (sort)
-import Data.Time (getCurrentTime)
-import GHC.Records (HasField)
 import Lore.Internal.BuildTool.Environment (runProcessInWorkingDir)
 import Lore.Internal.Package.Root (PackageRoot (..))
 import Lore.Internal.ProjectProvider (ProjectProvider (..))
-import Lore.Internal.SourceText (relativeSourcePath)
-import Lore.Logger (LogLevel (..), LogMessage (..), LoggerHandle (..))
 import System.Directory (doesFileExist, listDirectory)
 import System.FilePath (takeExtension, (</>))
 
@@ -87,35 +80,6 @@ materializeCabalPackageFileIO runner logInfo displayPath packageRoot = do
         Right () ->
           resolveCabalFilePath packageRoot
     else resolveCabalFilePath packageRoot
-
-materializeCabalPackageFiles ::
-  (MonadIO m, MonadReader r m, HasField "projectRoot" r FilePath, HasField "loggerHandle" r LoggerHandle, HasField "projectProvider" r ProjectProvider) =>
-  [PackageRoot] ->
-  m [FilePath]
-materializeCabalPackageFiles packageRoots = do
-  sessionProjectRoot <- asks (.projectRoot)
-  loggerHandle <- asks (.loggerHandle)
-  projectProvider <- asks (.projectProvider)
-  eiCabalFiles <-
-    liftIO $
-      materializeCabalPackageFilesIO
-        (defaultPackageMaterializeRunnerFor projectProvider)
-        (logInfoWithHandle loggerHandle)
-        (relativeSourcePath sessionProjectRoot)
-        packageRoots
-  case eiCabalFiles of
-    Left err -> liftIO (ioError (userError err))
-    Right cabalFiles -> pure cabalFiles
-
-logInfoWithHandle :: LoggerHandle -> String -> IO ()
-logInfoWithHandle loggerHandle message = do
-  currentTime <- getCurrentTime
-  loggerHandle.putLog
-    LogMessage
-      { timestamp = currentTime,
-        level = Info,
-        content = message
-      }
 
 resolveCabalFilePath :: PackageRoot -> IO (Either String FilePath)
 resolveCabalFilePath packageRoot =

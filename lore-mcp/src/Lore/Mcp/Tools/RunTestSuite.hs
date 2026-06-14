@@ -7,7 +7,7 @@ import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Lore (LoadHomeModulesResult (..), MonadLore)
+import Lore (HomeModulesLoadSummary (..), LoadHomeModulesResult (..), MonadLore, projectEnvironmentFailureMessage)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Tools.Result (RenderedResult (..), ToolRun (..))
@@ -66,18 +66,7 @@ runTestSuiteStructured args result =
         ]
     ToolRunReady renderedResult ->
       case renderedResult.renderedResultValue of
-        RunTestSuiteCompilationFailed loadResult ->
-          J.object
-            [ "tool" J..= ("runTestSuite" :: String),
-              "status" J..= statusText,
-              "invocation" J..= requestedInvocation args,
-              "compilation"
-                J..= J.object
-                  [ "loadedModules" J..= loadResult.loadHomeModulesLoaded,
-                    "failedModules" J..= loadResult.loadHomeModulesFailed,
-                    "totalModules" J..= loadResult.loadHomeModulesTotal
-                  ]
-            ]
+        RunTestSuiteLoadFailed loadResult -> loadFailureObject args statusText loadResult
         RunTestSuiteInvalidArguments parseErrorMessage ->
           J.object
             [ "tool" J..= ("runTestSuite" :: String),
@@ -111,8 +100,32 @@ executedInvocation execution =
 runTestSuiteStatusText :: RunTestSuiteStatus -> String
 runTestSuiteStatusText = \case
   RunTestSuiteStatusCompilationFailure -> "compilation-failure"
+  RunTestSuiteStatusEnvironmentFailure -> "environment-failure"
+  RunTestSuiteStatusRestartRequired -> "restart-required"
   RunTestSuiteStatusInvalidArguments -> "invalid-arguments"
   RunTestSuiteStatusNoTests -> "no-tests"
   RunTestSuiteStatusTestsPassed -> "tests-passed"
   RunTestSuiteStatusTestsFailed -> "tests-failed"
   RunTestSuiteStatusBlocked -> "blocked"
+
+loadFailureObject :: RunTestSuiteArgs 'ValueType -> String -> LoadHomeModulesResult -> J.Value
+loadFailureObject args statusText = \case
+  LoadHomeModulesCompleted summary ->
+    J.object
+      [ "tool" J..= ("runTestSuite" :: String),
+        "status" J..= statusText,
+        "invocation" J..= requestedInvocation args,
+        "compilation"
+          J..= J.object
+            [ "loadedModules" J..= summary.homeModulesLoaded,
+              "failedModules" J..= summary.homeModulesFailed,
+              "totalModules" J..= summary.homeModulesTotal
+            ]
+      ]
+  LoadHomeModulesPreparationFailed failure ->
+    J.object
+      [ "tool" J..= ("runTestSuite" :: String),
+        "status" J..= statusText,
+        "invocation" J..= requestedInvocation args,
+        "message" J..= projectEnvironmentFailureMessage failure
+      ]

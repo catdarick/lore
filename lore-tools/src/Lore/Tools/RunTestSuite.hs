@@ -24,12 +24,13 @@ import Lore
     TestSuiteComponentResult (..),
     TestSuiteComponentStatus (..),
     parseTestArguments,
+    projectEnvironmentFailureRequiresRestart,
     renderTestArgumentsParseError,
   )
 import qualified Lore as Core
-import Lore.Tools.ReloadHomeModules (renderReloadHomeModulesResult)
 import Lore.Tools.Render.Diagnostics (diagnosticSummaryWithHintsDoc)
 import Lore.Tools.Render.Doc (LoreDoc, heading2, paragraph)
+import Lore.Tools.ReloadHomeModules (renderReloadHomeModulesResult)
 import Lore.Tools.Result
   ( RenderedResult (..),
     ToolBlocked (..),
@@ -44,7 +45,7 @@ data RunTestSuiteToolOptions = RunTestSuiteToolOptions
   deriving stock (Eq, Show)
 
 data RunTestSuiteOutcome
-  = RunTestSuiteCompilationFailed LoadHomeModulesResult
+  = RunTestSuiteLoadFailed LoadHomeModulesResult
   | RunTestSuiteInvalidArguments Text
   | RunTestSuiteExecuted RunTestSuiteExecution
   deriving stock (Eq, Show)
@@ -72,6 +73,8 @@ data RunTestSuiteExecutionStatus
 
 data RunTestSuiteStatus
   = RunTestSuiteStatusCompilationFailure
+  | RunTestSuiteStatusEnvironmentFailure
+  | RunTestSuiteStatusRestartRequired
   | RunTestSuiteStatusInvalidArguments
   | RunTestSuiteStatusNoTests
   | RunTestSuiteStatusTestsPassed
@@ -82,26 +85,27 @@ data RunTestSuiteStatus
 runTestSuite :: (MonadLore m) => RunTestSuiteToolOptions -> m (ToolRun (RenderedResult RunTestSuiteOutcome))
 runTestSuite options = do
   loadResult <- Core.loadHomeModules LoadHomeModulesOptions {enableAutoRefactor = True}
-  if not loadResult.loadHomeModulesSucceeded
-    then ToolRunReady <$> renderCompilationFailure loadResult
-    else withInterpreterSession \_ ->
-      case traverse parseTestArguments options.runTestSuiteRawArgs of
-        Left parseError ->
-          pure (renderInvalidArguments parseError)
-        Right maybeParsedArgs -> do
-          result <-
-            Core.runTestSuite
-              RunTestSuiteOptions
-                { packageName = T.unpack <$> options.runTestSuitePackageFilter,
-                  testArguments = maybe [] id maybeParsedArgs
-                }
-          pure $
-            renderExecuted
-              RunTestSuiteExecution
-                { runTestSuitePackageFilter = options.runTestSuitePackageFilter,
-                  runTestSuiteEffectiveArguments = result.runTestSuiteEffectiveArguments,
-                  runTestSuiteComponents = result.runTestSuiteComponentResults
-                }
+  case loadResult of
+    LoadHomeModulesCompleted summary
+      | summary.homeModulesCompilationSucceeded -> withInterpreterSession \_ ->
+          case traverse parseTestArguments options.runTestSuiteRawArgs of
+            Left parseError ->
+              pure (renderInvalidArguments parseError)
+            Right maybeParsedArgs -> do
+              result <-
+                Core.runTestSuite
+                  RunTestSuiteOptions
+                    { packageName = T.unpack <$> options.runTestSuitePackageFilter,
+                      testArguments = maybe [] id maybeParsedArgs
+                    }
+              pure $
+                renderExecuted
+                  RunTestSuiteExecution
+                    { runTestSuitePackageFilter = options.runTestSuitePackageFilter,
+                      runTestSuiteEffectiveArguments = result.runTestSuiteEffectiveArguments,
+                      runTestSuiteComponents = result.runTestSuiteComponentResults
+                    }
+    _ -> ToolRunReady <$> renderLoadFailure loadResult
 
 runTestSuiteStatus :: ToolRun (RenderedResult RunTestSuiteOutcome) -> RunTestSuiteStatus
 runTestSuiteStatus = \case
@@ -109,8 +113,12 @@ runTestSuiteStatus = \case
     RunTestSuiteStatusBlocked
   ToolRunReady renderedResult ->
     case renderedResult.renderedResultValue of
-      RunTestSuiteCompilationFailed {} ->
-        RunTestSuiteStatusCompilationFailure
+      RunTestSuiteLoadFailed loadResult ->
+        case loadResult of
+          LoadHomeModulesCompleted _ -> RunTestSuiteStatusCompilationFailure
+          LoadHomeModulesPreparationFailed failure
+            | projectEnvironmentFailureRequiresRestart failure -> RunTestSuiteStatusRestartRequired
+            | otherwise -> RunTestSuiteStatusEnvironmentFailure
       RunTestSuiteInvalidArguments {} ->
         RunTestSuiteStatusInvalidArguments
       RunTestSuiteExecuted execution ->
@@ -163,13 +171,13 @@ runTestSuiteExecutionSummary execution =
           ]
     }
 
-renderCompilationFailure :: (MonadLore m) => LoadHomeModulesResult -> m (RenderedResult RunTestSuiteOutcome)
-renderCompilationFailure loadResult = do
-  loreDoc <- renderReloadHomeModulesResult loadResult
+renderLoadFailure :: (MonadLore m) => LoadHomeModulesResult -> m (RenderedResult RunTestSuiteOutcome)
+renderLoadFailure loadResult = do
+  document <- renderReloadHomeModulesResult loadResult
   pure
     RenderedResult
-      { renderedResultValue = RunTestSuiteCompilationFailed loadResult,
-        renderedResultDocument = loreDoc
+      { renderedResultValue = RunTestSuiteLoadFailed loadResult,
+        renderedResultDocument = document
       }
 
 renderInvalidArguments :: TestArgumentsParseError -> RenderedResult RunTestSuiteOutcome

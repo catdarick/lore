@@ -11,6 +11,7 @@ import Lore
     DeadCodeResult (..),
     DeadDefinition (..),
     Diagnostic (..),
+    HomeModulesLoadSummary (..),
     LoadHomeModulesResult (..),
     MonadLore,
     Symbol (..),
@@ -223,7 +224,7 @@ requireSymbolModule moduleName occName = do
 requireLoadedHomeModules :: (MonadLore m) => m ()
 requireLoadedHomeModules = do
   loadResult <- loadHomeModules defaultLoadHomeModulesOptions
-  if loadResult.loadHomeModulesSucceeded
+  if loadSucceeded loadResult
     then pure ()
     else error (renderLoadFailure loadResult)
 
@@ -231,11 +232,30 @@ renderLoadFailure :: LoadHomeModulesResult -> String
 renderLoadFailure loadResult =
   unlines $
     [ "loadHomeModules failed in dead-code fixture",
-      "loaded=" <> show loadResult.loadHomeModulesLoaded,
-      "failed=" <> show loadResult.loadHomeModulesFailed,
-      "total=" <> show loadResult.loadHomeModulesTotal
+      "loaded=" <> show (loadLoaded loadResult),
+      "failed=" <> show (loadFailed loadResult),
+      "total=" <> show (loadTotal loadResult)
     ]
-      <> map (T.unpack . (.diagnosticMessage)) loadResult.loadHomeModulesDiagnostics
+      <> map (T.unpack . (.diagnosticMessage)) (loadDiagnostics loadResult)
+
+loadSummary :: LoadHomeModulesResult -> HomeModulesLoadSummary
+loadSummary (LoadHomeModulesCompleted summary) = summary
+loadSummary (LoadHomeModulesPreparationFailed failure) = error ("Expected completed load, got preparation failure: " <> show failure)
+
+loadSucceeded :: LoadHomeModulesResult -> Bool
+loadSucceeded = (.homeModulesCompilationSucceeded) . loadSummary
+
+loadDiagnostics :: LoadHomeModulesResult -> [Diagnostic]
+loadDiagnostics = (.homeModulesDiagnostics) . loadSummary
+
+loadLoaded :: LoadHomeModulesResult -> Int
+loadLoaded = (.homeModulesLoaded) . loadSummary
+
+loadFailed :: LoadHomeModulesResult -> Int
+loadFailed = (.homeModulesFailed) . loadSummary
+
+loadTotal :: LoadHomeModulesResult -> Int
+loadTotal = (.homeModulesTotal) . loadSummary
 
 matchesSymbol :: String -> String -> Symbol -> Bool
 matchesSymbol moduleName occName symbol =

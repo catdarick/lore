@@ -9,9 +9,9 @@ import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Lore.Internal.Ghc.PackageEnvironment.Types
-  ( GhcEnvironmentSnapshot (..),
-    PackageDb (..),
+  ( PackageDb (..),
     PackageDbStack (..),
+    PackageEnvironmentSnapshot (..),
     PackageIndex (..),
     PackageIndexEntry (..),
     PackageNameText (..),
@@ -21,7 +21,7 @@ import Lore.Internal.Ghc.PackageEnvironment.Types
   )
 
 resolveDependencyPackageEnvironment ::
-  GhcEnvironmentSnapshot ->
+  PackageEnvironmentSnapshot ->
   Set.Set String ->
   Either PackageResolutionError ResolvedPackageEnvironment
 resolveDependencyPackageEnvironment snapshot dependencyNames = do
@@ -29,7 +29,7 @@ resolveDependencyPackageEnvironment snapshot dependencyNames = do
     fmap Set.unions (mapM resolveDependency (Set.toAscList dependencyNames))
   pure
     ResolvedPackageEnvironment
-      { resolvedPackageDbStack = snapshot.ghcEnvironmentPackageDbStack,
+      { resolvedPackageDbStack = snapshot.packageEnvironmentPackageDbStack,
         resolvedExposedUnitIds = resolvedDependencyUnitIds
       }
   where
@@ -53,10 +53,10 @@ resolveDependencyPackageEnvironment snapshot dependencyNames = do
                     )
 
     lookupSelectedUnitId packageName =
-      Map.lookup packageName snapshot.ghcEnvironmentSelectedUnitIdsByPackageName
+      Map.lookup packageName snapshot.packageEnvironmentSelectedUnitIdsByPackageName
 
     lookupPackageEntries packageName =
-      Map.lookup packageName snapshot.ghcEnvironmentPackageIndex.packageIndexByPackageName
+      Map.lookup packageName snapshot.packageEnvironmentPackageIndex.packageIndexByPackageName
 
 packageEnvironmentCacheKey :: ResolvedPackageEnvironment -> Set.Set String
 packageEnvironmentCacheKey environment =

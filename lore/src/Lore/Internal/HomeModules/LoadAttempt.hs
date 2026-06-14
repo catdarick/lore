@@ -7,7 +7,9 @@ module Lore.Internal.HomeModules.LoadAttempt
   )
 where
 
+import qualified Control.Concurrent.MVar as MVar
 import Control.Monad (unless)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
 import Data.List (intercalate)
 import qualified Data.Map as Map
@@ -48,7 +50,8 @@ loadHomeModulesOnce plan = do
   patchedModGraph <- applyModuleScopedArgs plan.homeModulesComponentOptions modGraph
   moduleSummariesByFile <- buildModuleSummariesByFile patchedModGraph
 
-  ifaceCache <- asks ifaceCache
+  ifaceCacheVar <- asks ifaceCacheVar
+  ifaceCache <- liftIO (MVar.readMVar ifaceCacheVar)
   Log.debug "Loading targets with GHC..."
   (diagnostics, loadResult) <- withDiagnosticsCapturing do
     GHC.load' (Just ifaceCache) GHC.LoadAllTargets Nothing patchedModGraph

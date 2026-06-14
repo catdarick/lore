@@ -33,3 +33,4 @@ dead-code:
 
   alive-symbols:
     - Lore.Session.defaultSessionConfig
+    - Lore.Config.defaultLoreConfig

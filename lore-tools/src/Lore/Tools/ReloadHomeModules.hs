@@ -17,10 +17,13 @@ import qualified Data.Text.IO as TIO
 import Lore
   ( Diagnostic (..),
     DiagnosticSpan (..),
+    HomeModulesLoadSummary (..),
     LoadHomeModulesOptions (..),
     LoadHomeModulesResult (..),
     MonadLore,
     Span (..),
+    projectEnvironmentFailureMessage,
+    projectEnvironmentFailureRequiresRestart,
   )
 import qualified Lore as Core
 import Lore.Tools.Render.Diagnostics (diagnosticHintsDoc, diagnosticMessageBody, diagnosticSeverityTitle)
@@ -36,6 +39,8 @@ import Lore.Tools.Result
 data ReloadHomeModulesStatus
   = ReloadHomeModulesStatusSuccess
   | ReloadHomeModulesStatusCompilationFailure
+  | ReloadHomeModulesStatusEnvironmentFailure
+  | ReloadHomeModulesStatusRestartRequired
   deriving stock (Eq, Show)
 
 newtype ReloadHomeModulesOptions = ReloadHomeModulesOptions
@@ -54,11 +59,14 @@ reloadHomeModules options = do
       }
 
 reloadHomeModulesStatus :: LoadHomeModulesResult -> ReloadHomeModulesStatus
-reloadHomeModulesStatus loadResult
-  | loadResult.loadHomeModulesSucceeded =
-      ReloadHomeModulesStatusSuccess
-  | otherwise =
-      ReloadHomeModulesStatusCompilationFailure
+reloadHomeModulesStatus loadResult =
+  case loadResult of
+    LoadHomeModulesCompleted summary
+      | summary.homeModulesCompilationSucceeded -> ReloadHomeModulesStatusSuccess
+      | otherwise -> ReloadHomeModulesStatusCompilationFailure
+    LoadHomeModulesPreparationFailed failure
+      | projectEnvironmentFailureRequiresRestart failure -> ReloadHomeModulesStatusRestartRequired
+      | otherwise -> ReloadHomeModulesStatusEnvironmentFailure
 
 renderReloadHomeModulesResult :: (MonadLore m) => LoadHomeModulesResult -> m LoreDoc
 renderReloadHomeModulesResult =
@@ -69,7 +77,9 @@ renderReloadHomeModulesResultWithPageRequest ::
   Maybe PageRequest ->
   LoadHomeModulesResult ->
   m LoreDoc
-renderReloadHomeModulesResultWithPageRequest maybePageRequest loadResult@LoadHomeModulesResult {loadHomeModulesDiagnostics} =
+renderReloadHomeModulesResultWithPageRequest _ (LoadHomeModulesPreparationFailed failure) =
+  pure $ paragraph ("Project environment preparation failed: " <> T.pack (projectEnvironmentFailureMessage failure))
+renderReloadHomeModulesResultWithPageRequest maybePageRequest loadResult@(LoadHomeModulesCompleted summary) =
   case paginatedDiagnostics of
     [] ->
       pure (paragraph statusLine <> autoFixedSummaryDoc loadResult)
@@ -80,37 +90,38 @@ renderReloadHomeModulesResultWithPageRequest maybePageRequest loadResult@LoadHom
         paragraph statusLine
           <> autoFixedSummaryDoc loadResult
           <> diagnosticsDoc
-          <> nextPageHintDoc loadHomeModulesDiagnostics diagnosticPage
+          <> nextPageHintDoc summary.homeModulesDiagnostics diagnosticPage
   where
-    diagnosticPage = paginateDiagnostics pageRequest loadHomeModulesDiagnostics
+    diagnosticPage = paginateDiagnostics pageRequest summary.homeModulesDiagnostics
     paginatedDiagnostics = maybe [] (.paginatedItems) diagnosticPage
     pageRequest =
       maybe defaultPageRequest id maybePageRequest
     statusLine
-      | loadResult.loadHomeModulesFailed > 0 =
+      | summary.homeModulesFailed > 0 =
           "Failed to load "
-            <> T.pack (show loadResult.loadHomeModulesFailed)
+            <> T.pack (show summary.homeModulesFailed)
             <> " of "
-            <> T.pack (show loadResult.loadHomeModulesTotal)
+            <> T.pack (show summary.homeModulesTotal)
             <> " modules."
-      | loadResult.loadHomeModulesAutofixed > 0 =
+      | summary.homeModulesAutofixed > 0 =
           "Successfully loaded all "
-            <> T.pack (show loadResult.loadHomeModulesTotal)
+            <> T.pack (show summary.homeModulesTotal)
             <> " modules after auto-fixing "
-            <> T.pack (show loadResult.loadHomeModulesAutofixed)
+            <> T.pack (show summary.homeModulesAutofixed)
             <> ". No errors left."
       | otherwise =
           "Successfully loaded all "
-            <> T.pack (show loadResult.loadHomeModulesTotal)
+            <> T.pack (show summary.homeModulesTotal)
             <> " modules. No errors found."
 
 autoFixedSummaryDoc :: LoadHomeModulesResult -> LoreDoc
-autoFixedSummaryDoc loadResult
-  | null loadResult.loadHomeModulesAutofixSummaryByFile =
+autoFixedSummaryDoc (LoadHomeModulesPreparationFailed _) = mempty
+autoFixedSummaryDoc (LoadHomeModulesCompleted summary)
+  | null summary.homeModulesAutofixSummaryByFile =
       mempty
   | otherwise =
       heading2 "Safe fixes applied"
-        <> bulletList (map renderAutofixedFileDoc loadResult.loadHomeModulesAutofixSummaryByFile)
+        <> bulletList (map renderAutofixedFileDoc summary.homeModulesAutofixSummaryByFile)
 
 renderAutofixedFileDoc :: (FilePath, [String]) -> LoreDoc
 renderAutofixedFileDoc (filePath, summaries) =

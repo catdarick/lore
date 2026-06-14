@@ -1,7 +1,7 @@
 module Lore.Internal.Ghc.PackageEnvironment.Probe
   ( GhcEnvironmentProbeRunner (..),
-    captureGhcEnvironmentSnapshot,
-    captureGhcEnvironmentSnapshotWithRunner,
+    captureGhcEnvironment,
+    captureGhcEnvironmentWithRunner,
   )
 where
 
@@ -18,8 +18,10 @@ import Lore.Internal.Ghc.PackageEnvironment.Parse
     parseGhcEnvironmentFile,
   )
 import Lore.Internal.Ghc.PackageEnvironment.Types
-  ( GhcEnvironmentSnapshot (..),
+  ( CapturedGhcEnvironment (..),
+    GhcToolchain (..),
     PackageDbStack,
+    PackageEnvironmentSnapshot (..),
     PackageIndex (..),
     PackageIndexEntry (..),
     PackageNameText (..),
@@ -43,12 +45,12 @@ defaultGhcEnvironmentProbeRunner =
       runBuildPackageIndex = buildPackageIndex
     }
 
-captureGhcEnvironmentSnapshot :: ProjectProvider -> FilePath -> IO (Either String GhcEnvironmentSnapshot)
-captureGhcEnvironmentSnapshot =
-  captureGhcEnvironmentSnapshotWithRunner defaultGhcEnvironmentProbeRunner
+captureGhcEnvironment :: ProjectProvider -> FilePath -> IO (Either String CapturedGhcEnvironment)
+captureGhcEnvironment =
+  captureGhcEnvironmentWithRunner defaultGhcEnvironmentProbeRunner
 
-captureGhcEnvironmentSnapshotWithRunner :: GhcEnvironmentProbeRunner -> ProjectProvider -> FilePath -> IO (Either String GhcEnvironmentSnapshot)
-captureGhcEnvironmentSnapshotWithRunner runner provider projectRoot = do
+captureGhcEnvironmentWithRunner :: GhcEnvironmentProbeRunner -> ProjectProvider -> FilePath -> IO (Either String CapturedGhcEnvironment)
+captureGhcEnvironmentWithRunner runner provider projectRoot = do
   executionResult <- runner.runBuildToolProbe provider projectRoot renderEnvironmentProbeScript
   case executionResult of
     Left err ->
@@ -78,14 +80,20 @@ captureGhcEnvironmentSnapshotWithRunner runner provider projectRoot = do
                     normalizedEnvironment.normalizedSelectedUnitIds
                     packageIndex
                 pure
-                  GhcEnvironmentSnapshot
-                    { ghcEnvironmentCompilerExe = normalizedEnvironment.normalizedGhcExe,
-                      ghcEnvironmentCompilerVersion = normalizedEnvironment.normalizedGhcVersion,
-                      ghcEnvironmentGhcPkgExe = normalizedEnvironment.normalizedGhcPkgExe,
-                      ghcEnvironmentLibDir = normalizedEnvironment.normalizedGhcLibDir,
-                      ghcEnvironmentPackageDbStack = normalizedEnvironment.normalizedPackageDbStack,
-                      ghcEnvironmentPackageIndex = packageIndex,
-                      ghcEnvironmentSelectedUnitIdsByPackageName = selectedUnitIdsByPackageName
+                  CapturedGhcEnvironment
+                    { capturedGhcToolchain =
+                        GhcToolchain
+                          { ghcToolchainCompilerExe = normalizedEnvironment.normalizedGhcExe,
+                            ghcToolchainCompilerVersion = normalizedEnvironment.normalizedGhcVersion,
+                            ghcToolchainGhcPkgExe = normalizedEnvironment.normalizedGhcPkgExe,
+                            ghcToolchainLibDir = normalizedEnvironment.normalizedGhcLibDir
+                          },
+                      capturedPackageEnvironment =
+                        PackageEnvironmentSnapshot
+                          { packageEnvironmentPackageDbStack = normalizedEnvironment.normalizedPackageDbStack,
+                            packageEnvironmentPackageIndex = packageIndex,
+                            packageEnvironmentSelectedUnitIdsByPackageName = selectedUnitIdsByPackageName
+                          }
                     }
 
 data RawGhcEnvironment = RawGhcEnvironment

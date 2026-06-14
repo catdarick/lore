@@ -3,7 +3,7 @@ module Lore.Mcp.Tools.ReloadHomeModules where
 import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import GHC.Generics (Generic)
-import Lore (LoadHomeModulesResult (..), MonadLore)
+import Lore (HomeModulesLoadSummary (..), LoadHomeModulesResult (..), MonadLore, projectEnvironmentFailureMessage)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
@@ -52,15 +52,23 @@ reloadHomeModulesHandler ReloadHomeModulesArgs {skip} =
 
 reloadHomeModulesStructured :: ReloadHomeModulesArgs 'ValueType -> RenderedResult LoadHomeModulesResult -> J.Value
 reloadHomeModulesStructured _ renderedResult =
-  J.object
-    [ "tool" J..= ("reloadHomeModules" :: String),
-      "status" J..= statusText,
-      "loadedModules" J..= loadResult.loadHomeModulesLoaded,
-      "failedModules" J..= loadResult.loadHomeModulesFailed,
-      "totalModules" J..= loadResult.loadHomeModulesTotal,
-      "autofixedModules" J..= loadResult.loadHomeModulesAutofixed,
-      "autofixedFiles" J..= loadResult.loadHomeModulesAutofixedFiles
-    ]
+  case loadResult of
+    LoadHomeModulesCompleted summary ->
+      J.object
+        [ "tool" J..= ("reloadHomeModules" :: String),
+          "status" J..= statusText,
+          "loadedModules" J..= summary.homeModulesLoaded,
+          "failedModules" J..= summary.homeModulesFailed,
+          "totalModules" J..= summary.homeModulesTotal,
+          "autofixedModules" J..= summary.homeModulesAutofixed,
+          "autofixedFiles" J..= summary.homeModulesAutofixedFiles
+        ]
+    LoadHomeModulesPreparationFailed failure ->
+      J.object
+        [ "tool" J..= ("reloadHomeModules" :: String),
+          "status" J..= statusText,
+          "message" J..= projectEnvironmentFailureMessage failure
+        ]
   where
     loadResult = renderedResult.renderedResultValue
     statusText =
@@ -69,3 +77,7 @@ reloadHomeModulesStructured _ renderedResult =
           ("success" :: String)
         ReloadHomeModulesStatusCompilationFailure ->
           "compilation-failure"
+        ReloadHomeModulesStatusEnvironmentFailure ->
+          "environment-failure"
+        ReloadHomeModulesStatusRestartRequired ->
+          "restart-required"

@@ -3,7 +3,7 @@ module Lore.Internal.Lookup.Cache.Types
     ExternalSymbolsIndexCache (..),
     ExternalSymbolsSnapshot (..),
     SymbolSearchIndexCache (..),
-    SymbolsDependencySetCache (..),
+    ExternalSymbolsEnvironmentKeyCache (..),
     ModSummariesCache (..),
     NameToInstancesIndexCache (..),
   )
@@ -22,7 +22,7 @@ newtype ExternalSymbolsIndexCache = ExternalSymbolsIndexCache
   }
 
 data ExternalSymbolsSnapshot = ExternalSymbolsSnapshot
-  { externalSymbolsSnapshotDependencies :: Set.Set String,
+  { externalSymbolsSnapshotEnvironmentKey :: Set.Set String,
     externalSymbolsSnapshotIndex :: SymbolsIndex
   }
 
@@ -30,8 +30,8 @@ newtype SymbolSearchIndexCache = SymbolSearchIndexCache
   { cachedSymbolSearchIndex :: Maybe SymbolSearchIndex
   }
 
-newtype SymbolsDependencySetCache = SymbolsDependencySetCache
-  { cachedSymbolsDependencySet :: Set.Set String
+newtype ExternalSymbolsEnvironmentKeyCache = ExternalSymbolsEnvironmentKeyCache
+  { cachedExternalSymbolsEnvironmentKey :: Set.Set String
   }
 
 newtype ModSummariesCache = ModSummariesCache

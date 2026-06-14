@@ -7,7 +7,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC
 import Lore.Diagnostics (Diagnostic (..))
-import Lore.HomeModules (LoadHomeModulesOptions (..), LoadHomeModulesResult (..), defaultLoadHomeModulesOptions)
+import Lore.HomeModules (HomeModulesLoadSummary (..), LoadHomeModulesOptions (..), LoadHomeModulesResult (..), defaultLoadHomeModulesOptions)
 import qualified Lore.HomeModules as HomeModules
 import Lore.HomeModules.Plan
   ( HomeModuleKey (..),
@@ -17,43 +17,52 @@ import Lore.HomeModules.Plan
     HomeModulesLoadPlan (..),
     HomeModulesSelection (..),
     buildHomeModulesSelection,
-    computeExternalHomeModuleDependencies,
     computeHomeModuleSourceDirs,
     homeModulesSelectionTotal,
     prepareHomeModulesComponentPlan,
-    prepareHomeModulesLoadInputs,
     prepareHomeModulesLoadPlan,
   )
+import Lore.Internal.HomeModules.Plan (prepareHomeModulesLoadInputsFromProjectEnvironment)
+import Lore.Internal.ProjectEnvironment.Prepare (prepareProjectDescription)
+import Lore.Internal.ProjectEnvironment.Refresh (refreshProjectEnvironment)
+import Lore.Internal.ProjectEnvironment.Types (PreparedProjectDescription (..), ProjectEnvironmentRefresh (..))
+import Lore.Monad (MonadLore)
+import Lore.Session (SessionConfig (..), defaultSessionConfig)
 import Lore.TemporalModules (TemporalModule (..))
 import System.Directory (createDirectoryIfMissing, doesFileExist, makeAbsolute, removeFile)
 import System.FilePath ((</>))
 import Test.Hspec
-import TestSupport (fixtureLoreAt, withFixtureCopy, withFixtureSpec)
+import TestSupport (fixtureLoreAt, fixtureLoreAtWithConfig, withFixtureCopy, withFixtureSpec)
 
 spec :: Spec
 spec =
   withFixtureSpec do
     describe "home-modules planning helpers" do
-      it "computeExternalHomeModuleDependencies subtracts local packages and conditionally adds directory" \fixture -> do
+      it "prepareProjectDescription derives required external dependencies from prepared packages" \fixture -> do
         withFixtureCopy fixture \fixtureRoot -> do
-          (depsWithoutTestSuite, depsWithTestSuite) <-
-            fixtureLoreAt fixture fixtureRoot do
-              inputs <- prepareHomeModulesLoadInputs
-              let packages = inputs.homeModulesPackages
-              pure
-                ( computeExternalHomeModuleDependencies False packages,
-                  computeExternalHomeModuleDependencies True packages
-                )
+          depsWithoutTestSuite <-
+            fixtureLoreAt fixture fixtureRoot preparedRequiredExternalDependenciesForTest
+          depsWithTestSuite <-
+            fixtureLoreAtWithConfig
+              fixture
+              defaultSessionConfig {isTestSuiteFunctionalityRequired = True}
+              fixtureRoot
+              preparedRequiredExternalDependenciesForTest
 
           Set.member "demo-fixture" depsWithoutTestSuite `shouldBe` False
           Set.member "directory" depsWithoutTestSuite `shouldBe` False
+          Set.member "base" depsWithoutTestSuite `shouldBe` True
+          Set.member "containers" depsWithoutTestSuite `shouldBe` True
+          Set.member "demo-fixture" depsWithTestSuite `shouldBe` False
           Set.member "directory" depsWithTestSuite `shouldBe` True
+          Set.member "base" depsWithTestSuite `shouldBe` True
+          Set.member "containers" depsWithTestSuite `shouldBe` True
 
       it "prepareHomeModulesLoadPlan derives cache identity from package environment" \fixture -> do
         withFixtureCopy fixture \fixtureRoot -> do
           cacheKey <-
             fixtureLoreAt fixture fixtureRoot do
-              inputs <- prepareHomeModulesLoadInputs
+              inputs <- prepareLoadInputsForTest
               plan <- prepareHomeModulesLoadPlan inputs
               pure plan.homeModulesLoadConfig.homeModulesPackageEnvironmentCacheKey
 
@@ -64,7 +73,7 @@ spec =
         withFixtureCopy fixture \fixtureRoot -> do
           sourceDirs <-
             fixtureLoreAt fixture fixtureRoot do
-              inputs <- prepareHomeModulesLoadInputs
+              inputs <- prepareLoadInputsForTest
               let packages = inputs.homeModulesPackages
               let temporalPath = fixtureRoot </> ".lore-work-test" </> "temporal-modules" </> "Temporal" </> "Sample.hs"
                   temporalModules = [TemporalModule {moduleName = GHC.mkModuleName "Temporal.Sample", modulePath = temporalPath}]
@@ -78,7 +87,7 @@ spec =
           (selection, plannedFileTargets) <-
             fixtureLoreAt fixture fixtureRoot do
               dflags <- GHC.getSessionDynFlags
-              inputs <- prepareHomeModulesLoadInputs
+              inputs <- prepareLoadInputsForTest
               let packages = inputs.homeModulesPackages
               componentPlan <- prepareHomeModulesComponentPlan packages
               let temporalModules =
@@ -123,7 +132,7 @@ spec =
 
           generatedTargets <-
             fixtureLoreAt fixture fixtureRoot do
-              inputs <- prepareHomeModulesLoadInputs
+              inputs <- prepareLoadInputsForTest
               componentPlan <- prepareHomeModulesComponentPlan inputs.homeModulesPackages
               pure
                 [ sourcePath
@@ -163,10 +172,10 @@ spec =
             fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions
 
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesTotal `shouldBe` 0
-          loadResult.loadHomeModulesLoaded `shouldBe` 0
-          loadResult.loadHomeModulesFailed `shouldBe` 0
+          loadSucceeded loadResult `shouldBe` True
+          loadTotal loadResult `shouldBe` 0
+          loadLoaded loadResult `shouldBe` 0
+          loadFailed loadResult `shouldBe` 0
 
       it "returns diagnostics when loading fails" \fixture -> do
         withFixtureCopy fixture \fixtureRoot -> do
@@ -176,15 +185,16 @@ spec =
               "lookupOrZero pairs key =\n  fromMaybe 0 (Map.lookup key (Map.fromList pairs))"
               "lookupOrZero pairs key ="
 
-          loadResult@LoadHomeModulesResult {loadHomeModulesDiagnostics} <-
+          loadResult <-
             fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions
+          let loadDiagnostics = loadDiagnosticsOf loadResult
 
-          loadResult.loadHomeModulesSucceeded `shouldBe` False
-          loadHomeModulesDiagnostics `shouldSatisfy` (not . null)
-          fmap diagnosticMessage loadHomeModulesDiagnostics
+          loadSucceeded loadResult `shouldBe` False
+          loadDiagnostics `shouldSatisfy` (not . null)
+          fmap diagnosticMessage loadDiagnostics
             `shouldSatisfy` any (T.isInfixOf "parse error")
-          loadResult.loadHomeModulesFailed `shouldSatisfy` (> 0)
+          loadFailed loadResult `shouldSatisfy` (> 0)
 
       it "MULTIPKG_LANGUAGE respects the configured default language in the multipackage workspace" \fixture -> do
         repoRoot <- makeAbsolute ".."
@@ -193,11 +203,11 @@ spec =
           fixtureLoreAt fixture repoRoot $
             HomeModules.loadHomeModules defaultLoadHomeModulesOptions
 
-        loadResult.loadHomeModulesDiagnostics `shouldBe` []
-        loadResult.loadHomeModulesSucceeded `shouldBe` True
-        loadResult.loadHomeModulesLoaded `shouldBe` loadResult.loadHomeModulesTotal
-        loadResult.loadHomeModulesFailed `shouldBe` 0
-        loadResult.loadHomeModulesAutofixed `shouldBe` 0
+        loadDiagnosticsOf loadResult `shouldBe` []
+        loadSucceeded loadResult `shouldBe` True
+        loadLoaded loadResult `shouldBe` loadTotal loadResult
+        loadFailed loadResult `shouldBe` 0
+        loadAutofixed loadResult `shouldBe` 0
 
     describe "loadHomeModules auto-refactor (redundant imports only)" do
       it "does not retry cleanup when auto-refactor is disabled" \fixture -> do
@@ -217,8 +227,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions
 
           sourceAfter <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` False
-          loadResult.loadHomeModulesAutofixed `shouldBe` 0
+          loadSucceeded loadResult `shouldBe` False
+          loadAutofixed loadResult `shouldBe` 0
           sourceAfter `shouldBe` sourceBefore
 
       it "does not fix missing imports" \fixture -> do
@@ -235,8 +245,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           sourceAfter <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` False
-          loadResult.loadHomeModulesAutofixed `shouldBe` 0
+          loadSucceeded loadResult `shouldBe` False
+          loadAutofixed loadResult `shouldBe` 0
           sourceAfter `shouldBe` sourceBefore
 
       it "applies redundant-import cleanup on failed load and succeeds after retry" \fixture -> do
@@ -255,10 +265,10 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesAutofixed `shouldBe` 1
-          loadResult.loadHomeModulesAutofixedFiles `shouldBe` ["src/Demo.hs"]
-          map fst loadResult.loadHomeModulesAutofixSummaryByFile `shouldBe` ["src/Demo.hs"]
+          loadSucceeded loadResult `shouldBe` True
+          loadAutofixed loadResult `shouldBe` 1
+          loadAutofixedFiles loadResult `shouldBe` ["src/Demo.hs"]
+          map fst (loadAutofixSummaryByFile loadResult) `shouldBe` ["src/Demo.hs"]
           T.isInfixOf "import qualified Data.Sequence as Seq" demoSource `shouldBe` False
 
       it "succeeds on a second explicit load after in-loop cleanup" \fixture -> do
@@ -279,9 +289,9 @@ spec =
             fixtureLoreAt fixture fixtureRoot $
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions
 
-          firstLoad.loadHomeModulesSucceeded `shouldBe` True
-          firstLoad.loadHomeModulesAutofixed `shouldBe` 1
-          secondLoad.loadHomeModulesSucceeded `shouldBe` True
+          loadSucceeded firstLoad `shouldBe` True
+          loadAutofixed firstLoad `shouldBe` 1
+          loadSucceeded secondLoad `shouldBe` True
 
       it "does not clean imports when load succeeds" \fixture -> do
         withFixtureCopy fixture \fixtureRoot -> do
@@ -298,8 +308,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesAutofixed `shouldBe` 0
+          loadSucceeded loadResult `shouldBe` True
+          loadAutofixed loadResult `shouldBe` 0
           T.isInfixOf "import qualified Data.IntMap.Strict as IntMap" demoSource `shouldBe` True
 
       it "rewrites only the targeted import and preserves neighboring import comments" \fixture -> do
@@ -329,8 +339,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesAutofixed `shouldBe` 1
+          loadSucceeded loadResult `shouldBe` True
+          loadAutofixed loadResult `shouldBe` 1
           T.isInfixOf "keep-kind-comment" demoSource `shouldBe` True
           T.isInfixOf "keep-set-comment" demoSource `shouldBe` True
           T.isInfixOf "listToMaybe" demoSource `shouldBe` False
@@ -357,8 +367,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` False
-          loadResult.loadHomeModulesAutofixed `shouldBe` 0
+          loadSucceeded loadResult `shouldBe` False
+          loadAutofixed loadResult `shouldBe` 0
           T.isInfixOf "keep-comment" demoSource `shouldBe` True
           T.isInfixOf "listToMaybe" demoSource `shouldBe` True
 
@@ -384,8 +394,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesAutofixed `shouldBe` 1
+          loadSucceeded loadResult `shouldBe` True
+          loadAutofixed loadResult `shouldBe` 1
           T.isInfixOf "(.+.)" demoSource `shouldBe` False
           T.isInfixOf "supportStep" demoSource `shouldBe` True
 
@@ -407,8 +417,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesAutofixed `shouldBe` 1
+          loadSucceeded loadResult `shouldBe` True
+          loadAutofixed loadResult `shouldBe` 1
           T.isInfixOf "CtorOnly(CtorOnly)" demoSource `shouldBe` False
           T.isInfixOf "supportStep" demoSource `shouldBe` True
 
@@ -431,8 +441,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesAutofixed `shouldBe` 1
+          loadSucceeded loadResult `shouldBe` True
+          loadAutofixed loadResult `shouldBe` 1
           T.isInfixOf "Op((:|))" demoSource `shouldBe` False
           T.isInfixOf "supportStep" demoSource `shouldBe` True
 
@@ -460,8 +470,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesAutofixed `shouldBe` 1
+          loadSucceeded loadResult `shouldBe` True
+          loadAutofixed loadResult `shouldBe` 1
           T.isInfixOf "pattern SeedPattern" demoSource `shouldBe` False
           T.isInfixOf "supportSeed" demoSource `shouldBe` True
 
@@ -483,8 +493,8 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesAutofixed `shouldBe` 1
+          loadSucceeded loadResult `shouldBe` True
+          loadAutofixed loadResult `shouldBe` 1
           T.isInfixOf "import Data.Proxy" demoSource `shouldBe` False
 
       it "removes an unused type-operator import item declared with explicit namespace" \fixture -> do
@@ -505,9 +515,28 @@ spec =
               HomeModules.loadHomeModules defaultLoadHomeModulesOptions {enableAutoRefactor = True}
 
           demoSource <- TIO.readFile demoFile
-          loadResult.loadHomeModulesSucceeded `shouldBe` True
-          loadResult.loadHomeModulesAutofixed `shouldBe` 1
+          loadSucceeded loadResult `shouldBe` True
+          loadAutofixed loadResult `shouldBe` 1
           T.isInfixOf "import GHC.TypeNats" demoSource `shouldBe` False
+
+prepareLoadInputsForTest :: (MonadLore m) => m HomeModulesLoadInputs
+prepareLoadInputsForTest = do
+  refreshResult <- refreshProjectEnvironment
+  case refreshResult of
+    Left failure ->
+      error ("Failed to prepare project environment in test: " <> show failure)
+    Right refresh ->
+      prepareHomeModulesLoadInputsFromProjectEnvironment
+        refresh.refreshedProjectEnvironment
+
+preparedRequiredExternalDependenciesForTest :: (MonadLore m) => m (Set.Set String)
+preparedRequiredExternalDependenciesForTest = do
+  descriptionResult <- prepareProjectDescription
+  case descriptionResult of
+    Left failure ->
+      error ("Failed to prepare project description in test: " <> show failure)
+    Right prepared ->
+      pure prepared.preparedRequiredExternalDependencies
 
 rewriteDemo :: FilePath -> (T.Text -> T.Text) -> IO ()
 rewriteDemo demoFile rewrite =
@@ -561,3 +590,31 @@ enableWarningErrors fixtureRoot = do
     if withInsertedOptions == packageSource
       then warningErrorsBlock <> packageSource
       else withInsertedOptions
+
+loadSummaryOf :: LoadHomeModulesResult -> HomeModulesLoadSummary
+loadSummaryOf (LoadHomeModulesCompleted summary) = summary
+loadSummaryOf (LoadHomeModulesPreparationFailed failure) = error ("Expected completed load, got preparation failure: " <> show failure)
+
+loadSucceeded :: LoadHomeModulesResult -> Bool
+loadSucceeded = (.homeModulesCompilationSucceeded) . loadSummaryOf
+
+loadDiagnosticsOf :: LoadHomeModulesResult -> [Diagnostic]
+loadDiagnosticsOf = (.homeModulesDiagnostics) . loadSummaryOf
+
+loadLoaded :: LoadHomeModulesResult -> Int
+loadLoaded = (.homeModulesLoaded) . loadSummaryOf
+
+loadFailed :: LoadHomeModulesResult -> Int
+loadFailed = (.homeModulesFailed) . loadSummaryOf
+
+loadAutofixed :: LoadHomeModulesResult -> Int
+loadAutofixed = (.homeModulesAutofixed) . loadSummaryOf
+
+loadAutofixedFiles :: LoadHomeModulesResult -> [FilePath]
+loadAutofixedFiles = (.homeModulesAutofixedFiles) . loadSummaryOf
+
+loadAutofixSummaryByFile :: LoadHomeModulesResult -> [(FilePath, [String])]
+loadAutofixSummaryByFile = (.homeModulesAutofixSummaryByFile) . loadSummaryOf
+
+loadTotal :: LoadHomeModulesResult -> Int
+loadTotal = (.homeModulesTotal) . loadSummaryOf

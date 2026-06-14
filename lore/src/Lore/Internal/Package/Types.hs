@@ -1,6 +1,8 @@
 module Lore.Internal.Package.Types
   ( ComponentData (..),
     ComponentKind (..),
+    ComponentIdentity (..),
+    DependencyFingerprint,
     PackageData (..),
   )
 where
@@ -10,6 +12,14 @@ import qualified Data.Set as Set
 import qualified GHC
 import Lore.Internal.Ghc.DynFlags (Extension, GhcOption, Language)
 
+data ComponentIdentity = ComponentIdentity
+  { componentIdentityPackageName :: String,
+    componentIdentityComponentName :: String
+  }
+  deriving (Eq, Ord, Show)
+
+type DependencyFingerprint = String
+
 data ComponentData = ComponentData
   { componentKind :: ComponentKind,
     componentName :: String,
@@ -18,6 +28,7 @@ data ComponentData = ComponentData
     ghcOptions :: Set.Set GhcOption,
     defaultExtensions :: Set.Set Extension,
     dependencies :: Set.Set String,
+    dependencyRequirements :: Set.Set DependencyFingerprint,
     sourceDirs :: Set.Set FilePath,
     modules :: Set.Set GHC.ModuleName
   }

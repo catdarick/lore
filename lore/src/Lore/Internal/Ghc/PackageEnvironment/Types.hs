@@ -7,7 +7,9 @@ module Lore.Internal.Ghc.PackageEnvironment.Types
     PackageDbStack (..),
     PackageIndexEntry (..),
     PackageIndex (..),
-    GhcEnvironmentSnapshot (..),
+    GhcToolchain (..),
+    PackageEnvironmentSnapshot (..),
+    CapturedGhcEnvironment (..),
     ResolvedPackageEnvironment (..),
     ParsedGhcEnvironmentFile (..),
     PackageResolutionError (..),
@@ -55,14 +57,24 @@ data PackageIndex = PackageIndex
   }
   deriving (Eq, Show)
 
-data GhcEnvironmentSnapshot = GhcEnvironmentSnapshot
-  { ghcEnvironmentCompilerExe :: FilePath,
-    ghcEnvironmentCompilerVersion :: CabalVersion.Version,
-    ghcEnvironmentGhcPkgExe :: FilePath,
-    ghcEnvironmentLibDir :: FilePath,
-    ghcEnvironmentPackageDbStack :: PackageDbStack,
-    ghcEnvironmentPackageIndex :: PackageIndex,
-    ghcEnvironmentSelectedUnitIdsByPackageName :: Map.Map PackageNameText (Set.Set UnitIdText)
+data GhcToolchain = GhcToolchain
+  { ghcToolchainCompilerExe :: FilePath,
+    ghcToolchainCompilerVersion :: CabalVersion.Version,
+    ghcToolchainGhcPkgExe :: FilePath,
+    ghcToolchainLibDir :: FilePath
+  }
+  deriving (Eq, Show)
+
+data PackageEnvironmentSnapshot = PackageEnvironmentSnapshot
+  { packageEnvironmentPackageDbStack :: PackageDbStack,
+    packageEnvironmentPackageIndex :: PackageIndex,
+    packageEnvironmentSelectedUnitIdsByPackageName :: Map.Map PackageNameText (Set.Set UnitIdText)
+  }
+  deriving (Eq, Show)
+
+data CapturedGhcEnvironment = CapturedGhcEnvironment
+  { capturedGhcToolchain :: GhcToolchain,
+    capturedPackageEnvironment :: PackageEnvironmentSnapshot
   }
   deriving (Eq, Show)
 
