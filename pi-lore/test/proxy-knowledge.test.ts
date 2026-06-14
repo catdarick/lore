@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { createLoreExtension } from "../src/index.ts";
 import { FakePiHost } from "./test-support.ts";
 
-const projectRoot = resolve(process.cwd(), "../../..");
+const projectRoot = resolve(process.cwd(), "../");
 
 function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, "");

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { createLoreExtension } from "../src/index.ts";
 import { FakePiHost } from "./test-support.ts";
 
-const projectRoot = resolve(process.cwd(), "../../..");
+const projectRoot = resolve(process.cwd(), "../");
 
 test("runtime usage stats read active branch entries", async () => {
   const host = new FakePiHost(projectRoot);

@@ -30,7 +30,7 @@ test("startup reports unavailable Lore without throwing through Pi", async () =>
 });
 
 test("runtime startup does not require an attached Pi session branch", async () => {
-  const projectRoot = resolve(process.cwd(), "../../..");
+  const projectRoot = resolve(process.cwd(), "../");
   const host = new FakePiHost(projectRoot);
   host.getActiveBranchEntries = () => {
     throw new Error("no session context");
@@ -46,7 +46,7 @@ test("runtime startup does not require an attached Pi session branch", async () 
 });
 
 test("concurrent restarts serialize the full Lore process lifecycle", async () => {
-  const projectRoot = resolve(process.cwd(), "../../..");
+  const projectRoot = resolve(process.cwd(), "../");
   const client = new LoreClient({
     command: "python3",
     args: [join(projectRoot, ".pi/extensions/lore/test/fake-lore-mcp.py")],
@@ -71,10 +71,10 @@ test("concurrent restarts serialize the full Lore process lifecycle", async () =
 });
 
 test("stop prevents queued calls from restarting Lore", async () => {
-  const projectRoot = resolve(process.cwd(), "../../..");
+  const projectRoot = resolve(process.cwd(), "../");
   const client = new LoreClient({
     command: "python3",
-    args: [join(projectRoot, ".pi/extensions/lore/test/fake-lore-mcp.py")],
+    args: [join(projectRoot, "pi-lore/test/fake-lore-mcp.py")],
     env: {},
     cwd: projectRoot,
     startupTimeoutMs: 5_000,
@@ -101,10 +101,10 @@ test("stop prevents queued calls from restarting Lore", async () => {
 });
 
 test("stop wins over queued automatic stale restart", async () => {
-  const projectRoot = resolve(process.cwd(), "../../..");
+  const projectRoot = resolve(process.cwd(), "../");
   const client = new LoreClient({
     command: "python3",
-    args: [join(projectRoot, ".pi/extensions/lore/test/fake-lore-mcp.py")],
+    args: [join(projectRoot, "pi-lore/test/fake-lore-mcp.py")],
     env: {},
     cwd: projectRoot,
     startupTimeoutMs: 5_000,

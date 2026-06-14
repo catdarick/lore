@@ -9,7 +9,7 @@ import type { LoreConfig } from "../src/types.ts";
 import { LoreRecoveryUi } from "../src/ui.ts";
 import { FakePiHost } from "./test-support.ts";
 
-const projectRoot = resolve(process.cwd(), "../../..");
+const projectRoot = resolve(process.cwd(), "../");
 
 test("cache sync failure after completion does not undo completedRecovery", async () => {
   const host = new FakePiHost(projectRoot);

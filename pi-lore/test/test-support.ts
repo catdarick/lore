@@ -22,7 +22,7 @@ export class FakePiHost implements PiHost {
   getConfig(): unknown {
     return {
       command: "python3",
-      args: [join(this.projectDir, ".pi/extensions/lore/test/fake-lore-mcp.py")],
+      args: [join(this.projectDir, "pi-lore/test/fake-lore-mcp.py")],
       cwd: this.projectDir,
       startupTimeoutMs: 5_000,
       defaultToolTimeoutMs: 5_000,

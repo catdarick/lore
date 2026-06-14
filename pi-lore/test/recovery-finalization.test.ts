@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { createLoreExtension } from "../src/index.ts";
 import { FakePiHost } from "./test-support.ts";
 
-const projectRoot = resolve(process.cwd(), "../../..");
+const projectRoot = resolve(process.cwd(), "../");
 
 test("recovery finalization waits for a context event with the persisted toolResult", async () => {
   const host = new FakePiHost(projectRoot);
