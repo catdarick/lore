@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.Lookup.TypeQuery.Names
   ( TypeQueryOccurrence (..),
     TypeQueryQualification (..),
@@ -28,6 +30,7 @@ collectTypeQueryOccurrences ::
 collectTypeQueryOccurrences =
   collectTypeQueryOccurrencesWithBound Set.empty
 
+{- ORMOLU_DISABLE -}
 collectTypeQueryOccurrencesWithBound ::
   Set.Set GHC.RdrName ->
   GHC.LHsType GHC.GhcPs ->
@@ -44,7 +47,11 @@ collectTypeQueryOccurrencesWithBound boundNames (GHC.L _ typeNode) =
         [ collectTypeQueryOccurrencesWithBound boundNames funcType,
           collectTypeQueryOccurrencesWithBound boundNames argType
         ]
+#if MIN_VERSION_ghc(9,8,0)
+    GHC.HsAppKindTy _ funcType _ kindType ->
+#else
     GHC.HsAppKindTy _ funcType kindType ->
+#endif
       combineOccurrences
         [ collectTypeQueryOccurrencesWithBound boundNames funcType,
           collectTypeQueryOccurrencesWithBound boundNames kindType
@@ -104,6 +111,7 @@ collectTypeQueryOccurrencesWithBound boundNames (GHC.L _ typeNode) =
       Left (unsupportedTypeQuerySyntax "record types are not supported in type queries")
     GHC.XHsType {} ->
       Left (unsupportedTypeQuerySyntax "extended type syntax is not supported in type queries")
+{- ORMOLU_ENABLE -}
 
 collectContextOccurrences ::
   Set.Set GHC.RdrName ->

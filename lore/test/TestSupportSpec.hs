@@ -96,8 +96,12 @@ spec = do
                   List.find ((== "lookupOrZero") . Plugins.getOccString . (.name)) symbols
               source <- maybe (error "lookupOrZero definition not found") pure =<< resolveDefinitionSourceNamed targetName
               pure (definitionSourceToRenderSlice source)
-          spanPath <- singleRealSpanPath (head slice.declarationSpans).declarationSpan
-          void (readFile spanPath)
+          case slice.declarationSpans of
+            [declaration] -> do
+              spanPath <- singleRealSpanPath declaration.declarationSpan
+              void (readFile spanPath)
+            spans ->
+              expectationFailure ("Expected one declaration span, got " <> show (length spans))
 
     it "cleans up nested mutable fixture copies after their callback" do
       nestedRoot <-

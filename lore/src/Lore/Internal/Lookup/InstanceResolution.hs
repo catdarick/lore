@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.Lookup.InstanceResolution
   ( ChosenInstanceError (..),
     ChosenInstanceResolution (..),
@@ -28,7 +30,11 @@ import qualified GHC.Tc.Errors.Types as TcErrors
 import qualified GHC.Tc.Module as TcModule
 import qualified GHC.Tc.Solver as TcSolver
 import qualified GHC.Tc.Solver.InertSet as InertSet
+#if MIN_VERSION_ghc(9,8,0)
+import qualified GHC.Tc.Zonk.Env as Zonk
+#else
 import qualified GHC.Tc.Utils.Zonk as Zonk
+#endif
 import qualified GHC.Types.Error as TypeError
 import qualified GHC.Unit.External as External
 import Lore.Internal.Lookup.Orphans (collectIndexModules)
@@ -284,6 +290,17 @@ renderTcMessages messages
   | otherwise =
       T.pack (Plugins.showSDocUnsafe (Plugins.ppr messages))
 
+#if MIN_VERSION_ghc(9,8,0)
+renderLookupInstanceError :: InstEnv.LookupInstanceErrReason -> Text
+renderLookupInstanceError = \case
+  InstEnv.LookupInstErrNotExact ->
+    "Matching instance is not exact."
+  InstEnv.LookupInstErrFlexiVar ->
+    "Instance lookup contains flexible type variables."
+  InstEnv.LookupInstErrNotFound ->
+    "No matching instance found."
+#else
 renderLookupInstanceError :: Plugins.SDoc -> Text
 renderLookupInstanceError =
   T.pack . Plugins.showSDocUnsafe
+#endif

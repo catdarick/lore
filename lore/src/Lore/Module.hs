@@ -14,6 +14,7 @@ import qualified GHC
 import qualified GHC.Data.FastString as FastString
 import qualified GHC.Types.Avail as Avail
 import GHC.Utils.Monad (mapMaybeM)
+import Lore.Internal.Ghc.AvailInfo (availInfoForName, availInfoSubordinateNames)
 import qualified Lore.Internal.Ghc.TyThing as TyThing
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedOccName, mkGhcModuleName)
 import Lore.Internal.Package (PackageData (packageName), discoverProject)
@@ -90,7 +91,7 @@ buildLeafNode childName = do
 buildRootNodeFromAvail :: (MonadLore m) => Avail.AvailInfo -> m (Maybe ExportedSymbolNode)
 buildRootNodeFromAvail availInfo = do
   let rootName = Avail.availName availInfo
-      childNames = map Avail.greNamePrintableName (Avail.availSubordinateGreNames availInfo)
+      childNames = availInfoSubordinateNames availInfo
   maybeRootThing <- GHC.lookupName rootName
   case maybeRootThing of
     Nothing ->
@@ -115,7 +116,7 @@ loadExportedAvailInfosForModule module_ = do
           pure (deduplicateAvailInfos (GHC.mi_exports modIface))
         Nothing -> do
           Log.warn $ "Failed to get interface exports for module " <> show (GHC.moduleNameString (GHC.moduleName module_)) <> ": modInfoIface returned Nothing. Falling back to flat export names."
-          pure (map (Avail.Avail . Avail.NormalGreName) (deduplicateNames (GHC.modInfoExports moduleInfo)))
+          pure (map availInfoForName (deduplicateNames (GHC.modInfoExports moduleInfo)))
     Nothing -> do
       Log.warn $ "Failed to get exports for module " <> show (GHC.moduleNameString (GHC.moduleName module_)) <> ": getModuleInfo returned Nothing."
       pure []

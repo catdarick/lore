@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.HomeModules.LoadAttempt
   ( HomeModulesLoadAttempt (..),
     loadHomeModulesOnce,
@@ -16,6 +18,9 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC
 import qualified GHC.Driver.Make as GHC
+#if MIN_VERSION_ghc(9,8,0)
+import qualified GHC.Types.Error as GHC.Error
+#endif
 import GHC.Utils.Monad (mapMaybeM)
 import Lore.Diagnostics (Diagnostic (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
 import Lore.Internal.HomeModules.ModuleGraphPatch (applyModuleScopedArgs)
@@ -36,6 +41,7 @@ data HomeModulesLoadAttempt = HomeModulesLoadAttempt
     homeModulesLoadAttemptAutoRefactSummaryByFile :: [(FilePath, [String])]
   }
 
+{- ORMOLU_DISABLE -}
 loadHomeModulesOnce :: (MonadLore m) => HomeModulesLoadPlan -> m HomeModulesLoadAttempt
 loadHomeModulesOnce plan = do
   Log.debug "Starting dependency analysis and home-module loading..."
@@ -54,7 +60,11 @@ loadHomeModulesOnce plan = do
   ifaceCache <- liftIO (MVar.readMVar ifaceCacheVar)
   Log.debug "Loading targets with GHC..."
   (diagnostics, loadResult) <- withDiagnosticsCapturing do
+#if MIN_VERSION_ghc(9,8,0)
+    GHC.load' (Just ifaceCache) GHC.LoadAllTargets GHC.Error.mkUnknownDiagnostic Nothing patchedModGraph
+#else
     GHC.load' (Just ifaceCache) GHC.LoadAllTargets Nothing patchedModGraph
+#endif
 
   loadedModules <- collectLoadedModules patchedModGraph
   retainCachesForLoadedModules loadedModules
@@ -68,6 +78,7 @@ loadHomeModulesOnce plan = do
         homeModulesLoadAttemptAutoRefactFiles = Set.empty,
         homeModulesLoadAttemptAutoRefactSummaryByFile = []
       }
+{- ORMOLU_ENABLE -}
 
 buildModuleSummariesByFile :: (MonadLore m) => GHC.ModuleGraph -> m (Map.Map FilePath GHC.ModSummary)
 buildModuleSummariesByFile moduleGraph = do

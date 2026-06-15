@@ -17,11 +17,9 @@ isHiddenDirectoryPath :: FilePath -> Bool
 isHiddenDirectoryPath path =
   any isHiddenSegment (splitDirectories (normalizeRelativePath path))
   where
-    isHiddenSegment segment =
-      segment /= "."
-        && segment /= ".."
-        && not (null segment)
-        && head segment == '.'
+    isHiddenSegment = \case
+      '.' : rest -> not (null rest) && rest /= "."
+      _ -> False
 
 data GitignoredDirectoryMatcher
   = GitignoredDirectoryName FilePath

@@ -27,10 +27,11 @@ import Lore.Internal.ProjectEnvironment.Prepare (prepareProjectDescription)
 import Lore.Internal.ProjectEnvironment.Refresh (refreshProjectEnvironment)
 import Lore.Internal.ProjectEnvironment.Types (PreparedProjectDescription (..), ProjectEnvironmentRefresh (..))
 import Lore.Monad (MonadLore)
-import Lore.Session (SessionConfig (..), defaultSessionConfig)
+import Lore.Session (ParallelWorkersCount (..), SessionConfig (..), defaultSessionConfig)
 import Lore.TemporalModules (TemporalModule (..))
 import System.Directory (createDirectoryIfMissing, doesFileExist, makeAbsolute, removeFile)
 import System.FilePath ((</>))
+import qualified System.Timeout as Timeout
 import Test.Hspec
 import TestSupport (fixtureLoreAt, fixtureLoreAtWithConfig, withFixtureCopy, withFixtureSpec)
 
@@ -196,18 +197,26 @@ spec =
             `shouldSatisfy` any (T.isInfixOf "parse error")
           loadFailed loadResult `shouldSatisfy` (> 0)
 
-      it "MULTIPKG_LANGUAGE respects the configured default language in the multipackage workspace" \fixture -> do
+      it "MULTIPKG_LANGUAGE loads the dependent multipackage workspace with two parallel workers" \fixture -> do
         repoRoot <- makeAbsolute ".."
 
-        loadResult <-
-          fixtureLoreAt fixture repoRoot $
-            HomeModules.loadHomeModules defaultLoadHomeModulesOptions
+        maybeLoadResult <-
+          Timeout.timeout 30_000_000 $
+            fixtureLoreAtWithConfig
+              fixture
+              defaultSessionConfig {parallelWorkersLimit = ThisWorkersCount 2}
+              repoRoot
+              (HomeModules.loadHomeModules defaultLoadHomeModulesOptions)
 
-        loadDiagnosticsOf loadResult `shouldBe` []
-        loadSucceeded loadResult `shouldBe` True
-        loadLoaded loadResult `shouldBe` loadTotal loadResult
-        loadFailed loadResult `shouldBe` 0
-        loadAutofixed loadResult `shouldBe` 0
+        case maybeLoadResult of
+          Nothing ->
+            expectationFailure "Parallel multipackage home-module loading timed out"
+          Just loadResult -> do
+            loadDiagnosticsOf loadResult `shouldBe` []
+            loadSucceeded loadResult `shouldBe` True
+            loadLoaded loadResult `shouldBe` loadTotal loadResult
+            loadFailed loadResult `shouldBe` 0
+            loadAutofixed loadResult `shouldBe` 0
 
     describe "loadHomeModules auto-refactor (redundant imports only)" do
       it "does not retry cleanup when auto-refactor is disabled" \fixture -> do

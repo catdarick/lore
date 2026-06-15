@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Diagnostics
   ( Diagnostic (..),
     DiagnosticClass (..),
@@ -13,6 +15,9 @@ where
 import qualified Control.Concurrent.MVar as MVar
 import Control.Monad.Catch (finally)
 import Control.Monad.IO.Class (MonadIO (..))
+#if MIN_VERSION_ghc(9,8,0)
+import qualified Data.List.NonEmpty as NonEmpty
+#endif
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
@@ -127,12 +132,12 @@ toSeverity = \case
 
 toReasonText :: MessageClass -> Maybe Text
 toReasonText = \case
-  MCDiagnostic _ reason _ -> Just (reasonToText reason)
+  MCDiagnostic _ reason _ -> Just (messageClassReasonToText reason)
   _ -> Nothing
 
 toWarningFlag :: MessageClass -> Maybe DriverFlags.WarningFlag
 toWarningFlag = \case
-  MCDiagnostic _ reason _ -> reasonToWarningFlag reason
+  MCDiagnostic _ reason _ -> messageClassReasonToWarningFlag reason
   _ -> Nothing
 
 toCodeInfo :: MessageClass -> Maybe DiagnosticCodeInfo
@@ -140,13 +145,35 @@ toCodeInfo = \case
   MCDiagnostic _ _ mCode -> fmap fromDiagnosticCode mCode
   _ -> Nothing
 
+#if MIN_VERSION_ghc(9,8,0)
+messageClassReasonToText :: GHC.ResolvedDiagnosticReason -> Text
+messageClassReasonToText =
+  reasonToText . GHC.resolvedDiagnosticReason
+
+messageClassReasonToWarningFlag :: GHC.ResolvedDiagnosticReason -> Maybe DriverFlags.WarningFlag
+messageClassReasonToWarningFlag =
+  reasonToWarningFlag . GHC.resolvedDiagnosticReason
+#else
+messageClassReasonToText :: GHC.DiagnosticReason -> Text
+messageClassReasonToText = reasonToText
+
+messageClassReasonToWarningFlag :: GHC.DiagnosticReason -> Maybe DriverFlags.WarningFlag
+messageClassReasonToWarningFlag = reasonToWarningFlag
+#endif
+
 reasonToText :: GHC.DiagnosticReason -> Text
 reasonToText = T.pack . show
 
+{- ORMOLU_DISABLE -}
 reasonToWarningFlag :: GHC.DiagnosticReason -> Maybe DriverFlags.WarningFlag
 reasonToWarningFlag = \case
+#if MIN_VERSION_ghc(9,8,0)
+  GHC.WarningWithFlags flags -> Just (NonEmpty.head flags)
+#else
   GHC.WarningWithFlag flag -> Just flag
+#endif
   _ -> Nothing
+{- ORMOLU_ENABLE -}
 
 fromDiagnosticCode :: GHC.DiagnosticCode -> DiagnosticCodeInfo
 fromDiagnosticCode

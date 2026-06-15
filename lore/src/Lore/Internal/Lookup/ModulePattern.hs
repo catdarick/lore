@@ -6,6 +6,8 @@ module Lore.Internal.Lookup.ModulePattern
   )
 where
 
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.Text (Text)
 import qualified Data.Text as T
 import Lore.Internal.Lookup.Name (NormalizedModuleName, unNormalizedModuleName)
@@ -19,7 +21,7 @@ data ModulePattern
 data WildcardModulePattern = WildcardModulePattern'
   { startsWithWildcard :: Bool,
     endsWithWildcard :: Bool,
-    literalParts :: [Text]
+    literalParts :: NonEmpty Text
   }
   deriving stock (Eq, Show)
 
@@ -30,18 +32,21 @@ data ModulePatternError
 compileModulePattern :: Text -> Either ModulePatternError ModulePattern
 compileModulePattern rawPattern
   | T.null rawPattern = Left EmptyModulePattern
-  | T.all (== '*') rawPattern = Right MatchAllModules
-  | "*" `T.isInfixOf` rawPattern =
-      Right
-        ( WildcardModulePattern
-            WildcardModulePattern'
-              { startsWithWildcard = "*" `T.isPrefixOf` rawPattern,
-                endsWithWildcard = "*" `T.isSuffixOf` rawPattern,
-                literalParts = filter (not . T.null) (T.splitOn "*" rawPattern)
-              }
-        )
   | otherwise =
-      Right (ExactModulePattern rawPattern)
+      case NonEmpty.nonEmpty (filter (not . T.null) (T.splitOn "*" rawPattern)) of
+        Nothing -> Right MatchAllModules
+        Just literalParts
+          | "*" `T.isInfixOf` rawPattern ->
+              Right
+                ( WildcardModulePattern
+                    WildcardModulePattern'
+                      { startsWithWildcard = "*" `T.isPrefixOf` rawPattern,
+                        endsWithWildcard = "*" `T.isSuffixOf` rawPattern,
+                        literalParts
+                      }
+                )
+          | otherwise ->
+              Right (ExactModulePattern rawPattern)
 
 matchesModulePattern :: ModulePattern -> NormalizedModuleName -> Bool
 matchesModulePattern (ExactModulePattern expected) moduleName =
@@ -54,15 +59,15 @@ matchesModulePattern (WildcardModulePattern wildcardPattern) moduleName =
     && endsAtRequiredPosition
   where
     moduleText = unNormalizedModuleName moduleName
-    firstPart = head wildcardPattern.literalParts
-    finalPart = last wildcardPattern.literalParts
+    firstPart = NonEmpty.head wildcardPattern.literalParts
+    finalPart = NonEmpty.last wildcardPattern.literalParts
 
     startsAtRequiredPosition =
       wildcardPattern.startsWithWildcard || firstPart `T.isPrefixOf` moduleText
 
     (initialOffset, remainingParts)
-      | wildcardPattern.startsWithWildcard = (0, wildcardPattern.literalParts)
-      | otherwise = (T.length firstPart, tail wildcardPattern.literalParts)
+      | wildcardPattern.startsWithWildcard = (0, NonEmpty.toList wildcardPattern.literalParts)
+      | otherwise = (T.length firstPart, NonEmpty.tail wildcardPattern.literalParts)
 
     endsAtRequiredPosition =
       wildcardPattern.endsWithWildcard || finalPart `T.isSuffixOf` moduleText

@@ -22,7 +22,7 @@ where
 import Control.Exception (bracket)
 import Control.Monad (when)
 import Data.Char (isSpace, toLower)
-import Data.List (find, isInfixOf, isPrefixOf, stripPrefix)
+import Data.List (find, isInfixOf)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import Data.Maybe (catMaybes)
@@ -31,12 +31,13 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import qualified GHC.Plugins as GHC
+import qualified GHC.Settings.Config as GHC.Settings
 import qualified Lore
 import Lore.Logger (LoggerHandle, noLogHandle)
 import Lore.Monad (LoreMonadT)
 import Lore.Session (SessionConfig (..), defaultSessionConfig, runLore)
 import qualified Lore.Session as Session
-import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory, makeAbsolute, removeFile, removePathForcibly)
+import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, listDirectory, makeAbsolute, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
@@ -257,16 +258,10 @@ ensureCabalFixturePackageDb fixtureCopyRoot = do
     runFixtureCommand fixtureCopyRoot "ghc-pkg" ["init", packageDb]
 
 materializeStackFixture :: FilePath -> IO ()
-materializeStackFixture fixtureCopyRoot = do
-  maybeProjectRoot <- findProjectRootWithStackFiles
-  case maybeProjectRoot of
-    Nothing -> error "Cannot materialize Stack fixture: project root with stack.yaml was not found."
-    Just projectRoot -> do
-      resolver <- readProjectResolver projectRoot
-      writeFile
-        (fixtureCopyRoot </> "stack.yaml")
-        ("resolver: " <> resolver <> "\n\npackages:\n- .\n")
-      copyProjectStackLockIfExists projectRoot fixtureCopyRoot
+materializeStackFixture fixtureCopyRoot =
+  writeFile
+    (fixtureCopyRoot </> "stack.yaml")
+    ("resolver: ghc-" <> GHC.Settings.cProjectVersion <> "\n\npackages:\n- .\n")
 
 runFixtureCommand :: FilePath -> FilePath -> [String] -> IO ()
 runFixtureCommand cwd command args = do
@@ -298,39 +293,6 @@ readFixtureCommandWithExit cwd command args = do
             "stderr:",
             stderrText
           ]
-
-findProjectRootWithStackFiles :: IO (Maybe FilePath)
-findProjectRootWithStackFiles = do
-  cwd <- getCurrentDirectory
-  let candidates = [cwd, cwd </> "..", cwd </> ".." </> "..", cwd </> ".." </> ".." </> ".."]
-  go candidates
-  where
-    go [] = pure Nothing
-    go (candidateRoot : restRoots) = do
-      hasStackYaml <- doesFileExist (candidateRoot </> "stack.yaml")
-      if hasStackYaml
-        then pure (Just candidateRoot)
-        else go restRoots
-
-readProjectResolver :: FilePath -> IO String
-readProjectResolver projectRoot = do
-  stackYaml <- readFile (projectRoot </> "stack.yaml")
-  case findResolver stackYaml of
-    Just resolver -> pure resolver
-    Nothing -> error "Cannot materialize Stack fixture: resolver was not found in project stack.yaml."
-  where
-    findResolver stackYamlContents =
-      case find (isPrefixOf "resolver:" . dropWhile isSpace) (lines stackYamlContents) of
-        Nothing -> Nothing
-        Just resolverLine ->
-          fmap (trim . dropWhile isSpace) (stripPrefix "resolver:" (dropWhile isSpace resolverLine))
-
-copyProjectStackLockIfExists :: FilePath -> FilePath -> IO ()
-copyProjectStackLockIfExists projectRoot fixtureCopyRoot = do
-  let projectStackLockPath = projectRoot </> "stack.yaml.lock"
-      fixtureStackLockPath = fixtureCopyRoot </> "stack.yaml.lock"
-  projectHasStackLock <- doesFileExist projectStackLockPath
-  when projectHasStackLock (copyFile projectStackLockPath fixtureStackLockPath)
 
 trim :: String -> String
 trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace

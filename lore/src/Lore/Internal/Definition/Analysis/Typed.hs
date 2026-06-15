@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.Definition.Analysis.Typed
   ( buildMinimalTypedModuleFacts,
     collectMinimalTypedOccurrences,
@@ -7,7 +9,7 @@ where
 import Data.Containers.ListUtils (nubOrd)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
-import Data.Maybe (maybeToList)
+import Data.Maybe (mapMaybe, maybeToList)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC
@@ -16,7 +18,9 @@ import qualified GHC.Core.InstEnv as GHC.InstEnv
 import qualified GHC.Core.TyCo.FVs as GHC.TyCoFVs
 import qualified GHC.Plugins as GHC
 import qualified GHC.Tc.Types as GHC.Tc
-import qualified GHC.Types.Avail as GHC
+#if MIN_VERSION_ghc(9,8,0)
+import qualified GHC.Types.GREInfo as GHC.GREInfo
+#endif
 import qualified GHC.Types.FieldLabel as GHC.FieldLabel
 import qualified GHC.Types.TypeEnv as GHC.TypeEnv
 import qualified GHC.Types.Unique.Set as GHC.UniqueSet
@@ -26,7 +30,7 @@ import Lore.Internal.Definition.Analysis.Common
     locatedSpan,
   )
 import Lore.Internal.Definition.Types
-import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfoNamesWithFields, fieldLabelAliasText, greNameFieldAliasText)
+import Lore.Internal.Ghc.AvailInfo (availInfoNamesWithFields, fieldLabelAliasText)
 import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames, valueTypeHeadNamesFromType)
 
 buildMinimalTypedModuleFacts ::
@@ -71,18 +75,16 @@ collectDefinitionCandidateNames homeModule tcg =
     localGreNames =
       filter
         belongsToModule
-        [ GHC.greNamePrintableName globalRdrElt.gre_name
+        [ globalRdrEltName globalRdrElt
         | globalRdrElt <- GHC.globalRdrEnvElts (GHC.Tc.tcg_rdr_env tcg),
           globalRdrElt.gre_lcl
         ]
 
     fieldSelectorNames =
-      filter
-        belongsToModule
-        [ GHC.flSelector fieldLabel
-        | fieldLabels <- GHC.nonDetNameEnvElts (GHC.Tc.tcg_field_env tcg),
-          fieldLabel <- fieldLabels
-        ]
+      [ GHC.FieldLabel.flSelector fieldLabel
+      | fieldLabel <- localFieldLabels tcg,
+        belongsToModule (GHC.FieldLabel.flSelector fieldLabel)
+      ]
 
     instanceNames =
       collectClassInstanceNames homeModule tcg <> collectFamilyInstanceNames homeModule tcg
@@ -137,9 +139,8 @@ collectDefinitionOccAliases homeModule tcg =
   Map.fromListWith
     Set.union
     [ (selectorName, Set.singleton (fieldLabelAliasText fieldLabel))
-    | fieldLabels <- GHC.nonDetNameEnvElts (GHC.Tc.tcg_field_env tcg),
-      fieldLabel <- fieldLabels,
-      let selectorName = GHC.flSelector fieldLabel,
+    | fieldLabel <- localFieldLabels tcg,
+      let selectorName = GHC.FieldLabel.flSelector fieldLabel,
       GHC.nameModule_maybe selectorName == Just homeModule
     ]
 
@@ -154,15 +155,9 @@ collectExportedNames homeModule tcg =
 
 collectExportedOccAliases :: GHC.Module -> GHC.Tc.TcGblEnv -> Map.Map GHC.Name (Set.Set Text)
 collectExportedOccAliases homeModule tcg =
-  Map.fromListWith
-    Set.union
-    [ (name, Set.singleton aliasText)
-    | availInfo <- GHC.Tc.tcg_exports tcg,
-      greName <- availInfoGreNames availInfo,
-      name <- [GHC.greNamePrintableName greName],
-      GHC.nameModule_maybe name == Just homeModule,
-      Just aliasText <- [greNameFieldAliasText greName]
-    ]
+  Map.restrictKeys
+    (collectDefinitionOccAliases homeModule tcg)
+    (Set.fromList (collectExportedNames homeModule tcg))
 
 collectMinimalTypedOccurrences :: GHC.Tc.TcGblEnv -> [MinimalTypedOccurrence]
 collectMinimalTypedOccurrences tcg =
@@ -193,7 +188,7 @@ collectMinimalTypedOccurrences tcg =
                   maybeToList $
                     List.find
                       (matchesFieldSelector (GHC.foExt fieldOccurrence))
-                      (GHC.lookupGRE_RdrName (GHC.unLoc fieldOccurrence.foLabel) globalRdrEnv)
+                      (lookupGlobalRdrEnvRdrName (GHC.unLoc fieldOccurrence.foLabel) globalRdrEnv)
               }
           | fieldOccurrence <- collectTyped renamedGroup :: [GHC.FieldOcc GHC.GhcRn]
           ]
@@ -204,14 +199,14 @@ collectMinimalTypedOccurrences tcg =
                 occurrenceSeedGres =
                   filter
                     isDotFieldSelectorGre
-                    (GHC.lookupGRE_RdrName (dotFieldLabelRdrNameRn dotFieldOccurrence) globalRdrEnv)
+                    (lookupGlobalRdrEnvRdrName (dotFieldLabelRdrNameRn dotFieldOccurrence) globalRdrEnv)
               }
           | dotFieldOccurrence <- collectTyped renamedGroup :: [GHC.DotFieldOcc GHC.GhcRn]
           ]
 
     toMinimalTypedOccurrences occurrenceSeed =
       [ MinimalTypedOccurrence
-          { typedOccurrenceName = GHC.greNamePrintableName gre.gre_name,
+          { typedOccurrenceName = globalRdrEltName gre,
             typedOccurrenceSpan = occurrenceSeed.occurrenceSeedSpan,
             typedOccurrenceParent = case GHC.gre_par gre of
               GHC.ParentIs parentName -> Just parentName
@@ -221,18 +216,10 @@ collectMinimalTypedOccurrences tcg =
       ]
 
     matchesFieldSelector selectorName gre =
-      case gre.gre_name of
-        GHC.NormalGreName name ->
-          name == selectorName
-        GHC.FieldGreName fieldLabel ->
-          GHC.FieldLabel.flSelector fieldLabel == selectorName
+      globalRdrEltName gre == selectorName
 
-    isDotFieldSelectorGre gre =
-      case gre.gre_name of
-        GHC.FieldGreName _ ->
-          True
-        GHC.NormalGreName _ ->
-          False
+    isDotFieldSelectorGre =
+      maybe False (const True) . globalRdrEltFieldLabel
 
 data OccurrenceSeed = OccurrenceSeed
   { occurrenceSeedSpan :: !GHC.SrcSpan,
@@ -247,3 +234,42 @@ dedupeMinimalTypedOccurrences =
       left.typedOccurrenceName == right.typedOccurrenceName
         && left.typedOccurrenceSpan == right.typedOccurrenceSpan
         && left.typedOccurrenceParent == right.typedOccurrenceParent
+
+localFieldLabels :: GHC.Tc.TcGblEnv -> [GHC.FieldLabel]
+localFieldLabels tcg =
+  mapMaybe
+    globalRdrEltFieldLabel
+    [ gre
+    | gre <- GHC.globalRdrEnvElts (GHC.Tc.tcg_rdr_env tcg),
+      gre.gre_lcl
+    ]
+
+globalRdrEltName :: GHC.GlobalRdrElt -> GHC.Name
+#if MIN_VERSION_ghc(9,8,0)
+globalRdrEltName = GHC.greName
+#else
+globalRdrEltName = GHC.grePrintableName
+#endif
+
+globalRdrEltFieldLabel :: GHC.GlobalRdrElt -> Maybe GHC.FieldLabel
+#if MIN_VERSION_ghc(9,8,0)
+globalRdrEltFieldLabel gre =
+  case GHC.greInfo gre of
+    GHC.GREInfo.IAmRecField recFieldInfo ->
+      Just (GHC.GREInfo.recFieldLabel recFieldInfo)
+    _ ->
+      Nothing
+#else
+globalRdrEltFieldLabel gre =
+  case gre.gre_name of
+    GHC.FieldGreName fieldLabel -> Just fieldLabel
+    GHC.NormalGreName _ -> Nothing
+#endif
+
+lookupGlobalRdrEnvRdrName :: GHC.RdrName -> GHC.GlobalRdrEnv -> [GHC.GlobalRdrElt]
+#if MIN_VERSION_ghc(9,8,0)
+lookupGlobalRdrEnvRdrName rdrName globalRdrEnv =
+  GHC.lookupGRE globalRdrEnv (GHC.LookupRdrName rdrName GHC.AllRelevantGREs)
+#else
+lookupGlobalRdrEnvRdrName = GHC.lookupGRE_RdrName
+#endif

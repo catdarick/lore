@@ -604,7 +604,7 @@ spec = withFixtureSpec do
           namedSources <- resolveDefinitionClosureSourcesNamed 2 targetName
           pure (map (GHC.moduleNameString . GHC.moduleName . definitionSourceModule . (.definitionSource)) namedSources)
 
-      head moduleOrder `shouldBe` "Demo"
+      take 1 moduleOrder `shouldBe` ["Demo"]
       "Demo.Support" `shouldSatisfy` (`elem` moduleOrder)
 
     it "orders nested dependencies after their dependents within breadth-first closure output" \fixture -> do
@@ -914,14 +914,15 @@ shouldHaveSingleDefinitionText ::
   String ->
   Maybe String ->
   IO ()
-shouldHaveSingleDefinitionText slice expectedDeclaration expectedSignature = do
-  length slice.declarationSpans `shouldBe` 1
-  declarationText <- readSpanText spans.declarationSpan
-  signatureText <- traverse readSpanText spans.signatureSpan
-  declarationText `shouldBe` expectedDeclaration
-  signatureText `shouldBe` expectedSignature
-  where
-    spans = head slice.declarationSpans
+shouldHaveSingleDefinitionText slice expectedDeclaration expectedSignature =
+  case slice.declarationSpans of
+    [spans] -> do
+      declarationText <- readSpanText spans.declarationSpan
+      signatureText <- traverse readSpanText spans.signatureSpan
+      declarationText `shouldBe` expectedDeclaration
+      signatureText `shouldBe` expectedSignature
+    spans ->
+      expectationFailure ("Expected one declaration span, got " <> show (length spans))
 
 shouldHaveModuleDefinitions :: [DefinitionSlice] -> [(String, [String])] -> IO ()
 shouldHaveModuleDefinitions slices expectedDefinitions = do

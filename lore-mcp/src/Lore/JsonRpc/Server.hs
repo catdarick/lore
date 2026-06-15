@@ -22,7 +22,7 @@ import Data.Aeson
     (.=),
   )
 import qualified Data.Aeson.KeyMap as KeyMap
-import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import Data.Text (Text)
 import qualified Data.Text as T

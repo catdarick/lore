@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Lore.Internal.Ghc.DynFlags
@@ -55,6 +56,7 @@ invalidatePackageDbCacheM =
             (GHC.hsc_unit_env hscEnv)
       }
 
+{- ORMOLU_DISABLE -}
 setGhciLikeDynFlags :: ParallelWorkersCount -> GHC.DynFlags -> GHC.DynFlags
 setGhciLikeDynFlags parallelWorkersLimit dflags0 =
   let dflags1 =
@@ -66,15 +68,20 @@ setGhciLikeDynFlags parallelWorkersLimit dflags0 =
           }
       dflags2 =
         case parallelWorkersLimit of
+#if MIN_VERSION_ghc(9,8,0)
+          ThisWorkersCount jobs -> dflags1 {GHC.parMakeCount = Just (GHC.ParMakeThisMany jobs)}
+          WorkersAsNumProcessors -> dflags1 {GHC.parMakeCount = Just GHC.ParMakeNumProcessors}
+#else
           ThisWorkersCount jobs -> dflags1 {GHC.parMakeCount = Just jobs}
           WorkersAsNumProcessors -> dflags1 {GHC.parMakeCount = Nothing}
-   in dflags2
+#endif
+   in GHC.gopt_unset dflags2 GHC.Opt_ExternalInterpreter
         `GHC.gopt_set` GHC.Opt_UseBytecodeRatherThanObjects
-        `GHC.gopt_set` GHC.Opt_ExternalInterpreter
         `GHC.gopt_set` GHC.Opt_Haddock
         `GHC.gopt_set` GHC.Opt_IgnoreHpcChanges
         `GHC.gopt_set` GHC.Opt_IgnoreOptimChanges
         `GHC.gopt_set` GHC.Opt_ImplicitImportQualified
+{- ORMOLU_ENABLE -}
 
 setGhcWorkDirs :: FilePath -> GHC.DynFlags -> GHC.DynFlags
 setGhcWorkDirs ghcWorkDir dflags =

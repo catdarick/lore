@@ -154,7 +154,7 @@ processCabalPackage ghcVersion cabalFile = do
             CabalCompiler.NoAbiTag
         platform = CabalSystem.Platform CabalSystem.buildArch CabalSystem.buildOS
         requestedComponents =
-          CabalRequested.defaultComponentRequestedSpec
+          CabalRequested.ComponentRequestedSpec
             { CabalRequested.testsRequested = True,
               CabalRequested.benchmarksRequested = True
             }

@@ -214,7 +214,7 @@ spec =
               (typeFacts [(highIdfContext, [], ["createUser"])])
 
       suggestionLookupNames suggestions `shouldBe` ["createUser", "createUsers", "createUserRequest", "load"]
-      (head suggestions).suggestionExactLookupNameMatch `shouldBe` True
+      map (.suggestionExactLookupNameMatch) (take 1 suggestions) `shouldBe` [True]
 
     it "lets rare secondary evidence materially influence ranking" do
       suggestionNames (searchWithTypeFacts "create DiscountAccount" [commonCreate, createOtherAccount] (typeFacts [(commonCreate, [], ["DiscountAccount"]), (createOtherAccount, [], ["Account"])]))
@@ -410,10 +410,10 @@ qualifiedSymbolName :: Symbol -> Text
 qualifiedSymbolName symbol =
   renderName symbol.name
 
-testSymbol :: Int -> String -> String -> Symbol
+testSymbol :: Integer -> String -> String -> Symbol
 testSymbol unique moduleName occName =
   Symbol
-    { name = GHC.mkExternalName (GHC.Unique.mkUniqueGrimily unique) (testModule moduleName) (GHC.mkVarOcc occName) GHC.noSrcSpan,
+    { name = GHC.mkExternalName (GHC.Unique.mkUniqueGrimily (fromInteger unique)) (testModule moduleName) (GHC.mkVarOcc occName) GHC.noSrcSpan,
       visibility = Symbol'ExportedFrom (Set.singleton (testModule moduleName)),
       aliases = Set.empty
     }

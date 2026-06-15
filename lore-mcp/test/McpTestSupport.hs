@@ -12,10 +12,10 @@ where
 import Control.Exception (bracket)
 import Control.Monad (void, when)
 import qualified Data.Aeson as J
-import Data.Char (isSpace, toLower)
-import Data.List (find, isPrefixOf, stripPrefix)
+import Data.Char (toLower)
 import qualified Data.Text as T
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import qualified GHC.Settings.Config as GHC.Settings
 import Lore
   ( ProjectProvider (..),
     SessionConfig (..),
@@ -30,7 +30,7 @@ import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), ToolWithoutArgs
 import Lore.Mcp.Monad (LoreMcpMonad, newLoreMcpContext, runLoreMcp)
 import Lore.Tools.Render.Doc (ToLoreDoc (toLoreDoc))
 import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
-import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory, makeAbsolute, removeFile, removePathForcibly)
+import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, makeAbsolute, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
@@ -83,10 +83,14 @@ resolveFixtureRoot = do
         [ "test" </> "fixtures" </> "demo",
           "lore-mcp" </> "test" </> "fixtures" </> "demo"
         ]
-  maybeFixturePath <- findFirstExistingAbsolutePath candidates
+  absoluteCandidates <- traverse makeAbsolute candidates
+  maybeFixturePath <- findFirstExistingDirectory absoluteCandidates
   case maybeFixturePath of
     Just fixturePath -> pure fixturePath
-    Nothing -> makeAbsolute (head candidates)
+    Nothing ->
+      ioError . userError $
+        "Cannot find lore-mcp test fixture. Searched:\n"
+          <> unlines (map ("  - " <>) absoluteCandidates)
 
 loadFixtureHomeModules :: LoreMcpMonad ()
 loadFixtureHomeModules =
@@ -184,16 +188,15 @@ copyDirectoryRecursive sourceDir targetDir = do
         then copyDirectoryRecursive sourcePath targetPath
         else copyFile sourcePath targetPath
 
-findFirstExistingAbsolutePath :: [FilePath] -> IO (Maybe FilePath)
-findFirstExistingAbsolutePath candidatePaths =
+findFirstExistingDirectory :: [FilePath] -> IO (Maybe FilePath)
+findFirstExistingDirectory candidatePaths =
   go candidatePaths
   where
     go [] = pure Nothing
     go (candidatePath : restPaths) = do
-      absolutePath <- makeAbsolute candidatePath
-      exists <- doesDirectoryExist absolutePath
+      exists <- doesDirectoryExist candidatePath
       if exists
-        then pure (Just absolutePath)
+        then pure (Just candidatePath)
         else go restPaths
 
 normalizeFixtureBuildFiles :: FilePath -> IO ()
@@ -233,52 +236,10 @@ materializeCabalFixture fixtureCopyRoot = do
   writeFile (fixtureCopyRoot </> "cabal.project") "packages:\n  .\n"
 
 materializeStackFixture :: FilePath -> IO ()
-materializeStackFixture fixtureCopyRoot = do
-  maybeProjectRoot <- findProjectRootWithStackFiles
-  case maybeProjectRoot of
-    Nothing -> error "Cannot materialize Stack fixture: project root with stack.yaml was not found."
-    Just projectRoot -> do
-      resolver <- readProjectResolver projectRoot
-      writeFile
-        (fixtureCopyRoot </> "stack.yaml")
-        ("resolver: " <> resolver <> "\n\npackages:\n- .\n")
-      copyProjectStackLockIfExists projectRoot fixtureCopyRoot
-
-findProjectRootWithStackFiles :: IO (Maybe FilePath)
-findProjectRootWithStackFiles = do
-  cwd <- getCurrentDirectory
-  let candidates = [cwd, cwd </> "..", cwd </> ".." </> "..", cwd </> ".." </> ".." </> ".."]
-  go candidates
-  where
-    go [] = pure Nothing
-    go (candidateRoot : restRoots) = do
-      hasStackYaml <- doesFileExist (candidateRoot </> "stack.yaml")
-      if hasStackYaml
-        then pure (Just candidateRoot)
-        else go restRoots
-
-readProjectResolver :: FilePath -> IO String
-readProjectResolver projectRoot = do
-  stackYaml <- readFile (projectRoot </> "stack.yaml")
-  case findResolver stackYaml of
-    Just resolver -> pure resolver
-    Nothing -> error "Cannot materialize Stack fixture: resolver was not found in project stack.yaml."
-  where
-    findResolver stackYamlContents =
-      case find (isPrefixOf "resolver:" . dropWhile isSpace) (lines stackYamlContents) of
-        Nothing -> Nothing
-        Just resolverLine ->
-          fmap (trim . dropWhile isSpace) (stripPrefix "resolver:" (dropWhile isSpace resolverLine))
-
-copyProjectStackLockIfExists :: FilePath -> FilePath -> IO ()
-copyProjectStackLockIfExists projectRoot fixtureCopyRoot = do
-  let projectStackLockPath = projectRoot </> "stack.yaml.lock"
-      fixtureStackLockPath = fixtureCopyRoot </> "stack.yaml.lock"
-  projectHasStackLock <- doesFileExist projectStackLockPath
-  when projectHasStackLock (copyFile projectStackLockPath fixtureStackLockPath)
-
-trim :: String -> String
-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
+materializeStackFixture fixtureCopyRoot =
+  writeFile
+    (fixtureCopyRoot </> "stack.yaml")
+    ("resolver: ghc-" <> GHC.Settings.cProjectVersion <> "\n\npackages:\n- .\n")
 
 removeFileIfExists :: FilePath -> IO ()
 removeFileIfExists path = do

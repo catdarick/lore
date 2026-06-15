@@ -224,7 +224,7 @@ toolSpecHasProperty propertyName = \case
       _ -> False
   _ -> False
 
-suggestion :: Int -> String -> String -> SymbolSuggestion
+suggestion :: Integer -> String -> String -> SymbolSuggestion
 suggestion unique moduleName occName =
   SymbolSuggestion
     { suggestedSymbol = testSymbol unique moduleName occName,
@@ -234,10 +234,10 @@ suggestion unique moduleName occName =
       suggestionEvidence = []
     }
 
-testSymbol :: Int -> String -> String -> Symbol
+testSymbol :: Integer -> String -> String -> Symbol
 testSymbol unique moduleName occName =
   Symbol
-    { name = GHC.mkExternalName (GHC.Unique.mkUniqueGrimily unique) (testModule moduleName) (GHC.mkVarOcc occName) GHC.noSrcSpan,
+    { name = GHC.mkExternalName (GHC.Unique.mkUniqueGrimily (fromInteger unique)) (testModule moduleName) (GHC.mkVarOcc occName) GHC.noSrcSpan,
       visibility = Symbol'ExportedFrom (Set.singleton (testModule moduleName)),
       aliases = Set.empty
     }

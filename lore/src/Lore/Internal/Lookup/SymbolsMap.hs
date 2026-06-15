@@ -43,7 +43,7 @@ import qualified GHC.Types.Name as GHC.Name
 import qualified GHC.Types.SrcLoc as GHC.SrcLoc
 import Lore.Internal.Definition.Cache.TypedModuleFacts (lookupTypedModuleFactsCache)
 import Lore.Internal.Definition.Types (MinimalTypedModuleFacts (..), TypedDefinitionFacts (..), TypedNameFacts (..), typedInstanceNames)
-import Lore.Internal.Ghc.AvailInfo (availInfoGreNames, availInfosNameSet, greNameFieldAliasText)
+import Lore.Internal.Ghc.AvailInfo (AvailableName (..), availInfoAvailableNames, availInfosNameSet)
 import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames (..), mergeValueTypeHeadNames, valueTypeHeadNamesFromIfaceType)
 import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsEnvironmentKeyCache (..),
@@ -487,11 +487,9 @@ availInfosFieldAliases :: [GHC.AvailInfo] -> Map.Map GHC.Name (Set.Set Normalize
 availInfosFieldAliases availInfos =
   Map.fromListWith
     Set.union
-    [ (name, Set.singleton (normalizeOccAlias aliasText))
+    [ (availableName, Set.singleton (normalizeOccAlias aliasText))
     | availInfo <- availInfos,
-      greName <- availInfoGreNames availInfo,
-      name <- [GHC.greNamePrintableName greName],
-      Just aliasText <- [greNameFieldAliasText greName]
+      AvailableName {availableName, availableFieldAlias = Just aliasText} <- availInfoAvailableNames availInfo
     ]
   where
     normalizeOccAlias aliasText =
