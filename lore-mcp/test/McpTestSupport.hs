@@ -34,6 +34,7 @@ import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, do
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
+import qualified System.Process as Process
 
 fixtureLoreMcp :: LoreMcpMonad a -> IO a
 fixtureLoreMcp =
@@ -214,10 +215,19 @@ data FixtureBuildProvider
 detectFixtureBuildProvider :: IO FixtureBuildProvider
 detectFixtureBuildProvider = do
   maybeOverride <- lookupEnv "LORE_FIXTURE_PROVIDER"
-  pure $ case fmap (map toLower) maybeOverride of
-    Just "cabal" -> FixtureProviderCabal
-    Just "stack" -> FixtureProviderStack
-    _ -> FixtureProviderStack
+  maybeStackExe <- lookupEnv "STACK_EXE"
+  case fmap (map toLower) maybeOverride of
+    Just "cabal" -> pure FixtureProviderCabal
+    Just "stack" -> pure FixtureProviderStack
+    Just unsupported ->
+      error
+        ( "Unsupported LORE_FIXTURE_PROVIDER value: "
+            <> unsupported
+            <> ". Expected \"stack\" or \"cabal\"."
+        )
+    Nothing
+      | maybe False (not . null) maybeStackExe -> pure FixtureProviderStack
+      | otherwise -> pure FixtureProviderCabal
 
 removeBuildProviderFiles :: FilePath -> IO ()
 removeBuildProviderFiles fixtureCopyRoot = do
@@ -234,6 +244,10 @@ removeBuildProviderFiles fixtureCopyRoot = do
 materializeCabalFixture :: FilePath -> IO ()
 materializeCabalFixture fixtureCopyRoot = do
   writeFile (fixtureCopyRoot </> "cabal.project") "packages:\n  .\n"
+  let packageDbRoot = fixtureCopyRoot </> "dist-newstyle" </> "packagedb"
+      packageDb = packageDbRoot </> ("ghc-" <> GHC.Settings.cProjectVersion)
+  createDirectoryIfMissing True packageDbRoot
+  Process.callProcess "ghc-pkg" ["init", packageDb]
 
 materializeStackFixture :: FilePath -> IO ()
 materializeStackFixture fixtureCopyRoot =

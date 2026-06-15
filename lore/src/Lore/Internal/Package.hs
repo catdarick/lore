@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Move filter" #-}
@@ -214,7 +215,7 @@ extractCabalComponents packageDescription =
       mkComponentData
         ComponentKindExecutable
         ("executable:" <> CabalComponentName.unUnqualComponentName (Cabal.exeName executableComponent))
-        (Just executableComponent.modulePath)
+        (Just (cabalPathToFilePath executableComponent.modulePath))
         executableComponent.buildInfo
         (extractBuildInfoModules executableComponent.buildInfo)
 
@@ -298,14 +299,22 @@ extractBenchmarkModules benchmark =
 extractTestMainModulePath :: Cabal.TestSuite -> Maybe FilePath
 extractTestMainModulePath testSuite =
   case Cabal.testInterface testSuite of
-    Cabal.TestSuiteExeV10 _ mainFilePath -> Just mainFilePath
+    Cabal.TestSuiteExeV10 _ mainFilePath -> Just (cabalPathToFilePath mainFilePath)
     _ -> Nothing
 
 extractBenchmarkMainModulePath :: Cabal.Benchmark -> Maybe FilePath
 extractBenchmarkMainModulePath benchmark =
   case Cabal.benchmarkInterface benchmark of
-    Cabal.BenchmarkExeV10 _ mainFilePath -> Just mainFilePath
+    Cabal.BenchmarkExeV10 _ mainFilePath -> Just (cabalPathToFilePath mainFilePath)
     _ -> Nothing
+
+#if MIN_VERSION_Cabal(3,14,0)
+cabalPathToFilePath :: CabalPath.SymbolicPathX allowAbsolute from to -> FilePath
+cabalPathToFilePath = CabalPath.getSymbolicPath
+#else
+cabalPathToFilePath :: FilePath -> FilePath
+cabalPathToFilePath = id
+#endif
 
 normalizeSourceDirs :: Set.Set FilePath -> Set.Set FilePath
 normalizeSourceDirs sourceDirectorySet

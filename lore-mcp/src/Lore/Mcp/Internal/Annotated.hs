@@ -33,13 +33,10 @@ type family WithMeta (t :: k1) (a :: k2) :: Type where
   WithMeta a b = a
 
 data Description (description :: Symbol)
-  deriving (Typeable)
 
 data Example (example :: k)
-  deriving (Typeable)
 
 data ExampleList (example :: [k])
-  deriving (Typeable)
 
 type family CanBeExample a example where
   CanBeExample (Maybe a) (Proxy example) = CanBeExample a (Proxy example)
@@ -58,13 +55,10 @@ instance (KnownNat example, CanBeExample a (Proxy example) ~ 'True) => IsExample
   exampleToJSON = J.toJSON $ natVal (Proxy @example)
 
 data Minimum (minimum :: Nat)
-  deriving (Typeable)
 
 data Maximum (maximum :: Nat)
-  deriving (Typeable)
 
 data MinLength (minimum :: Nat)
-  deriving (Typeable)
 
 class IsFieldMetadata a metadata where
   modifySchema :: OpenApi.Schema -> OpenApi.Schema
@@ -111,10 +105,8 @@ instance (ToSchema a, IsFieldMetadata a metadata, Typeable metadata) => ToSchema
     pure $ namedSchema & schema %~ modifySchema @a @metadata
 
 data MinItems (n :: Nat)
-  deriving (Typeable)
 
 data MaxItems (n :: Nat)
-  deriving (Typeable)
 
 instance (KnownNat n) => IsFieldMetadata [a] (MinItems n) where
   modifySchema schema' = schema' & OpenApi.minItems ?~ natVal (Proxy @n)

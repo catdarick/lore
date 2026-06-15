@@ -33,25 +33,19 @@ spec :: Spec
 spec = do
   describe "selectFixtureBuildProvider" do
     it "honors an explicit Stack override" do
-      selectFixtureBuildProvider (Just "stack") Nothing Nothing Nothing `shouldBe` Right FixtureProviderStack
+      selectFixtureBuildProvider (Just "stack") Nothing `shouldBe` Right FixtureProviderStack
 
     it "honors an explicit Cabal override" do
-      selectFixtureBuildProvider (Just "cabal") (Just "stack") (Just "-") (Just "pkgdb") `shouldBe` Right FixtureProviderCabal
+      selectFixtureBuildProvider (Just "cabal") (Just "/usr/bin/stack") `shouldBe` Right FixtureProviderCabal
 
     it "rejects unsupported overrides" do
-      selectFixtureBuildProvider (Just "nix") Nothing Nothing Nothing `shouldSatisfy` isLeft
+      selectFixtureBuildProvider (Just "nix") Nothing `shouldSatisfy` isLeft
 
     it "detects Stack from STACK_EXE" do
-      selectFixtureBuildProvider Nothing (Just "/usr/bin/stack") Nothing Nothing `shouldBe` Right FixtureProviderStack
+      selectFixtureBuildProvider Nothing (Just "/usr/bin/stack") `shouldBe` Right FixtureProviderStack
 
-    it "detects Stack from a Stack-style GHC package environment" do
-      selectFixtureBuildProvider Nothing Nothing (Just "-") (Just "/tmp/pkgdb") `shouldBe` Right FixtureProviderStack
-
-    it "detects Cabal from a real GHC environment file path" do
-      selectFixtureBuildProvider Nothing Nothing (Just "/tmp/.ghc.environment") Nothing `shouldBe` Right FixtureProviderCabal
-
-    it "fails when provider markers are missing" do
-      selectFixtureBuildProvider Nothing Nothing Nothing Nothing `shouldSatisfy` isLeft
+    it "uses Cabal when Stack is not running the tests" do
+      selectFixtureBuildProvider Nothing Nothing `shouldBe` Right FixtureProviderCabal
 
   describe "withFixtureContext" do
     it "does not write provider files or generated state into the source fixture" do

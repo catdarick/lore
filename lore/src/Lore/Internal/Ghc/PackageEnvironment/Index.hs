@@ -5,6 +5,7 @@ module Lore.Internal.Ghc.PackageEnvironment.Index
 where
 
 import Data.Char (isSpace, toLower)
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import Lore.Internal.BuildTool.Environment (runProcessInWorkingDir)
@@ -79,12 +80,36 @@ parseTopLevelPackageFields record
     fields =
       Map.fromListWith
         (<>)
-        [ (fieldName, [trim fieldValue])
-        | line <- lines record,
-          not (isContinuationLine line),
-          not (null (trim line)),
-          Just (fieldName, fieldValue) <- [parseFieldLine line]
+        [ (fieldName, [fieldValue])
+        | (fieldName, fieldValue) <- parseFields (lines record)
         ]
+
+parseFields :: [String] -> [(String, String)]
+parseFields = finish . List.foldl' step (Nothing, [])
+  where
+    step (maybeCurrentField, parsedFields) line
+      | isContinuationLine line =
+          case maybeCurrentField of
+            Nothing -> (Nothing, parsedFields)
+            Just (fieldName, fieldValue) ->
+              ( Just (fieldName, appendFieldContinuation fieldValue (trim line)),
+                parsedFields
+              )
+      | otherwise =
+          let parsedFields' = maybe parsedFields (: parsedFields) maybeCurrentField
+           in case parseFieldLine line of
+                Nothing -> (Nothing, parsedFields')
+                Just (fieldName, fieldValue) ->
+                  (Just (fieldName, trim fieldValue), parsedFields')
+
+    finish (maybeCurrentField, parsedFields) =
+      reverse (maybe parsedFields (: parsedFields) maybeCurrentField)
+
+appendFieldContinuation :: String -> String -> String
+appendFieldContinuation fieldValue continuation
+  | null continuation = fieldValue
+  | null fieldValue = continuation
+  | otherwise = fieldValue <> " " <> continuation
 
 requireField :: String -> Map.Map String [String] -> Either PackageIndexParseError String
 requireField fieldName fields =

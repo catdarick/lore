@@ -280,12 +280,25 @@ collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindin
       ]
   GHCTyCo.CoVarCo coercionVariable ->
     coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys (GHC.getName coercionVariable)
+#if MIN_VERSION_ghc(9,12,0)
+  GHCTyCo.AxiomCo axiomRule coercions ->
+    maybe
+      emptyCoreDirectDependencies
+      (coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys)
+      (coAxiomRuleName axiomRule)
+      `appendCoreDirectDependencies` concatCoreDirectDependencies
+        (map (collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys) coercions)
+  GHCTyCo.UnivCo {GHCTyCo.uco_deps = dependencies} ->
+    concatCoreDirectDependencies
+      (map (collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys) dependencies)
+#else
   GHCTyCo.AxiomInstCo axiom _ coercions ->
     coreDirectDependenciesForName interestingDependencyKeys topLevelBindingKeys (GHCAxiom.coAxiomName axiom)
       `appendCoreDirectDependencies` concatCoreDirectDependencies
         (map (collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys) coercions)
   GHCTyCo.UnivCo _ _ _ _ ->
     emptyCoreDirectDependencies
+#endif
   GHCTyCo.SymCo coercion ->
     collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
   GHCTyCo.TransCo coercionOne coercionTwo ->
@@ -302,12 +315,23 @@ collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindin
     collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
   GHCTyCo.SubCo coercion ->
     collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
+#if !MIN_VERSION_ghc(9,12,0)
   GHCTyCo.AxiomRuleCo _ coercions ->
     concatCoreDirectDependencies
       (map (collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys) coercions)
+#endif
   GHCTyCo.HoleCo _ ->
     emptyCoreDirectDependencies
 {- ORMOLU_ENABLE -}
+
+#if MIN_VERSION_ghc(9,12,0)
+coAxiomRuleName :: GHCAxiom.CoAxiomRule -> Maybe GHC.Name
+coAxiomRuleName = \case
+  GHCAxiom.BranchedAxiom axiom _ -> Just (GHCAxiom.coAxiomName axiom)
+  GHCAxiom.UnbranchedAxiom axiom -> Just (GHCAxiom.coAxiomName axiom)
+  GHCAxiom.BuiltInFamRew _ -> Nothing
+  GHCAxiom.BuiltInFamInj _ -> Nothing
+#endif
 
 collectDirectCoreDependenciesInMCoercion ::
   IntSet.IntSet ->

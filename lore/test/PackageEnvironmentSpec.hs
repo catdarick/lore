@@ -186,6 +186,27 @@ spec = do
               }
           ]
 
+    it "parses unit IDs wrapped onto continuation lines" do
+      let record =
+            unlines
+              [ "name:                 HUnit",
+                "version:              1.6.2.0",
+                "visibility:           public",
+                "id:",
+                "    HUnit-1.6.2.0-45e0ccc498517129b7100db6705b111f5ee78238177979a096b0fd4104bc16e6",
+                "exposed:              True"
+              ]
+
+      parsePackageEntries record
+        `shouldBe` Right
+          [ PackageIndexEntry
+              { packageIndexPackageName = PackageNameText "HUnit",
+                packageIndexUnitId = UnitIdText "HUnit-1.6.2.0-45e0ccc498517129b7100db6705b111f5ee78238177979a096b0fd4104bc16e6",
+                packageIndexVersion = "1.6.2.0",
+                packageIndexExposed = True
+              }
+          ]
+
     it "accepts unit-id when id is absent" do
       let record =
             unlines
@@ -317,6 +338,41 @@ spec = do
           prepCount `shouldBe` 1
           captureCount `shouldBe` 1
           committedSnapshot `shouldBe` (mkPreparedSnapshot CabalProject "initial") {projectConfigurationProvider = projectConfigurationProvider committedSnapshot}
+
+      it "skips dependency preparation when the project has no components" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          (prepCount, captureCount) <-
+            fixtureLoreAt fixture fixtureRoot do
+              provider <- asks projectProvider
+              stableToolchain <- asks ghcToolchain
+              let prepared =
+                    (mkPreparedProject provider "empty")
+                      { preparedConfigurationSnapshot =
+                          (mkPreparedSnapshot provider "empty")
+                            { projectConfigurationDependencies = Map.empty
+                            }
+                      }
+              preparedRef <- liftIO $ newIORef [Right prepared, Right prepared]
+              prepCountRef <- liftIO $ newIORef (0 :: Int)
+              captureCountRef <- liftIO $ newIORef (0 :: Int)
+              let runners =
+                    mkRefreshRunners
+                      stableToolchain
+                      preparedRef
+                      prepCountRef
+                      (pure (Right ()))
+                      captureCountRef
+                      (pure Nothing)
+              refreshResult <- refreshProjectEnvironmentWith runners
+              case refreshResult of
+                Left failure -> error ("Expected successful refresh, got: " <> show failure)
+                Right _ -> do
+                  prepCount <- liftIO $ readIORef prepCountRef
+                  captureCount <- liftIO $ readIORef captureCountRef
+                  pure (prepCount, captureCount)
+
+          prepCount `shouldBe` 0
+          captureCount `shouldBe` 1
 
       it "unchanged configuration reuses the previous package environment without preparation" \fixture -> do
         withFixtureCopy fixture \fixtureRoot -> do

@@ -187,8 +187,8 @@ collectMinimalTypedOccurrences tcg =
                 occurrenceSeedGres =
                   maybeToList $
                     List.find
-                      (matchesFieldSelector (GHC.foExt fieldOccurrence))
-                      (lookupGlobalRdrEnvRdrName (GHC.unLoc fieldOccurrence.foLabel) globalRdrEnv)
+                      (matchesFieldSelector (fieldOccurrenceSelectorName fieldOccurrence))
+                      (lookupGlobalRdrEnvRdrName (fieldOccurrenceRdrName fieldOccurrence) globalRdrEnv)
               }
           | fieldOccurrence <- collectTyped renamedGroup :: [GHC.FieldOcc GHC.GhcRn]
           ]
@@ -243,6 +243,20 @@ localFieldLabels tcg =
     | gre <- GHC.globalRdrEnvElts (GHC.Tc.tcg_rdr_env tcg),
       gre.gre_lcl
     ]
+
+fieldOccurrenceSelectorName :: GHC.FieldOcc GHC.GhcRn -> GHC.Name
+#if MIN_VERSION_ghc(9,12,0)
+fieldOccurrenceSelectorName = GHC.unLoc . (.foLabel)
+#else
+fieldOccurrenceSelectorName = GHC.foExt
+#endif
+
+fieldOccurrenceRdrName :: GHC.FieldOcc GHC.GhcRn -> GHC.RdrName
+#if MIN_VERSION_ghc(9,12,0)
+fieldOccurrenceRdrName = GHC.foExt
+#else
+fieldOccurrenceRdrName = GHC.unLoc . (.foLabel)
+#endif
 
 globalRdrEltName :: GHC.GlobalRdrElt -> GHC.Name
 #if MIN_VERSION_ghc(9,8,0)

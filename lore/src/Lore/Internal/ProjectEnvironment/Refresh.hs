@@ -8,12 +8,13 @@ where
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
+import qualified Data.Map.Strict as Map
 import Lore.Internal.BuildTool.Dependencies (prepareProjectDependencies)
 import Lore.Internal.Ghc.PackageEnvironment.Probe (captureGhcEnvironment)
 import Lore.Internal.Ghc.PackageEnvironment.Resolve (renderPackageResolutionError, resolveDependencyPackageEnvironment)
 import Lore.Internal.Ghc.PackageEnvironment.Types (CapturedGhcEnvironment (..), PackageEnvironmentSnapshot)
 import Lore.Internal.ProjectEnvironment.Prepare (prepareProjectDescription)
-import Lore.Internal.ProjectEnvironment.Types (PreparedProjectDescription (..), ProjectEnvironmentFailure (..), ProjectEnvironmentRefresh (..), ProjectEnvironmentState (..))
+import Lore.Internal.ProjectEnvironment.Types (PreparedProjectDescription (..), ProjectConfigurationSnapshot (..), ProjectEnvironmentFailure (..), ProjectEnvironmentRefresh (..), ProjectEnvironmentState (..))
 import Lore.Internal.ProjectProvider (ProjectProvider)
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
@@ -61,19 +62,29 @@ runRefresh runners maybePreviousState = do
                 case resolveDependencyPackageEnvironment previous.projectEnvironmentCapturedPackages prepared.preparedRequiredExternalDependencies of
                   Left _ -> False
                   Right _ -> True
-          preparationRequired = configChanged || not previousCanResolve
+          environmentRefreshRequired = configChanged || not previousCanResolve
+          dependencyPreparationRequired = environmentRefreshRequired && hasProjectComponents prepared
       Log.debug $ "Project dependency configuration changed: " <> show configChanged
-      Log.debug $ "Dependency preparation required: " <> show preparationRequired
-      if preparationRequired
-        then prepareAndCapture runners maybePreviousState
-        else reusePrevious runners prepared maybePreviousState
+      Log.debug $ "Project environment refresh required: " <> show environmentRefreshRequired
+      Log.debug $ "Dependency preparation command required: " <> show dependencyPreparationRequired
+      case maybePreviousState of
+        Nothing ->
+          prepareAndCapture runners dependencyPreparationRequired Nothing
+        Just previous
+          | environmentRefreshRequired ->
+              prepareAndCapture runners dependencyPreparationRequired maybePreviousState
+          | otherwise ->
+              buildState prepared previous.projectEnvironmentCapturedPackages maybePreviousState
 
-prepareAndCapture :: (MonadLore m) => ProjectEnvironmentRefreshRunners m -> Maybe ProjectEnvironmentState -> m (Either ProjectEnvironmentFailure ProjectEnvironmentRefresh)
-prepareAndCapture runners maybePreviousState = do
+prepareAndCapture :: (MonadLore m) => ProjectEnvironmentRefreshRunners m -> Bool -> Maybe ProjectEnvironmentState -> m (Either ProjectEnvironmentFailure ProjectEnvironmentRefresh)
+prepareAndCapture runners dependencyPreparationRequired maybePreviousState = do
   provider <- asks projectProvider
   root <- asks projectRoot
   stableToolchain <- asks ghcToolchain
-  prepResult <- liftIO $ runners.refreshRunnerPrepareDependencies provider root
+  prepResult <-
+    if dependencyPreparationRequired
+      then liftIO $ runners.refreshRunnerPrepareDependencies provider root
+      else pure (Right ())
   case prepResult of
     Left failure -> pure (Left (ProjectEnvironmentFailed failure))
     Right () -> do
@@ -91,12 +102,9 @@ prepareAndCapture runners maybePreviousState = do
               | otherwise ->
                   buildState postBuildPrepared captured.capturedPackageEnvironment maybePreviousState
 
-reusePrevious :: (MonadLore m) => ProjectEnvironmentRefreshRunners m -> PreparedProjectDescription -> Maybe ProjectEnvironmentState -> m (Either ProjectEnvironmentFailure ProjectEnvironmentRefresh)
-reusePrevious runners prepared maybePreviousState =
-  case maybePreviousState of
-    Nothing -> prepareAndCapture runners Nothing
-    Just previous ->
-      buildState prepared previous.projectEnvironmentCapturedPackages maybePreviousState
+hasProjectComponents :: PreparedProjectDescription -> Bool
+hasProjectComponents prepared =
+  not (Map.null prepared.preparedConfigurationSnapshot.projectConfigurationDependencies)
 
 buildState :: (MonadLore m) => PreparedProjectDescription -> PackageEnvironmentSnapshot -> Maybe ProjectEnvironmentState -> m (Either ProjectEnvironmentFailure ProjectEnvironmentRefresh)
 buildState prepared packageSnapshot maybePreviousState =

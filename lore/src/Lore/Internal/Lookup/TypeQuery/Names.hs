@@ -91,7 +91,11 @@ collectTypeQueryOccurrencesWithBound boundNames (GHC.L _ typeNode) =
       combineOccurrences (map (collectTypeQueryOccurrencesWithBound boundNames) tupleTypes)
     GHC.HsExplicitListTy _ _ explicitTypes ->
       combineOccurrences (map (collectTypeQueryOccurrencesWithBound boundNames) explicitTypes)
+#if MIN_VERSION_ghc(9,12,0)
+    GHC.HsExplicitTupleTy _ _ tupleTypes ->
+#else
     GHC.HsExplicitTupleTy _ tupleTypes ->
+#endif
       combineOccurrences (map (collectTypeQueryOccurrencesWithBound boundNames) tupleTypes)
     GHC.HsSumTy _ sumTypes ->
       combineOccurrences (map (collectTypeQueryOccurrencesWithBound boundNames) sumTypes)
@@ -153,12 +157,36 @@ collectBinderOccurrences ::
   GHC.LHsTyVarBndr flag GHC.GhcPs ->
   Either Text (GHC.RdrName, [TypeQueryOccurrence])
 collectBinderOccurrences boundNames (GHC.L _ binder) =
-  case binder of
-    GHC.UserTyVar _ _ binderName ->
-      pure (GHC.unLoc binderName, [])
-    GHC.KindedTyVar _ _ binderName kindType -> do
-      kindOccurrences <- collectTypeQueryOccurrencesWithBound boundNames kindType
-      pure (GHC.unLoc binderName, kindOccurrences)
+  case parsedBinderNameAndKind binder of
+    Nothing ->
+      Left (unsupportedTypeQuerySyntax "wildcard type variable binders are not supported in type queries")
+    Just (binderName, maybeKindType) -> do
+      kindOccurrences <-
+        maybe
+          (pure [])
+          (collectTypeQueryOccurrencesWithBound boundNames)
+          maybeKindType
+      pure (binderName, kindOccurrences)
+
+parsedBinderNameAndKind ::
+  GHC.HsTyVarBndr flag GHC.GhcPs ->
+  Maybe (GHC.RdrName, Maybe (GHC.LHsKind GHC.GhcPs))
+#if MIN_VERSION_ghc(9,12,0)
+parsedBinderNameAndKind binder = do
+  binderName <- GHC.hsTyVarName binder
+  pure
+    ( binderName,
+      case GHC.hsBndrKind binder of
+        GHC.HsBndrNoKind _ -> Nothing
+        GHC.HsBndrKind _ kindType -> Just kindType
+    )
+#else
+parsedBinderNameAndKind = \case
+  GHC.UserTyVar _ _ binderName ->
+    Just (GHC.unLoc binderName, Nothing)
+  GHC.KindedTyVar _ _ binderName kindType ->
+    Just (GHC.unLoc binderName, Just kindType)
+#endif
 
 mkOccurrence :: GHC.RdrName -> TypeQueryOccurrence
 mkOccurrence rdrName =

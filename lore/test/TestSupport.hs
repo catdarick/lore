@@ -188,23 +188,13 @@ detectFixtureBuildProvider :: IO FixtureBuildProvider
 detectFixtureBuildProvider = do
   override <- lookupEnv "LORE_FIXTURE_PROVIDER"
   maybeStackExe <- lookupEnv "STACK_EXE"
-  maybeGhcEnvironment <- lookupEnv "GHC_ENVIRONMENT"
-  maybeGhcPackagePath <- lookupEnv "GHC_PACKAGE_PATH"
-
-  either error pure $
-    selectFixtureBuildProvider
-      override
-      maybeStackExe
-      maybeGhcEnvironment
-      maybeGhcPackagePath
+  either error pure (selectFixtureBuildProvider override maybeStackExe)
 
 selectFixtureBuildProvider ::
   Maybe String ->
   Maybe String ->
-  Maybe String ->
-  Maybe String ->
   Either String FixtureBuildProvider
-selectFixtureBuildProvider maybeOverride maybeStackExe maybeGhcEnvironment maybeGhcPackagePath =
+selectFixtureBuildProvider maybeOverride maybeStackExe =
   case fmap (map toLower) maybeOverride of
     Just "stack" -> Right FixtureProviderStack
     Just "cabal" -> Right FixtureProviderCabal
@@ -215,19 +205,8 @@ selectFixtureBuildProvider maybeOverride maybeStackExe maybeGhcEnvironment maybe
             <> ". Expected \"stack\" or \"cabal\"."
         )
     Nothing
-      | isNonEmpty maybeStackExe ->
-          Right FixtureProviderStack
-      | maybeGhcEnvironment == Just "-",
-        isNonEmpty maybeGhcPackagePath ->
-          Right FixtureProviderStack
-      | isNonEmpty maybeGhcEnvironment ->
-          Right FixtureProviderCabal
-      | otherwise ->
-          Left
-            "Could not detect the fixture build provider. Set LORE_FIXTURE_PROVIDER to \"stack\" or \"cabal\"."
-  where
-    isNonEmpty =
-      maybe False (not . null)
+      | maybe False (not . null) maybeStackExe -> Right FixtureProviderStack
+      | otherwise -> Right FixtureProviderCabal
 
 toProjectProvider :: FixtureBuildProvider -> Session.ProjectProvider
 toProjectProvider FixtureProviderStack = Session.StackProject

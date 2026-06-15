@@ -212,7 +212,7 @@ library
     , edit-distance
     , exceptions
     , filepath
-    , ghc >=9.6 && <9.11
+    , ghc >=9.6 && <9.13
     , ghc-boot
     , ghc-paths
     , megaparsec
@@ -439,7 +439,7 @@ test-suite lore-test
     , edit-distance
     , exceptions
     , filepath
-    , ghc >=9.6 && <9.11
+    , ghc >=9.6 && <9.13
     , ghc-boot
     , ghc-paths
     , hspec

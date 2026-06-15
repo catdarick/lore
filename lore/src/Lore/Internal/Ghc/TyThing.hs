@@ -247,6 +247,16 @@ mentionsInCoercion predicate = go
           ]
       CoVarCo coercionVariable ->
         mentionsInTyCoVar predicate coercionVariable
+#if MIN_VERSION_ghc(9,12,0)
+      AxiomCo {} ->
+        pure False
+      UnivCo {uco_lty = typeOne, uco_rty = typeTwo, uco_deps = dependencies} ->
+        anyM
+          [ mentionsInType predicate typeOne,
+            mentionsInType predicate typeTwo,
+            anyM (map go dependencies)
+          ]
+#else
       AxiomInstCo {} ->
         pure False
       UnivCo _ _ typeOne typeTwo ->
@@ -254,6 +264,7 @@ mentionsInCoercion predicate = go
           [ mentionsInType predicate typeOne,
             mentionsInType predicate typeTwo
           ]
+#endif
       SymCo coercion ->
         go coercion
       TransCo coercionOne coercionTwo ->
@@ -274,8 +285,10 @@ mentionsInCoercion predicate = go
         go coercion
       SubCo coercion ->
         go coercion
+#if !MIN_VERSION_ghc(9,12,0)
       AxiomRuleCo {} ->
         pure False
+#endif
       HoleCo {} ->
         pure False
 {- ORMOLU_ENABLE -}

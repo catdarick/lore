@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.Definition.Callbacks
   ( installDefinitionCallbacks,
   )
@@ -46,9 +48,23 @@ installDefinitionCallbacks sessionContext hscEnv =
               }
        in (GHC.Env.hsc_plugins hscEnv)
             { GHC.Plugins.staticPlugins =
-                GHC.Plugins.StaticPlugin {GHC.Plugins.spPlugin = pluginWithArgs}
+                mkStaticPlugin pluginWithArgs
                   : GHC.Plugins.staticPlugins (GHC.Env.hsc_plugins hscEnv)
             }
+
+mkStaticPlugin :: GHC.Plugins.PluginWithArgs -> GHC.Plugins.StaticPlugin
+#if MIN_VERSION_ghc(9,12,0)
+mkStaticPlugin pluginWithArgs =
+  GHC.Plugins.StaticPlugin
+    { GHC.Plugins.spPlugin = pluginWithArgs,
+      GHC.Plugins.spInitialised = False
+    }
+#else
+mkStaticPlugin pluginWithArgs =
+  GHC.Plugins.StaticPlugin
+    { GHC.Plugins.spPlugin = pluginWithArgs
+    }
+#endif
 
 definitionPlugin :: SessionContext -> GHC.Plugins.Plugin
 definitionPlugin sessionContext =
