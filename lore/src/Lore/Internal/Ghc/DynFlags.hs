@@ -50,11 +50,19 @@ invalidatePackageDbCacheM :: (GHC.GhcMonad m) => m ()
 invalidatePackageDbCacheM =
   GHC.modifySession \hscEnv ->
     hscEnv
-      { GHC.hsc_unit_env =
-          GHC.ue_setUnitDbs
-            Nothing
-            (GHC.hsc_unit_env hscEnv)
+      { GHC.hsc_unit_env = clearUnitDbs (GHC.hsc_unit_env hscEnv)
       }
+
+clearUnitDbs :: GHC.UnitEnv -> GHC.UnitEnv
+#if MIN_VERSION_ghc(9,14,0)
+clearUnitDbs unitEnv =
+  GHC.ue_updateHomeUnitEnv
+    (\homeUnitEnv -> homeUnitEnv {GHC.homeUnitEnv_unit_dbs = Nothing})
+    (GHC.ue_currentUnit unitEnv)
+    unitEnv
+#else
+clearUnitDbs = GHC.ue_setUnitDbs Nothing
+#endif
 
 {- ORMOLU_DISABLE -}
 setGhciLikeDynFlags :: ParallelWorkersCount -> GHC.DynFlags -> GHC.DynFlags

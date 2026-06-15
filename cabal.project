@@ -4,10 +4,19 @@ packages:
   ./lore-mcp
   ./lore-tools-cli
 
--- openapi3-3.2.4 compiles with the boot libraries shipped by GHC 9.12,
--- but its published upper bounds have not been revised for them.
+-- GHC 9.14 ships newer boot libraries than the current dependency bounds allow.
+-- These selected dependency versions are verified to compile with that boot-library set.
 allow-newer:
-  openapi3:base,
-  openapi3:hashable,
-  openapi3:template-haskell,
-  openapi3:time
+  *:base,
+  *:bytestring,
+  *:containers,
+  *:deepseq,
+  *:directory,
+  *:filepath,
+  *:ghc-bignum,
+  *:ghc-prim,
+  *:template-haskell,
+  *:text,
+  *:time,
+  *:transformers,
+  openapi3:hashable

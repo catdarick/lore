@@ -37,6 +37,9 @@ import Distribution.Pretty (prettyShow)
 import qualified Distribution.System as CabalSystem
 import qualified Distribution.Types.ComponentRequestedSpec as CabalRequested
 import qualified Distribution.Types.Dependency as CabalDependency
+#if MIN_VERSION_Cabal(3,16,0)
+import qualified Distribution.Types.DependencySatisfaction as CabalDependencySatisfaction
+#endif
 import qualified Distribution.Types.LibraryName as CabalLibraryName
 import qualified Distribution.Types.PackageName as CabalPackageName
 import qualified Distribution.Types.UnqualComponentName as CabalComponentName
@@ -163,7 +166,7 @@ processCabalPackage ghcVersion cabalFile = do
           CabalConfig.finalizePD
             mempty
             requestedComponents
-            (const True)
+            allDependenciesSatisfied
             platform
             compilerInfo
             []
@@ -173,6 +176,14 @@ processCabalPackage ghcVersion cabalFile = do
         ("Failed to finalize package description for " <> cabalFile <> formatWarnings warnings)
         finalized
     pure (packageDataFromCabalDescription cabalFile packageDescription)
+
+#if MIN_VERSION_Cabal(3,16,0)
+allDependenciesSatisfied :: CabalDependency.Dependency -> CabalDependencySatisfaction.DependencySatisfaction
+allDependenciesSatisfied _ = CabalDependencySatisfaction.Satisfied
+#else
+allDependenciesSatisfied :: CabalDependency.Dependency -> Bool
+allDependenciesSatisfied _ = True
+#endif
 
 packageDataFromCabalDescription :: FilePath -> Cabal.PackageDescription -> PackageData
 packageDataFromCabalDescription packageFile packageDescription =

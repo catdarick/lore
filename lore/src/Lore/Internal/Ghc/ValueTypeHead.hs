@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveAnyClass #-}
 
 module Lore.Internal.Ghc.ValueTypeHead
@@ -51,7 +52,7 @@ valueTypeHeadNamesFromType type_ =
       GHC.TyCo.FunTy {GHC.TyCo.ft_af = argFlag, GHC.TyCo.ft_arg = argType, GHC.TyCo.ft_res = resType} ->
         let (restArgs, finalResult) = splitValueFunctionType resType
             args =
-              if isConstraintArgument argFlag || GHC.Type.isPredTy argType
+              if isConstraintArgument argFlag || isConstraintType argType
                 then restArgs
                 else argType : restArgs
          in (args, finalResult)
@@ -133,6 +134,13 @@ valueTypeHeadNamesFromIfaceType type_ =
 isConstraintArgument :: GHC.Var.FunTyFlag -> Bool
 isConstraintArgument flag =
   flag == GHC.Var.FTF_C_T || flag == GHC.Var.FTF_C_C
+
+isConstraintType :: GHC.Type -> Bool
+#if MIN_VERSION_ghc(9,14,0)
+isConstraintType = GHC.Type.isConstraintLikeKind . GHC.Type.typeKind
+#else
+isConstraintType = GHC.Type.isPredTy
+#endif
 
 userFacingOccText :: GHC.Name -> Maybe Text
 userFacingOccText name

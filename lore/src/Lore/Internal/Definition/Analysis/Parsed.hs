@@ -130,11 +130,11 @@ collectParsedDefinitionMembers decl =
     recordFieldMembers =
       [ ParsedDefinitionMember
           { parsedMemberOccKey = rdrNameOccKey (GHC.unLoc fieldName),
-            parsedMemberSpan = GHC.getLocA (GHC.cd_fld_type (GHC.unLoc fieldDecl))
+            parsedMemberSpan = recordFieldTypeSpan (GHC.unLoc fieldDecl)
           }
       | constructorDecl <- constructorDecls,
         fieldDecl <- constructorRecordFields (GHC.unLoc constructorDecl),
-        fieldOcc <- GHC.cd_fld_names (GHC.unLoc fieldDecl),
+        fieldOcc <- recordFieldNames (GHC.unLoc fieldDecl),
         let fieldName = GHC.foLabel (GHC.unLoc fieldOcc)
       ]
 
@@ -191,7 +191,12 @@ constructorDeclaredNames = \case
     NE.toList con_names
 
 {- ORMOLU_DISABLE -}
-constructorRecordFields :: GHC.ConDecl GHC.GhcPs -> [GHC.LConDeclField GHC.GhcPs]
+constructorRecordFields :: GHC.ConDecl GHC.GhcPs ->
+#if MIN_VERSION_ghc(9,14,0)
+  [GHC.LHsConDeclRecField GHC.GhcPs]
+#else
+  [GHC.LConDeclField GHC.GhcPs]
+#endif
 constructorRecordFields = \case
   GHC.ConDeclH98 {con_args = GHC.RecCon fields} ->
     GHC.unLoc fields
@@ -204,6 +209,20 @@ constructorRecordFields = \case
   _ ->
     []
 {- ORMOLU_ENABLE -}
+
+#if MIN_VERSION_ghc(9,14,0)
+recordFieldNames :: GHC.HsConDeclRecField GHC.GhcPs -> [GHC.LFieldOcc GHC.GhcPs]
+recordFieldNames = GHC.cdrf_names
+
+recordFieldTypeSpan :: GHC.HsConDeclRecField GHC.GhcPs -> GHC.SrcSpan
+recordFieldTypeSpan = GHC.getLocA . GHC.cdf_type . GHC.cdrf_spec
+#else
+recordFieldNames :: GHC.ConDeclField GHC.GhcPs -> [GHC.LFieldOcc GHC.GhcPs]
+recordFieldNames = GHC.cd_fld_names
+
+recordFieldTypeSpan :: GHC.ConDeclField GHC.GhcPs -> GHC.SrcSpan
+recordFieldTypeSpan = GHC.getLocA . GHC.cd_fld_type
+#endif
 
 constructorDeclStartSpan :: GHC.LConDecl GHC.GhcPs -> GHC.SrcSpan
 constructorDeclStartSpan conDecl =

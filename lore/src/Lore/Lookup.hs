@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Lore.Lookup
@@ -213,7 +214,11 @@ classifySymbolCategory = \case
     | GHC.isTypeFamilyTyCon tyCon -> SymbolTypeFamily
     | GHC.isTypeSynonymTyCon tyCon -> SymbolTypeAlias
     | GHC.isNewTyCon tyCon -> SymbolNewtype
+#if MIN_VERSION_ghc(9,14,0)
+    | GHC.isAlgTyCon tyCon -> SymbolData
+#else
     | GHC.isDataTyCon tyCon -> SymbolData
+#endif
     | otherwise -> SymbolUnknown
 
 data Instances = Instances

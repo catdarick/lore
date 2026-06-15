@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.Lookup.TypeQuery.Resolve
   ( TypeQueryOccurrencePolicy (..),
     TypeQueryUnresolvedSymbolQuery (..),
@@ -81,15 +83,16 @@ resolveParsedTypeQueryNames parsed = do
             modulePreferenceCustomPrelude = GHC.mkModuleName . T.unpack <$> maybeCustomPrelude
           }
   eiResolution <- resolveOccurrences context parsed.parsedTypeQueryOccurrences
-  pure $
-    case eiResolution of
-      Left err ->
-        Left err
-      Right resolvedModuleImports ->
+  case eiResolution of
+    Left err ->
+      pure (Left err)
+    Right resolvedModuleImports -> do
+      imports <- buildImports homeModuleNames parsed resolvedModuleImports
+      pure $
         Right
           ResolvedTypeQuery
             { resolvedTypeQueryParsed = parsed,
-              resolvedTypeQueryImports = dedupeInteractiveImports (buildImports homeModuleNames parsed resolvedModuleImports)
+              resolvedTypeQueryImports = dedupeInteractiveImports imports
             }
 
 resolveOccurrences ::
@@ -229,41 +232,55 @@ preferredImportForRoot context rootGroup =
       Nothing
 
 buildImports ::
+  (MonadLore m) =>
   Set.Set GHC.ModuleName ->
   ParsedTypeQuery ->
   [GHC.ModuleName] ->
-  [GHC.InteractiveImport]
-buildImports homeModuleNames parsed resolvedImports =
-  map (mkImportForUnqualifiedResolvedSymbol homeModuleNames) resolvedImports
-    <> qualifiedImports
-  where
-    qualifiedImports =
-      [ mkImportForQualifiedOccurrence homeModuleNames moduleName
+  m [GHC.InteractiveImport]
+buildImports homeModuleNames parsed resolvedImports = do
+  unqualifiedImports <-
+    mapM (mkImportForUnqualifiedResolvedSymbol homeModuleNames) resolvedImports
+  qualifiedImports <-
+    mapM
+      (mkImportForQualifiedOccurrence homeModuleNames)
+      [ moduleName
       | occurrence <- parsed.parsedTypeQueryOccurrences,
         TypeQueryQualified moduleName <- [occurrence.typeQueryOccurrenceQualification]
       ]
+  pure (unqualifiedImports <> qualifiedImports)
 
 mkImportForUnqualifiedResolvedSymbol ::
+  (MonadLore m) =>
   Set.Set GHC.ModuleName ->
   GHC.ModuleName ->
-  GHC.InteractiveImport
+  m GHC.InteractiveImport
 mkImportForUnqualifiedResolvedSymbol homeModuleNames moduleName =
   if moduleName `Set.member` homeModuleNames
-    then GHC.IIModule moduleName
-    else GHC.IIDecl (GHC.simpleImportDecl moduleName)
+    then mkInteractiveModuleImport moduleName
+    else pure (GHC.IIDecl (GHC.simpleImportDecl moduleName))
 
 mkImportForQualifiedOccurrence ::
+  (MonadLore m) =>
   Set.Set GHC.ModuleName ->
   GHC.ModuleName ->
-  GHC.InteractiveImport
+  m GHC.InteractiveImport
 mkImportForQualifiedOccurrence homeModuleNames moduleName =
   if moduleName `Set.member` homeModuleNames
-    then GHC.IIModule moduleName
+    then mkInteractiveModuleImport moduleName
     else
-      GHC.IIDecl $
-        (GHC.simpleImportDecl moduleName)
-          { GHC.ideclQualified = GHC.QualifiedPre
-          }
+      pure $
+        GHC.IIDecl $
+          (GHC.simpleImportDecl moduleName)
+            { GHC.ideclQualified = GHC.QualifiedPre
+            }
+
+mkInteractiveModuleImport :: (MonadLore m) => GHC.ModuleName -> m GHC.InteractiveImport
+#if MIN_VERSION_ghc(9,14,0)
+mkInteractiveModuleImport moduleName =
+  GHC.IIModule <$> GHC.findModule moduleName Nothing
+#else
+mkInteractiveModuleImport = pure . GHC.IIModule
+#endif
 
 dedupeInteractiveImports :: [GHC.InteractiveImport] -> [GHC.InteractiveImport]
 dedupeInteractiveImports =
@@ -277,8 +294,8 @@ dedupeInteractiveImports =
 interactiveImportKey :: GHC.InteractiveImport -> (Text, Text)
 interactiveImportKey import_ =
   case import_ of
-    GHC.IIModule moduleName ->
-      ("module", T.pack (GHC.moduleNameString moduleName))
+    GHC.IIModule module_ ->
+      ("module", T.pack (GHC.moduleNameString (interactiveImportModuleName module_)))
     GHC.IIDecl importDecl ->
       let moduleName =
             T.pack (GHC.moduleNameString (GHC.unLoc importDecl.ideclName))
@@ -288,6 +305,19 @@ interactiveImportKey import_ =
               GHC.QualifiedPre -> "qualified-pre"
               GHC.QualifiedPost -> "qualified-post"
        in ("decl:" <> qualifier, moduleName)
+
+interactiveImportModuleName ::
+#if MIN_VERSION_ghc(9,14,0)
+  GHC.Module ->
+#else
+  GHC.ModuleName ->
+#endif
+  GHC.ModuleName
+#if MIN_VERSION_ghc(9,14,0)
+interactiveImportModuleName = GHC.moduleName
+#else
+interactiveImportModuleName = id
+#endif
 
 withAdditionalInteractiveImports :: (MonadLore m) => [GHC.InteractiveImport] -> m a -> m a
 withAdditionalInteractiveImports extraImports action =

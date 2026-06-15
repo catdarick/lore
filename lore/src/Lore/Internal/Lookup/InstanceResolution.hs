@@ -30,6 +30,9 @@ import qualified GHC.Tc.Errors.Types as TcErrors
 import qualified GHC.Tc.Module as TcModule
 import qualified GHC.Tc.Solver as TcSolver
 import qualified GHC.Tc.Solver.InertSet as InertSet
+#if MIN_VERSION_ghc(9,14,0)
+import qualified GHC.Tc.Utils.TcType as TcType
+#endif
 #if MIN_VERSION_ghc(9,8,0)
 import qualified GHC.Tc.Zonk.Env as Zonk
 #else
@@ -258,7 +261,13 @@ solveSelectedInstanceContext contextPredicates = do
   (messages, maybeCheckResult) <-
     liftIO $
       TcModule.runTcInteractive hscEnv $
-        TcSolver.tcCheckWanteds InertSet.emptyInert contextPredicates
+        TcSolver.tcCheckWanteds
+#if MIN_VERSION_ghc(9,14,0)
+          (InertSet.emptyInertSet TcType.topTcLevel)
+#else
+          InertSet.emptyInert
+#endif
+          contextPredicates
   pure $
     case maybeCheckResult of
       Just True ->

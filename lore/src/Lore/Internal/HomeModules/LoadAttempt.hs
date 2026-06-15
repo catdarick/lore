@@ -45,7 +45,11 @@ data HomeModulesLoadAttempt = HomeModulesLoadAttempt
 loadHomeModulesOnce :: (MonadLore m) => HomeModulesLoadPlan -> m HomeModulesLoadAttempt
 loadHomeModulesOnce plan = do
   Log.debug "Starting dependency analysis and home-module loading..."
+#if MIN_VERSION_ghc(9,14,0)
+  (errs, modGraph) <- GHC.depanalE GHC.Error.mkUnknownDiagnostic Nothing [] False
+#else
   (errs, modGraph) <- GHC.depanalE [] False
+#endif
   let dependencyDiagnostics = driverMessagesToDiagnostics errs
   unless (null errs) $
     Log.err $

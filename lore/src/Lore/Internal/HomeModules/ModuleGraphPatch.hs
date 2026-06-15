@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.HomeModules.ModuleGraphPatch
   ( applyModuleScopedArgs,
     applySourcePragmas,
@@ -14,6 +16,9 @@ import qualified GHC.Data.StringBuffer as GHC
 import qualified GHC.Driver.Config.Parser as GHC
 import qualified GHC.Driver.Session as GHC
 import qualified GHC.Parser.Header as GHC
+#if MIN_VERSION_ghc(9,14,0)
+import qualified GHC.Platform as GHC
+#endif
 import qualified GHC.Unit.Module.Graph as GHC
 import Lore.Internal.Ghc.DynFlags (addGhcOptionsAndExtensions)
 import Lore.Internal.HomeModules.Plan (ComponentSpecificOptions (..), HomeModuleKey (..))
@@ -31,8 +36,13 @@ applyModuleScopedArgs homeModulesWithComponentOptions modGraph = do
   where
     patchNode node =
       case node of
+#if MIN_VERSION_ghc(9,14,0)
+        GHC.ModuleNode deps (GHC.ModuleNodeCompile summary) ->
+          GHC.ModuleNode deps . GHC.ModuleNodeCompile <$> patchSummary summary
+#else
         GHC.ModuleNode deps summary ->
           GHC.ModuleNode deps <$> patchSummary summary
+#endif
         _ ->
           pure node
 
@@ -77,7 +87,15 @@ applySourcePragmas summary compOptions summaryFile = do
   let (_warnings, options) =
         GHC.getOptions
           (GHC.initParserOpts componentDynFlags)
+#if MIN_VERSION_ghc(9,14,0)
+          (GHC.supportedLanguagesAndExtensions (GHC.platformArchOS (GHC.targetPlatform componentDynFlags)))
+#endif
           contents
           summaryFile
+#if MIN_VERSION_ghc(9,14,0)
+  logger <- GHC.getLogger
+  (dynFlags, _, _) <- liftIO (GHC.parseDynamicFilePragma logger componentDynFlags options)
+#else
   (dynFlags, _, _) <- liftIO (GHC.parseDynamicFilePragma componentDynFlags options)
+#endif
   pure dynFlags

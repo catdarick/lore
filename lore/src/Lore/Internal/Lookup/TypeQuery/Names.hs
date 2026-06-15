@@ -101,7 +101,11 @@ collectTypeQueryOccurrencesWithBound boundNames (GHC.L _ typeNode) =
       combineOccurrences (map (collectTypeQueryOccurrencesWithBound boundNames) sumTypes)
     GHC.HsDocTy _ innerType _ ->
       collectTypeQueryOccurrencesWithBound boundNames innerType
+#if MIN_VERSION_ghc(9,14,0)
+    GHC.XHsType (GHC.HsBangTy _ _ innerType) ->
+#else
     GHC.HsBangTy _ _ innerType ->
+#endif
       collectTypeQueryOccurrencesWithBound boundNames innerType
     GHC.HsTyLit {} ->
       Right []
@@ -113,10 +117,17 @@ collectTypeQueryOccurrencesWithBound boundNames (GHC.L _ typeNode) =
       Left (unsupportedTypeQuerySyntax "implicit parameter types are not supported in type queries")
     GHC.HsSpliceTy {} ->
       Left (unsupportedTypeQuerySyntax "type splices are not supported in type queries")
+#if MIN_VERSION_ghc(9,14,0)
+    GHC.XHsType (GHC.HsRecTy {}) ->
+      Left (unsupportedTypeQuerySyntax "record types are not supported in type queries")
+    GHC.XHsType _ ->
+      Left (unsupportedTypeQuerySyntax "extended type syntax is not supported in type queries")
+#else
     GHC.HsRecTy {} ->
       Left (unsupportedTypeQuerySyntax "record types are not supported in type queries")
     GHC.XHsType {} ->
       Left (unsupportedTypeQuerySyntax "extended type syntax is not supported in type queries")
+#endif
 {- ORMOLU_ENABLE -}
 
 collectContextOccurrences ::

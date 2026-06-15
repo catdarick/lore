@@ -21,6 +21,9 @@ import qualified GHC.Tc.Types as GHC.Tc
 #if MIN_VERSION_ghc(9,8,0)
 import qualified GHC.Types.GREInfo as GHC.GREInfo
 #endif
+#if MIN_VERSION_ghc(9,14,0)
+import qualified GHC.Types.Name.Reader as GHC.NameReader
+#endif
 import qualified GHC.Types.FieldLabel as GHC.FieldLabel
 import qualified GHC.Types.TypeEnv as GHC.TypeEnv
 import qualified GHC.Types.Unique.Set as GHC.UniqueSet
@@ -173,13 +176,31 @@ collectMinimalTypedOccurrences tcg =
       namedOccurrenceSeeds <> fieldOccurrenceSeeds <> dotFieldOccurrenceSeeds
       where
         namedOccurrenceSeeds =
-          [ OccurrenceSeed
-              { occurrenceSeedSpan = locatedSpan locatedName,
-                occurrenceSeedGres =
-                  maybeToList (GHC.lookupGRE_Name globalRdrEnv (GHC.unLoc locatedName))
-              }
+          plainNameOccurrenceSeeds
+#if MIN_VERSION_ghc(9,14,0)
+            <> userRdrOccurrenceSeeds
+#endif
+
+        plainNameOccurrenceSeeds =
+          [ occurrenceSeedForName locatedName (GHC.unLoc locatedName)
           | locatedName <- collectTyped renamedGroup :: [GHC.LocatedN GHC.Name]
           ]
+
+#if MIN_VERSION_ghc(9,14,0)
+        userRdrOccurrenceSeeds =
+          [ occurrenceSeedForName locatedName name
+          | locatedName <- collectTyped renamedGroup :: [GHC.LIdOccP GHC.GhcRn],
+            let GHC.NameReader.WithUserRdr _ name = GHC.unLoc locatedName
+          ]
+#endif
+
+        occurrenceSeedForName :: GHC.LocatedN a -> GHC.Name -> OccurrenceSeed
+        occurrenceSeedForName locatedName name =
+          OccurrenceSeed
+            { occurrenceSeedSpan = locatedSpan locatedName,
+              occurrenceSeedGres =
+                maybeToList (GHC.lookupGRE_Name globalRdrEnv name)
+            }
 
         fieldOccurrenceSeeds =
           [ OccurrenceSeed
@@ -246,14 +267,16 @@ localFieldLabels tcg =
 
 fieldOccurrenceSelectorName :: GHC.FieldOcc GHC.GhcRn -> GHC.Name
 #if MIN_VERSION_ghc(9,12,0)
-fieldOccurrenceSelectorName = GHC.unLoc . (.foLabel)
+fieldOccurrenceSelectorName (GHC.FieldOcc _ selectorName) =
+  GHC.unLoc selectorName
 #else
 fieldOccurrenceSelectorName = GHC.foExt
 #endif
 
 fieldOccurrenceRdrName :: GHC.FieldOcc GHC.GhcRn -> GHC.RdrName
 #if MIN_VERSION_ghc(9,12,0)
-fieldOccurrenceRdrName = GHC.foExt
+fieldOccurrenceRdrName (GHC.FieldOcc rdrName _) =
+  rdrName
 #else
 fieldOccurrenceRdrName = GHC.unLoc . (.foLabel)
 #endif
