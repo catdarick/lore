@@ -9,7 +9,7 @@ module Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex
 where
 
 import Control.Monad.Reader (asks)
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified GHC.Plugins as GHC
@@ -54,7 +54,7 @@ prepareParsedOccurrenceModuleIndex modSummaries = do
   ModuleCache parsedFactsByModule <- readMVar parsedFactsCacheVar
   Log.debug $ "Building reference occurrence index for " <> show (Map.size modSummaries) <> " modules."
   let occurrenceIndex =
-        foldl' (insertModuleOccurrences parsedFactsByModule) Map.empty (Map.keys modSummaries)
+        List.foldl' (insertModuleOccurrences parsedFactsByModule) Map.empty (Map.keys modSummaries)
   Log.debug $ "Finished building reference occurrence index. Indexed " <> show (Map.size occurrenceIndex) <> " unique occurrence names."
   pure (ParsedOccurrenceModuleIndex occurrenceIndex)
   where
@@ -62,7 +62,7 @@ prepareParsedOccurrenceModuleIndex modSummaries = do
       case Map.lookup homeModule parsedFactsByModule of
         Nothing -> occurrenceIndex
         Just parsedFacts ->
-          foldl'
+          List.foldl'
             (\index occKey -> Map.insertWith (<>) occKey (Set.singleton homeModule) index)
             occurrenceIndex
             (Set.toList parsedFacts.parsedOccKeys)
@@ -75,7 +75,7 @@ invalidateParsedOccurrenceModuleIndexCache = do
 lookupModulesForOccurrenceKeys :: Set.Set OccKey -> Map.Map OccKey (Set.Set GHC.Module) -> [GHC.Module]
 lookupModulesForOccurrenceKeys targetOccKeys occurrenceIndex =
   Set.toList $
-    foldl'
+    List.foldl'
       (\modules occKey -> modules <> Map.findWithDefault Set.empty occKey occurrenceIndex)
       Set.empty
       (Set.toList targetOccKeys)

@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.Definition.SourceTree
   ( collectModuleSourceRegionCandidates,
     buildDefinitionSourceTree,
@@ -138,6 +140,7 @@ sourceRegionContextRank region =
     BindingRegion -> 1
     _ -> 1
 
+{- ORMOLU_DISABLE -}
 sourceRegionKindForExpression :: GHC.HsExpr GHC.GhcPs -> Maybe SourceRegionKind
 sourceRegionKindForExpression = \case
   GHC.RecordCon {} -> Just RecordRegion
@@ -146,8 +149,13 @@ sourceRegionKindForExpression = \case
   GHC.HsAppType {} -> Just ApplicationRegion
   GHC.OpApp {} -> Just ApplicationRegion
   GHC.NegApp {} -> Just ApplicationRegion
+#if MIN_VERSION_ghc(9,10,0)
+  GHC.HsPar _ expression -> sourceRegionKindForExpression (GHC.unLoc expression)
+#else
   GHC.HsPar _ _ expression _ -> sourceRegionKindForExpression (GHC.unLoc expression)
+#endif
   _ -> Nothing
+{- ORMOLU_ENABLE -}
 
 nestSourceRegions :: [SourceRegionCandidate] -> [SourceRegion]
 nestSourceRegions candidates =

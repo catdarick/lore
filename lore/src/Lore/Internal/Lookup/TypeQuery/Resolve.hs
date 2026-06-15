@@ -11,7 +11,8 @@ where
 
 import Control.Monad.Reader (asks)
 import Data.Char (isUpper)
-import Data.List (foldl', sortOn)
+import Data.List (sortOn)
+import qualified Data.List as List
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -269,7 +270,7 @@ dedupeInteractiveImports =
   map snd
     . sortOn fst
     . Map.toList
-    . foldl'
+    . List.foldl'
       (\importsByKey import_ -> Map.insert (interactiveImportKey import_) import_ importsByKey)
       Map.empty
 

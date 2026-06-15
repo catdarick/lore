@@ -14,7 +14,8 @@ where
 
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (liftIO)
-import Data.List (foldl', sortBy)
+import Data.List (sortBy)
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
@@ -86,14 +87,14 @@ applyFileEdits edits = do
       }
   where
     groupedEdits =
-      foldl'
+      List.foldl'
         (\acc edit -> Map.insertWith (flip (<>)) (editFilePath edit) [edit] acc)
         Map.empty
         edits
 
 applyValidatedReplacementEdits :: Text -> [OffsetFileEdit] -> Text
 applyValidatedReplacementEdits source =
-  foldl' applyOne source
+  List.foldl' applyOne source
     . sortBy compareDescendingOffsets
   where
     compareDescendingOffsets left right =
@@ -148,14 +149,14 @@ validateReplacementEdits source filePath edits =
             _ ->
               (InvalidFileEditSpan editSourcePath edit : warningsAcc, candidatesAcc)
     (validatedEdits, _conflictedEdits, conflictWarnings) =
-      foldl' classifyCandidate ([], [], []) sortedCandidates
+      List.foldl' classifyCandidate ([], [], []) sortedCandidates
 
     classifyCandidate (accepted, conflicted, warningsAcc) candidate
       | null conflictingAccepted && null conflictingConflicted =
           (candidate : accepted, conflicted, warningsAcc)
       | otherwise =
           let acceptedWithoutConflicts =
-                foldl' removeFirst accepted conflictingAccepted
+                List.foldl' removeFirst accepted conflictingAccepted
               newConflicted =
                 dedupeOffsetEdits (candidate : conflictingAccepted <> conflictingConflicted <> conflicted)
               newWarnings =
@@ -188,13 +189,13 @@ editsConflict left right =
 
 dedupeExactEdits :: [FileEdit] -> [FileEdit]
 dedupeExactEdits =
-  foldl'
+  List.foldl'
     (\uniqueEdits edit -> if edit `elem` uniqueEdits then uniqueEdits else uniqueEdits <> [edit])
     []
 
 dedupeOffsetEdits :: [OffsetFileEdit] -> [OffsetFileEdit]
 dedupeOffsetEdits =
-  foldl'
+  List.foldl'
     (\uniqueEdits edit -> if edit `elem` uniqueEdits then uniqueEdits else uniqueEdits <> [edit])
     []
 

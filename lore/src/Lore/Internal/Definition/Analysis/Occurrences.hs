@@ -5,7 +5,7 @@ module Lore.Internal.Definition.Analysis.Occurrences
   )
 where
 
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe, maybeToList)
 import qualified Data.Set as Set
@@ -114,7 +114,7 @@ dedupeOccurrences =
 
 dedupeOn :: (Ord key) => (value -> key) -> [value] -> [value]
 dedupeOn keyOf =
-  reverse . snd . foldl' step (Set.empty, [])
+  reverse . snd . List.foldl' step (Set.empty, [])
   where
     step (seen, values) value
       | key `Set.member` seen = (seen, values)

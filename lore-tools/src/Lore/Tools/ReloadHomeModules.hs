@@ -10,7 +10,8 @@ where
 
 import Control.Exception (IOException, try)
 import Control.Monad.IO.Class (liftIO)
-import Data.List (foldl', nub)
+import qualified Data.List as List
+import Data.List (nub)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -165,7 +166,7 @@ type DiagnosticGroup = (DiagnosticGroupKey, [Diagnostic])
 
 groupDiagnostics :: [Diagnostic] -> [DiagnosticGroup]
 groupDiagnostics =
-  foldl' insertDiagnosticGroup []
+  List.foldl' insertDiagnosticGroup []
   where
     insertDiagnosticGroup [] diagnostic =
       [(diagnosticGroupKey diagnostic, [diagnostic])]

@@ -13,7 +13,7 @@ where
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
-import Data.List (foldl')
+import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
@@ -223,7 +223,7 @@ canonicalizeIssue issue = do
 
 groupIssuesByFile :: NonEmpty RedundantImportIssue -> Map.Map FilePath (NonEmpty RedundantImportIssue)
 groupIssuesByFile =
-  foldl' insertIssue Map.empty . NE.toList
+  List.foldl' insertIssue Map.empty . NE.toList
   where
     insertIssue grouped issue =
       Map.insertWith

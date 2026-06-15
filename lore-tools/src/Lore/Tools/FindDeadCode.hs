@@ -12,7 +12,7 @@ module Lore.Tools.FindDeadCode
   )
 where
 
-import Data.List (foldl')
+import qualified Data.List as List
 import Data.Maybe (mapMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -191,7 +191,7 @@ renderDeadDefinitionListing renderedDeadDefinitions =
 
 groupDeadDefinitionsByModule :: [RenderedDeadDefinition] -> Map.Map Text [Text]
 groupDeadDefinitionsByModule =
-  foldl'
+  List.foldl'
     ( \grouped rendered ->
         Map.insertWith
           (flip (++))

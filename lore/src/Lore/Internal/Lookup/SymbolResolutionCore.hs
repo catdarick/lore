@@ -13,7 +13,7 @@ module Lore.Internal.Lookup.SymbolResolutionCore
   )
 where
 
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -64,7 +64,7 @@ resolveRootNameFromName name = do
 groupSymbolsByResolvedRoot :: [(Symbol, Plugins.Name)] -> [ResolvedRootGroup]
 groupSymbolsByResolvedRoot symbolsWithRoots =
   Map.elems $
-    foldl'
+    List.foldl'
       collectSymbol
       Map.empty
       symbolsWithRoots
@@ -142,7 +142,7 @@ findFirst predicate =
 
 dedupeTexts :: [Text] -> [Text]
 dedupeTexts =
-  reverse . snd . foldl' dedupeOne (Set.empty, [])
+  reverse . snd . List.foldl' dedupeOne (Set.empty, [])
   where
     dedupeOne (seenKeys, dedupedValues) value =
       if value `Set.member` seenKeys

@@ -7,7 +7,8 @@ import qualified Control.Concurrent.MVar as MVar
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
 import Data.Char (isAlpha, isAlphaNum, isSpace, ord, toUpper)
-import Data.List (foldl', stripPrefix)
+import Data.List (stripPrefix)
+import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified GHC
 import Lore.Internal.Session (SessionContext (..))
@@ -107,7 +108,7 @@ sanitizeModuleSegment raw =
 
 stablePathFingerprint :: FilePath -> Int
 stablePathFingerprint =
-  abs . foldl' step 5381
+  abs . List.foldl' step 5381
   where
     step acc c = acc * 33 + ord c
 
@@ -145,7 +146,7 @@ parseLeadingModuleName =
 
 pickLast :: [a] -> Maybe a
 pickLast =
-  foldl' (\_ value -> Just value) Nothing
+  List.foldl' (\_ value -> Just value) Nothing
 
 rewriteModuleHeader :: String -> FilePath -> String -> String
 rewriteModuleHeader syntheticName originalPath source =

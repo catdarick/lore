@@ -5,7 +5,7 @@ where
 
 import Control.Concurrent.MVar (modifyMVar)
 import Control.Monad.IO.Class (liftIO)
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -184,7 +184,7 @@ definitionBodyHash declarationBody =
 
 dedupeHashedDefinitionEntries :: [HashedDefinitionEntry] -> [HashedDefinitionEntry]
 dedupeHashedDefinitionEntries =
-  reverse . snd . foldl' dedupeOne (Set.empty, [])
+  reverse . snd . List.foldl' dedupeOne (Set.empty, [])
   where
     dedupeOne (seenFingerprints, deduped) definition
       | Set.member definition.definitionFingerprint seenFingerprints =

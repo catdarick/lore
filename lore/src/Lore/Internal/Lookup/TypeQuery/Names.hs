@@ -7,7 +7,7 @@ module Lore.Internal.Lookup.TypeQuery.Names
   )
 where
 
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -47,7 +47,9 @@ collectTypeQueryOccurrencesWithBound boundNames (GHC.L _ typeNode) =
         [ collectTypeQueryOccurrencesWithBound boundNames funcType,
           collectTypeQueryOccurrencesWithBound boundNames argType
         ]
-#if MIN_VERSION_ghc(9,8,0)
+#if MIN_VERSION_ghc(9,10,0)
+    GHC.HsAppKindTy _ funcType kindType ->
+#elif MIN_VERSION_ghc(9,8,0)
     GHC.HsAppKindTy _ funcType _ kindType ->
 #else
     GHC.HsAppKindTy _ funcType kindType ->
@@ -136,7 +138,7 @@ foldTelescopeBinders ::
   [GHC.LHsTyVarBndr flag GHC.GhcPs] ->
   Either Text (Set.Set GHC.RdrName, [TypeQueryOccurrence])
 foldTelescopeBinders initialBoundNames binders =
-  foldl'
+  List.foldl'
     collectOneBinder
     (Right (initialBoundNames, []))
     binders

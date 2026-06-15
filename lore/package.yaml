@@ -30,7 +30,7 @@ dependencies:
 - exceptions
 - filepath
 - deepseq
-- ghc >= 9.6 && < 9.9
+- ghc >= 9.6 && < 9.11
 - ghc-paths
 - ghc-boot
 - mtl

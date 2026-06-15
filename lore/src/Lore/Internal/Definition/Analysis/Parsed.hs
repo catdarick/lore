@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.Definition.Analysis.Parsed
   ( buildParsedModuleFacts,
     collectParsedOccurrenceNames,
@@ -188,14 +190,20 @@ constructorDeclaredNames = \case
   GHC.ConDeclGADT {con_names} ->
     NE.toList con_names
 
+{- ORMOLU_DISABLE -}
 constructorRecordFields :: GHC.ConDecl GHC.GhcPs -> [GHC.LConDeclField GHC.GhcPs]
 constructorRecordFields = \case
   GHC.ConDeclH98 {con_args = GHC.RecCon fields} ->
     GHC.unLoc fields
+#if MIN_VERSION_ghc(9,10,0)
+  GHC.ConDeclGADT {con_g_args = GHC.RecConGADT _ fields} ->
+#else
   GHC.ConDeclGADT {con_g_args = GHC.RecConGADT fields _} ->
+#endif
     GHC.unLoc fields
   _ ->
     []
+{- ORMOLU_ENABLE -}
 
 constructorDeclStartSpan :: GHC.LConDecl GHC.GhcPs -> GHC.SrcSpan
 constructorDeclStartSpan conDecl =

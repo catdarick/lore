@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 
 module Lore.Internal.Ghc.TyThing
@@ -202,6 +203,7 @@ mentionsInType predicate = go
       CoercionTy coercion ->
         mentionsInCoercion predicate coercion
 
+{- ORMOLU_DISABLE -}
 mentionsInCoercion :: (Name -> Bool) -> Coercion -> State VisitedNames Bool
 mentionsInCoercion predicate = go
   where
@@ -227,7 +229,11 @@ mentionsInCoercion predicate = go
           [ go coercionOne,
             go coercionTwo
           ]
+#if MIN_VERSION_ghc(9,10,0)
+      ForAllCo {fco_tcv = typeVariable, fco_kind = kindCoercion, fco_body = coercion} ->
+#else
       ForAllCo typeVariable kindCoercion coercion ->
+#endif
         anyM
           [ mentionsInTyCoVar predicate typeVariable,
             go kindCoercion,
@@ -272,6 +278,7 @@ mentionsInCoercion predicate = go
         pure False
       HoleCo {} ->
         pure False
+{- ORMOLU_ENABLE -}
 
 withFreshName :: (Name -> Bool) -> Name -> State VisitedNames Bool -> State VisitedNames Bool
 withFreshName predicate name continue =

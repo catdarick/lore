@@ -9,7 +9,7 @@ module Lore.Tools.LookupInstances
   )
 where
 
-import Data.List (foldl')
+import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Set as Set
@@ -156,7 +156,7 @@ renderName name =
 
 dedupeNamesBy :: (Ord key) => (name -> key) -> [name] -> [name]
 dedupeNamesBy renderKey =
-  reverse . snd . foldl' dedupeName (Set.empty, [])
+  reverse . snd . List.foldl' dedupeName (Set.empty, [])
   where
     dedupeName (seenKeys, dedupedNames) name =
       let key = renderKey name

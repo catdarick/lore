@@ -36,7 +36,8 @@ module Lore.Lookup
 where
 
 import Control.Monad (filterM)
-import Data.List (foldl', sortOn)
+import Data.List (sortOn)
+import qualified Data.List as List
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -226,7 +227,7 @@ listIntersectingInstances targetNames = do
   case instancesPerName of
     [] -> pure (Instances [] [])
     (firstInstances : restInstances) ->
-      pure $ foldl' intersectMatchingInstances firstInstances restInstances
+      pure $ List.foldl' intersectMatchingInstances firstInstances restInstances
 
 listAssociatedInstances :: (MonadLore m) => GHC.Name -> m Instances
 listAssociatedInstances name = do
@@ -297,7 +298,7 @@ isDirectRoughMatchTc targetTyConName roughMatchTc =
 
 dedupeInstancesByName :: (GHC.NamedThing a) => [a] -> [a]
 dedupeInstancesByName =
-  reverse . snd . foldl' step (Set.empty, [])
+  reverse . snd . List.foldl' step (Set.empty, [])
   where
     step (seenNames, acc) instance_ =
       let instanceName = GHC.getName instance_

@@ -4,7 +4,8 @@ module LookupSpec
 where
 
 import Control.Monad (forM)
-import Data.List (foldl', isInfixOf)
+import Data.List (isInfixOf)
+import qualified Data.List as List
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map as Map
 import Data.Maybe (catMaybes)
@@ -576,12 +577,12 @@ resolvePreferredRootNames query = do
 listUnionInstancesForNames :: (MonadLore m) => [GHC.Name] -> m Instances
 listUnionInstancesForNames names = do
   instancesPerName <- mapM listAssociatedInstances names
-  pure (foldl' unionInstances (Instances [] []) instancesPerName)
+  pure (List.foldl' unionInstances (Instances [] []) instancesPerName)
 
 listUnionInstancesForSymbols :: (MonadLore m) => [Symbol] -> m Instances
 listUnionInstancesForSymbols symbols = do
   instancesPerSymbol <- mapM (listAssociatedInstances . (.name)) symbols
-  pure (foldl' unionInstances (Instances [] []) instancesPerSymbol)
+  pure (List.foldl' unionInstances (Instances [] []) instancesPerSymbol)
 
 unionInstances :: Instances -> Instances -> Instances
 unionInstances left right =
@@ -597,7 +598,7 @@ intersectAllInstances :: [Instances] -> Instances
 intersectAllInstances = \case
   [] -> Instances [] []
   firstInstances : restInstances ->
-    foldl' intersectInstances firstInstances restInstances
+    List.foldl' intersectInstances firstInstances restInstances
 
 intersectInstances :: Instances -> Instances -> Instances
 intersectInstances left right =

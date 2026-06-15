@@ -13,7 +13,7 @@ where
 import Control.DeepSeq (NFData (..), deepseq)
 import Control.Exception (evaluate)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Foldable (foldl')
+import qualified Data.Foldable as Foldable
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import GHC.Conc (getNumCapabilities)
@@ -157,7 +157,7 @@ mergeIdenticalMaps ::
   [Map.Map key value] ->
   Map.Map key value
 mergeIdenticalMaps label =
-  foldl' mergeOne Map.empty
+  Foldable.foldl' mergeOne Map.empty
   where
     mergeOne accumulated nextMap =
       Map.foldlWithKey' insertEntry accumulated nextMap
@@ -197,7 +197,7 @@ resolveDependencyNames ::
   f GHC.Name ->
   Set.Set DefinitionTarget
 resolveDependencyNames catalog =
-  foldl' insertDependencyName Set.empty
+  Foldable.foldl' insertDependencyName Set.empty
   where
     insertDependencyName resolvedTargets dependencyName =
       case Map.lookup dependencyName catalog.definitionIdsByName of

@@ -7,7 +7,7 @@ module Lore.Tools.LookupSymbolInfo
   )
 where
 
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
@@ -159,7 +159,7 @@ pickClosestSymbolsToRoot symbols = do
   pure $
     map (\(symbol, _, _) -> symbol) $
       Map.elems $
-        foldl' keepClosestByRoot Map.empty symbolsWithPath
+        List.foldl' keepClosestByRoot Map.empty symbolsWithPath
   where
     keepClosestByRoot acc current@(_, pathToRoot, _) =
       Map.insertWith

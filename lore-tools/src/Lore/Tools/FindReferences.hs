@@ -14,7 +14,8 @@ module Lore.Tools.FindReferences
 where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.List (foldl', sortOn)
+import qualified Data.List as List
+import Data.List (sortOn)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -191,7 +192,7 @@ filterRootChainByQuery targetOccName matchedSymbols rootChain =
       (.occName) . parseAndNormalizeName . T.pack . Plugins.getOccString
 
     dedupeNames =
-      reverse . snd . foldl' go (Set.empty, [])
+      reverse . snd . List.foldl' go (Set.empty, [])
 
     go (seenNames, keptNames) name
       | name `Set.member` seenNames =

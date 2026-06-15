@@ -5,7 +5,7 @@ module Lore.Internal.Definition.Reachability
   )
 where
 
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import Lore.Internal.Definition.ProjectIndex
@@ -53,7 +53,7 @@ walkReachable maybeMaxDepth neighbours roots =
 
 dedupePreservingOrder :: (Ord a) => [a] -> [a]
 dedupePreservingOrder =
-  reverse . snd . foldl' step (Set.empty, [])
+  reverse . snd . List.foldl' step (Set.empty, [])
   where
     step (seen, deduped) item
       | item `Set.member` seen =

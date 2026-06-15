@@ -730,14 +730,14 @@ compileSynonymTerm term =
 
 buildAdjacency :: [[SynonymTerm]] -> Map.Map SynonymTerm (Set.Set SynonymTerm)
 buildAdjacency =
-  foldl' insertGroup Map.empty
+  List.foldl' insertGroup Map.empty
   where
     insertGroup acc groupTerms =
       case Set.toList (Set.fromList groupTerms) of
         [] ->
           acc
         uniqueTerms ->
-          foldl'
+          List.foldl'
             ( \mapAcc term ->
                 Map.insertWith Set.union term (Set.delete term (Set.fromList uniqueTerms)) mapAcc
             )
@@ -779,6 +779,3 @@ renderSynonymTerm term =
 quote :: Text -> Text
 quote value =
   "\"" <> value <> "\""
-
-foldl' :: (b -> a -> b) -> b -> [a] -> b
-foldl' = List.foldl'

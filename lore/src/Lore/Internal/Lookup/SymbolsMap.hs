@@ -28,7 +28,7 @@ where
 import Control.DeepSeq (NFData)
 import Control.Monad (forM, when)
 import Control.Monad.Reader (MonadIO (..), asks)
-import Data.List (foldl')
+import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
@@ -503,7 +503,7 @@ buildSymbolsIndex moduleSymbols =
     }
   where
     symbolsByLookupName =
-      mapToSymbols <$> foldl' insertModuleSymbols Map.empty moduleSymbols
+      mapToSymbols <$> List.foldl' insertModuleSymbols Map.empty moduleSymbols
 
     indexedValueTypeHeadNamesBySymbol =
       Map.restrictKeys valueTypeHeadNamesBySymbol (Set.map (.name) (foldMap id symbolsByLookupName))
@@ -528,14 +528,14 @@ buildSymbolsIndex moduleSymbols =
 
     insertModuleSymbols acc = \case
       ModuleSymbolsLoaded _ symbols _ ->
-        foldl' insertSymbol acc symbols
+        List.foldl' insertSymbol acc symbols
       ModuleSymbolsMissing _ ->
         acc
       ModuleSymbolsFailed _ ->
         acc
 
     insertSymbol acc indexableSymbol =
-      foldl'
+      List.foldl'
         ( \mapAcc key ->
             Map.insertWith
               (Map.unionWith mergeSymbolMeta)

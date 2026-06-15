@@ -17,7 +17,8 @@ module Lore.Tools.GetDefinition
   )
 where
 
-import Data.List (foldl', sortOn)
+import qualified Data.List as List
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Ord (Down (..))
@@ -212,7 +213,7 @@ orderDefinitionSources definitionEntries =
 
 dedupeDefinitionSourcesAtMinimumDepth :: [NamedDefinitionSource] -> [NamedDefinitionSource]
 dedupeDefinitionSourcesAtMinimumDepth =
-  Map.elems . foldl' collectDefinition (Map.empty :: Map.Map DefinitionId NamedDefinitionSource)
+  Map.elems . List.foldl' collectDefinition (Map.empty :: Map.Map DefinitionId NamedDefinitionSource)
   where
     collectDefinition definitionsById definitionEntry =
       Map.insertWith preferShallower definitionId definitionEntry definitionsById
@@ -228,7 +229,7 @@ dedupeDefinitionSourcesAtMinimumDepth =
 
 definitionModuleScores :: [NamedDefinitionSource] -> Map.Map GHC.Module Integer
 definitionModuleScores =
-  foldl' collectScore Map.empty
+  List.foldl' collectScore Map.empty
   where
     collectScore scoresByModule definitionEntry =
       Map.insertWith
@@ -261,7 +262,7 @@ mkOmittedDefinitions names =
     }
   where
     grouped =
-      foldl' collectDefinition Map.empty names
+      List.foldl' collectDefinition Map.empty names
 
     collectDefinition groupedByModule name =
       Map.insertWith (<>) (definitionModuleName name) [definitionSymbolName name] groupedByModule
@@ -284,7 +285,7 @@ definitionSymbolName =
 
 dedupeTexts :: [Text] -> [Text]
 dedupeTexts =
-  reverse . snd . foldl' dedupeText (Set.empty, [])
+  reverse . snd . List.foldl' dedupeText (Set.empty, [])
   where
     dedupeText (seenTexts, deduped) value
       | Set.member value seenTexts =

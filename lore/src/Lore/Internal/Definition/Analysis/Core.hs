@@ -1,9 +1,11 @@
+{-# LANGUAGE CPP #-}
+
 module Lore.Internal.Definition.Analysis.Core
   ( buildCoreDependenciesByBinder,
   )
 where
 
-import Data.Foldable (foldl')
+import qualified Data.Foldable as Foldable
 import qualified Data.Graph as Graph
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -122,7 +124,7 @@ buildTransitiveCoreSemanticDependencies directDependenciesByKey =
         componentKeysByComponent
 
     semanticDependenciesByComponent =
-      foldl'
+      Foldable.foldl'
         addComponentSemanticDependencies
         IntMap.empty
         (IntMap.toAscList componentDirectSemanticNames)
@@ -245,6 +247,7 @@ collectDirectCoreDependenciesInType interestingDependencyKeys topLevelBindingKey
     | tyCon <- GHC.UniqueSet.nonDetEltsUniqSet (GHC.TyCoFVs.tyConsOfType type_)
     ]
 
+{- ORMOLU_DISABLE -}
 collectDirectCoreDependenciesInCoercion ::
   IntSet.IntSet ->
   IntSet.IntSet ->
@@ -262,7 +265,11 @@ collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindin
   GHCTyCo.AppCo coercionOne coercionTwo ->
     collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercionOne
       `appendCoreDirectDependencies` collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercionTwo
+#if MIN_VERSION_ghc(9,10,0)
+  GHCTyCo.ForAllCo {GHCTyCo.fco_kind = kindCoercion, GHCTyCo.fco_body = coercion} ->
+#else
   GHCTyCo.ForAllCo _ kindCoercion coercion ->
+#endif
     collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys kindCoercion
       `appendCoreDirectDependencies` collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys coercion
   GHCTyCo.FunCo {GHCTyCo.fco_mult = multiplicityCoercion, GHCTyCo.fco_arg = argumentCoercion, GHCTyCo.fco_res = resultCoercion} ->
@@ -300,6 +307,7 @@ collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindin
       (map (collectDirectCoreDependenciesInCoercion interestingDependencyKeys topLevelBindingKeys) coercions)
   GHCTyCo.HoleCo _ ->
     emptyCoreDirectDependencies
+{- ORMOLU_ENABLE -}
 
 collectDirectCoreDependenciesInMCoercion ::
   IntSet.IntSet ->
