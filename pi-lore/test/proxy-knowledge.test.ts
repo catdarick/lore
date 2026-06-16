@@ -37,6 +37,25 @@ test("registers Lore tools dynamically and normalizes required-nullable schema f
   }
 });
 
+test("tool feature gates filter public Lore tool registrations", async () => {
+  const host = new FakePiHost(projectRoot);
+  const baseConfig = host.getConfig();
+  host.getConfig = () => ({
+    ...(baseConfig as Record<string, unknown>),
+    tools: {
+      disabled: ["runTestSuite"],
+    },
+  });
+  const runtime = await createLoreExtension(host);
+  await runtime.start();
+  try {
+    assert.deepEqual([...host.tools.keys()].sort(), ["echo", "getDefinition", "reloadHomeModules"]);
+    assert.deepEqual(runtime.getState().registeredToolNames.sort(), ["echo", "getDefinition", "reloadHomeModules"]);
+  } finally {
+    await runtime.stop();
+  }
+});
+
 test("captures changed knowledge snapshots after getDefinition", async () => {
   const host = new FakePiHost(projectRoot);
   const runtime = await createLoreExtension(host);

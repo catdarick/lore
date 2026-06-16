@@ -3,7 +3,7 @@ import { KnowledgeSynchronizer } from "./knowledge.ts";
 import { LoreClient } from "./mcp-client.ts";
 import { RecoveryManager } from "./recovery.ts";
 import { SessionStateStore } from "./session-state.ts";
-import { LoreToolProxy } from "./tool-proxy.ts";
+import { isPrivateLoreMethod, LoreToolProxy } from "./tool-proxy.ts";
 import type { ExtensionRuntime, PiEntry, PiHost } from "./types.ts";
 import { LoreRecoveryUi } from "./ui.ts";
 import { analyzeLoreUsage } from "./usage-stats.ts";
@@ -97,6 +97,10 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
     start,
     stop,
     restartLore,
+    async listAvailableToolNames() {
+      const tools = await client.listTools();
+      return tools.map((tool) => tool.name).filter((name) => !isPrivateLoreMethod(name)).sort();
+    },
     abandonRecovery() {
       return recovery.abandonRecovery();
     },

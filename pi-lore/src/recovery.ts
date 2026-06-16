@@ -71,6 +71,9 @@ export class RecoveryManager {
       if (outcome.success) {
         return;
       }
+      if (!recoveryFailureEnabled(this.config, outcome.toolName)) {
+        return;
+      }
       const recovery = await this.startRecovery(outcome, toolCallId);
       try {
         await this.ui.appendContextMarker(recovery);
@@ -84,7 +87,7 @@ export class RecoveryManager {
       return;
     }
 
-    const updated = updateRecoveryObligations(recoveryAsActive(current), outcome);
+    const updated = updateRecoveryObligations(recoveryAsActive(current), outcome, this.config.recovery);
     if (hasPending(updated)) {
       await this.persistRecovery(updated);
       await this.uiBestEffort(() => this.ui.showActiveStatus(updated));
@@ -324,17 +327,25 @@ export class RecoveryManager {
 export function updateRecoveryObligations(
   recovery: ActiveRecovery,
   outcome: Extract<ValidationOutcome, { kind: "semantic" }>,
+  options: LoreConfig["recovery"] = { compilation: true, tests: true },
 ): ActiveRecovery {
   const next: ActiveRecovery = { ...recovery };
   if (outcome.toolName === "reloadHomeModules") {
-    next.compilationPending = !outcome.success;
+    next.compilationPending = !outcome.success && options.compilation;
   } else if (outcome.toolName === "runTestSuite") {
-    next.testsPending = !outcome.success;
+    next.testsPending = !outcome.success && options.tests;
     if (outcome.success) {
       next.compilationPending = false;
     }
   }
   return next;
+}
+
+function recoveryFailureEnabled(config: LoreConfig, toolName: ValidationToolName): boolean {
+  if (toolName === "reloadHomeModules") {
+    return config.recovery.compilation;
+  }
+  return config.recovery.tests;
 }
 
 function failedObligations(toolName: ValidationToolName): RecoveryObligations {

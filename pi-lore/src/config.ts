@@ -15,6 +15,8 @@ type RawLoreConfig = Partial<{
   maxInlineDiffBytes: unknown;
   allowToolOverride: unknown;
   stateDir: unknown;
+  tools: unknown;
+  recovery: unknown;
 }>;
 
 const defaults = {
@@ -33,6 +35,13 @@ const defaults = {
   summaryTimeoutMs: 1_000_000,
   maxInlineDiffBytes: 50_000,
   allowToolOverride: false,
+  tools: {
+    disabled: [] as string[],
+  },
+  recovery: {
+    compilation: true,
+    tests: true,
+  },
 };
 
 export function loadLoreConfig(host: PiHost = {}): LoreConfig {
@@ -50,6 +59,8 @@ export function loadLoreConfig(host: PiHost = {}): LoreConfig {
   const summaryTimeoutMs = requirePositiveInteger(merged.summaryTimeoutMs, "summaryTimeoutMs");
   const maxInlineDiffBytes = requirePositiveInteger(merged.maxInlineDiffBytes, "maxInlineDiffBytes");
   const allowToolOverride = requireBoolean(merged.allowToolOverride, "allowToolOverride");
+  const tools = requireToolsConfig(merged.tools, "tools");
+  const recovery = requireRecoveryConfig(merged.recovery, "recovery");
   const cwd = merged.cwd === undefined ? projectDir : resolve(projectDir, requireString(merged.cwd, "cwd"));
   const stateDir =
     merged.stateDir === undefined
@@ -68,6 +79,8 @@ export function loadLoreConfig(host: PiHost = {}): LoreConfig {
     maxInlineDiffBytes,
     allowToolOverride,
     stateDir,
+    tools,
+    recovery,
   };
 }
 
@@ -168,4 +181,26 @@ function requireBoolean(value: unknown, name: string): boolean {
     throw new Error(`Invalid Lore config: ${name} must be a boolean`);
   }
   return value;
+}
+
+function requireToolsConfig(value: unknown, name: string): LoreConfig["tools"] {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid Lore config: ${name} must be an object`);
+  }
+  const disabled = value.disabled === undefined ? [] : requireStringArray(value.disabled, `${name}.disabled`);
+  return { disabled: uniqueSorted(disabled) };
+}
+
+function requireRecoveryConfig(value: unknown, name: string): LoreConfig["recovery"] {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid Lore config: ${name} must be an object`);
+  }
+  return {
+    compilation: value.compilation === undefined ? true : requireBoolean(value.compilation, `${name}.compilation`),
+    tests: value.tests === undefined ? true : requireBoolean(value.tests, `${name}.tests`),
+  };
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort();
 }

@@ -3,6 +3,7 @@ import type { PiEntry, PiHost, PiToolRegistration } from "../src/types.ts";
 
 export class FakePiHost implements PiHost {
   projectDir: string;
+  projectTrusted = false;
   tools = new Map<string, PiToolRegistration>();
   entries: PiEntry[] = [];
   statuses = new Map<string, string>();

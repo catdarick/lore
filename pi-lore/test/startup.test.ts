@@ -10,6 +10,28 @@ test("default config enables Lore definition knowledge RPC at the producer", () 
   const config = loadLoreConfig({ projectDir: process.cwd() });
   assert.equal(config.env.LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE, "true");
   assert.equal(config.env.LORE_MCP_TOOL_ENABLED_NOTIFY_KNOWLEDGE_RESET, "false");
+  assert.deepEqual(config.tools, { disabled: [] });
+  assert.deepEqual(config.recovery, { compilation: true, tests: true });
+});
+
+test("config supports tool and recovery feature gates", () => {
+  const config = loadLoreConfig({
+    projectDir: process.cwd(),
+    getConfig: () => ({
+      tools: {
+        disabled: ["getDefinition"],
+      },
+      recovery: {
+        compilation: false,
+        tests: true,
+      },
+    }),
+  });
+
+  assert.deepEqual(config.tools, {
+    disabled: ["getDefinition"],
+  });
+  assert.deepEqual(config.recovery, { compilation: false, tests: true });
 });
 
 test("startup reports unavailable Lore without throwing through Pi", async () => {
@@ -49,7 +71,7 @@ test("concurrent restarts serialize the full Lore process lifecycle", async () =
   const projectRoot = resolve(process.cwd(), "../");
   const client = new LoreClient({
     command: "python3",
-    args: [join(projectRoot, ".pi/extensions/lore/test/fake-lore-mcp.py")],
+    args: [join(projectRoot, "pi-lore/test/fake-lore-mcp.py")],
     env: {},
     cwd: projectRoot,
     startupTimeoutMs: 5_000,

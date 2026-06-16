@@ -1,7 +1,8 @@
 import { createLoreExtension } from "./src/index.ts";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { loadLoreConfig } from "./src/config.ts";
 import { installPiImmediateDisplayBridge, type PiImmediateDisplayOptions } from "./src/pi-immediate-display.ts";
 import { recoverySummaryCustomType } from "./src/ui.ts";
 import { formatLoreUsageStats, loreUsageStatsCustomType } from "./src/usage-stats.ts";
@@ -88,13 +89,16 @@ export default async function lorePiExtension(pi: PiExtensionApi): Promise<void>
   pi.registerCommand?.("lore-status", {
     description: "Show Lore extension registration status",
     handler: async (_args: unknown, ctx: { ui?: { notify?: (message: string, type?: string) => void } }) => {
+      const activeLoreToolNames = currentActiveLoreToolNames(pi, loreToolNames);
       const message =
         startupError
           ? `Lore extension failed to start: ${startupError}`
-          : loreToolNames.length > 0
-            ? `Lore extension registered ${loreToolNames.length} tools: ${loreToolNames.join(", ")}`
-            : "Lore extension has not registered any tools.";
-      ctx.ui?.notify?.(message, startupError ? "error" : loreToolNames.length > 0 ? "info" : "warning");
+          : activeLoreToolNames.length > 0
+            ? `Lore extension active tools (${activeLoreToolNames.length}/${loreToolNames.length} registered): ${activeLoreToolNames.join(", ")}`
+            : loreToolNames.length > 0
+              ? `Lore extension has ${loreToolNames.length} registered tools, but none are active.`
+              : "Lore extension has not registered any tools.";
+      ctx.ui?.notify?.(message, startupError ? "error" : activeLoreToolNames.length > 0 ? "info" : "warning");
     },
   });
   const immediateDisplay = await installPiImmediateDisplayBridge({
@@ -112,7 +116,13 @@ export default async function lorePiExtension(pi: PiExtensionApi): Promise<void>
   };
 
   const runtime = await createLoreExtension(host);
+  registerLoreSettingsCommand(pi, host, runtime, (next) => {
+    currentContext = next ?? currentContext;
+  });
   registerUsageStatsCommand(pi, runtime, host, (next) => {
+    currentContext = next ?? currentContext;
+  });
+  registerLoreRestartCommand(pi, runtime, (next) => {
     currentContext = next ?? currentContext;
   });
   pi.registerCommand?.("lore-recovery-abandon", {
@@ -210,6 +220,379 @@ function registerUsageStatsCommand(
       });
     },
   });
+}
+
+function registerLoreSettingsCommand(
+  pi: PiExtensionApi,
+  host: PiHost,
+  runtime: { listAvailableToolNames: () => Promise<string[]> },
+  setCurrentContext: (next: ExtensionContext | undefined) => void,
+): void {
+  pi.registerCommand?.("lore-settings", {
+    description: "Configure Lore tools and recovery",
+    handler: async (args: unknown, ctx: unknown) => {
+      setCurrentContext(toExtensionContext(ctx));
+      const input = typeof args === "string" ? args.trim() : "";
+      if (input === "show") {
+        commandUi(ctx)?.notify?.(formatLoreConfigStatus(host), "info");
+        return;
+      }
+      if (input.startsWith("set ")) {
+        const patch = parseLoreSettingsPatch(input.slice(4));
+        const path = writeProjectLoreConfig(host, patch);
+        commandUi(ctx)?.notify?.(`Updated ${path}. Run /reload to apply tool registration changes.`, "info");
+        return;
+      }
+      await configureLoreSettingsMenu(pi, host, runtime, ctx);
+    },
+  });
+}
+
+async function configureLoreSettingsMenu(
+  pi: PiExtensionApi,
+  host: PiHost,
+  runtime: { listAvailableToolNames: () => Promise<string[]> },
+  ctx: unknown,
+): Promise<void> {
+  const ui = requireInteractiveUi(ctx);
+  while (true) {
+    const choice = await ui.select("Lore settings", ["Tools", "Recovery"]);
+    if (choice === "Tools") {
+      await configureLoreToolsCheckboxes(pi, host, runtime, ctx);
+      continue;
+    }
+    if (choice === "Recovery") {
+      await configureLoreRecoveryCheckboxes(host, ctx);
+      continue;
+    }
+    return;
+  }
+}
+
+async function configureLoreToolsCheckboxes(
+  pi: PiExtensionApi,
+  host: PiHost,
+  runtime: { listAvailableToolNames: () => Promise<string[]> },
+  ctx: unknown,
+): Promise<void> {
+  const ui = requireCustomUi(ctx);
+  const config = loadLoreConfig(host);
+  const toolNames = await runtime.listAvailableToolNames();
+  if (toolNames.length === 0) {
+    ui.notify?.("Lore MCP did not report any public tools.", "warning");
+    return;
+  }
+  const checked = await ui.custom((_tui, _theme, _keybindings, done) =>
+    new CheckboxListComponent(
+      "Lore tools",
+      toolNames.map((name) => ({ id: name, label: name, checked: toolIsEnabled(config.tools, name) })),
+      done,
+    ),
+  );
+  if (!checked) {
+    return;
+  }
+  const enabled = new Set(checked);
+  const disabled = toolNames.filter((name) => !enabled.has(name));
+  persistInteractiveLoreConfig(
+    host,
+    {
+      tools: {
+        disabled,
+      },
+    },
+    ui,
+  );
+  applyActiveLoreToolSelection(pi, toolNames, checked);
+}
+
+function applyActiveLoreToolSelection(pi: PiExtensionApi, loreToolNames: string[], enabledLoreToolNames: string[]): void {
+  const activeTools = pi.getActiveTools?.();
+  if (!activeTools || !pi.setActiveTools) {
+    return;
+  }
+  const loreTools = new Set(loreToolNames);
+  const nonLoreActiveTools = activeTools.filter((name) => !loreTools.has(name));
+  pi.setActiveTools([...new Set([...nonLoreActiveTools, ...enabledLoreToolNames])]);
+}
+
+async function configureLoreRecoveryCheckboxes(host: PiHost, ctx: unknown): Promise<void> {
+  const ui = requireCustomUi(ctx);
+  const config = loadLoreConfig(host);
+  const checked = await ui.custom((_tui, _theme, _keybindings, done) =>
+    new CheckboxListComponent(
+      "Lore recovery",
+      [
+        { id: "compilation", label: "Compilation recovery", checked: config.recovery.compilation },
+        { id: "tests", label: "Test recovery", checked: config.recovery.tests },
+      ],
+      done,
+    ),
+  );
+  if (!checked) {
+    return;
+  }
+  persistInteractiveLoreConfig(
+    host,
+    { recovery: { compilation: checked.includes("compilation"), tests: checked.includes("tests") } },
+    ui,
+  );
+}
+
+function persistInteractiveLoreConfig(
+  host: PiHost,
+  patch: Record<string, unknown>,
+  ui: { notify?: (message: string, type?: string) => void },
+): void {
+  const path = writeProjectLoreConfig(host, patch);
+  ui.notify?.(`Updated ${path}. Run /reload to apply tool registration changes.`, "info");
+}
+
+function requireInteractiveUi(ctx: unknown): {
+  notify?: (message: string, type?: string) => void;
+  select: (title: string, options: string[]) => Promise<string | undefined>;
+} {
+  const ui = commandUi(ctx);
+  if (!ui?.select) {
+    throw new Error("/lore-settings requires Pi UI select support");
+  }
+  return ui as {
+    notify?: (message: string, type?: string) => void;
+    select: (title: string, options: string[]) => Promise<string | undefined>;
+  };
+}
+
+function requireCustomUi(ctx: unknown): {
+  notify?: (message: string, type?: string) => void;
+  custom: <T>(factory: (...args: unknown[]) => unknown) => Promise<T | undefined>;
+} {
+  const ui = commandUi(ctx);
+  if (!ui?.custom) {
+    throw new Error("/lore-settings requires Pi custom UI support");
+  }
+  return ui as {
+    notify?: (message: string, type?: string) => void;
+    custom: <T>(factory: (...args: unknown[]) => unknown) => Promise<T | undefined>;
+  };
+}
+
+function toolIsEnabled(config: { disabled: string[] }, name: string): boolean {
+  return !config.disabled.includes(name);
+}
+
+function formatLoreConfigStatus(host: PiHost): string {
+  const config = loadLoreConfig(host);
+  return [
+    "Lore settings:",
+    `Project config: ${projectLoreConfigPath(host)}`,
+    "Effective tool/recovery settings:",
+    JSON.stringify({ tools: config.tools, recovery: config.recovery }, null, 2),
+    "",
+    'Update project config with: /lore-settings set {"recovery":{"tests":false}}',
+    "Changes apply after /reload or Pi restart.",
+  ].join("\n");
+}
+
+function parseLoreSettingsPatch(text: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid /lore-settings JSON: ${message}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid /lore-settings JSON: expected an object");
+  }
+  const patch = parsed as Record<string, unknown>;
+  const allowed = new Set(["tools", "recovery"]);
+  const unsupported = Object.keys(patch).filter((key) => !allowed.has(key));
+  if (unsupported.length > 0) {
+    throw new Error(`Unsupported /lore-settings keys: ${unsupported.join(", ")}`);
+  }
+  validateLoreSettingsPatchShape(patch);
+  return patch;
+}
+
+function validateLoreSettingsPatchShape(patch: Record<string, unknown>): void {
+  const tools = patch.tools;
+  if (tools !== undefined) {
+    if (!isPlainObject(tools)) {
+      throw new Error("Invalid /lore-settings JSON: tools must be an object");
+    }
+    const unsupportedTools = Object.keys(tools).filter((key) => key !== "disabled");
+    if (unsupportedTools.length > 0) {
+      throw new Error(`Unsupported /lore-settings tools keys: ${unsupportedTools.join(", ")}`);
+    }
+  }
+  const recovery = patch.recovery;
+  if (recovery !== undefined) {
+    if (!isPlainObject(recovery)) {
+      throw new Error("Invalid /lore-settings JSON: recovery must be an object");
+    }
+    const unsupportedRecovery = Object.keys(recovery).filter((key) => key !== "compilation" && key !== "tests");
+    if (unsupportedRecovery.length > 0) {
+      throw new Error(`Unsupported /lore-settings recovery keys: ${unsupportedRecovery.join(", ")}`);
+    }
+  }
+}
+
+function writeProjectLoreConfig(host: PiHost, patch: Record<string, unknown>): string {
+  const path = projectLoreConfigPath(host);
+  const existing = readJsonFileIfPresent(path);
+  const next = deepMergeObject(existing, patch);
+  removeUnsupportedLoreSettings(next);
+  loadLoreConfig({ ...host, getConfig: () => next });
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return path;
+}
+
+function readJsonFileIfPresent(path: string): Record<string, unknown> {
+  if (!existsSync(path)) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("expected an object");
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid Lore project config at ${path}: ${message}`);
+  }
+}
+
+function projectLoreConfigPath(host: PiHost): string {
+  return join(resolve(String(host.projectDir ?? host.cwd ?? process.cwd())), ".pi", "lore.config.json");
+}
+
+function deepMergeObject(left: Record<string, unknown>, right: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...left };
+  for (const [key, value] of Object.entries(right)) {
+    if (isPlainObject(result[key]) && isPlainObject(value)) {
+      result[key] = deepMergeObject(result[key], value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function removeUnsupportedLoreSettings(config: Record<string, unknown>): void {
+  const tools = config.tools;
+  if (tools && typeof tools === "object" && !Array.isArray(tools)) {
+    delete (tools as Record<string, unknown>).enabled;
+  }
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+class CheckboxListComponent {
+  private readonly title: string;
+  private readonly items: Array<{ id: string; label: string; checked: boolean }>;
+  private readonly done: (value: string[] | undefined) => void;
+  private cursor = 0;
+
+  constructor(
+    title: string,
+    items: Array<{ id: string; label: string; checked: boolean }>,
+    done: (value: string[] | undefined) => void,
+  ) {
+    this.title = title;
+    this.items = items;
+    this.done = done;
+  }
+
+  render(width: number): string[] {
+    const safeWidth = Number.isFinite(width) && width > 0 ? Math.floor(width) : 80;
+    return [
+      this.title,
+      "Space/Enter: toggle  Esc: back/save",
+      ...this.items.map((item, index) => {
+        const cursor = index === this.cursor ? "›" : " ";
+        const checkbox = item.checked ? "[X]" : "[ ]";
+        return `${cursor} ${checkbox} ${item.label}`.slice(0, safeWidth);
+      }),
+    ];
+  }
+
+  handleInput(data: string): void {
+    if (data === "\u001b[B" || data === "j") {
+      this.cursor = Math.min(this.cursor + 1, this.items.length - 1);
+      return;
+    }
+    if (data === "\u001b[A" || data === "k") {
+      this.cursor = Math.max(this.cursor - 1, 0);
+      return;
+    }
+    if ((data === " " || data === "\r" || data === "\n") && this.items[this.cursor]) {
+      this.items[this.cursor].checked = !this.items[this.cursor].checked;
+      return;
+    }
+    if (data.startsWith("\u001b")) {
+      this.done(this.items.filter((item) => item.checked).map((item) => item.id));
+    }
+  }
+
+  invalidate(): void {
+    // stateless render cache
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function registerLoreRestartCommand(
+  pi: PiExtensionApi,
+  runtime: { restartLore: () => Promise<void> },
+  setCurrentContext: (next: ExtensionContext | undefined) => void,
+): void {
+  pi.registerCommand?.("lore-restart", {
+    description: "Restart the Lore MCP binary",
+    handler: async (_args: unknown, ctx: unknown) => {
+      setCurrentContext(toExtensionContext(ctx));
+      const ui = commandUi(ctx);
+      ui?.notify?.("Restarting Lore MCP binary...", "info");
+      try {
+        await runtime.restartLore();
+        ui?.notify?.("Lore MCP binary restarted.", "info");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ui?.notify?.(`Lore MCP binary restart failed: ${message}`, "error");
+        throw error;
+      }
+    },
+  });
+}
+
+function commandUi(ctx: unknown): {
+  notify?: (message: string, type?: string) => void;
+  select?: (title: string, options: string[]) => Promise<string | undefined>;
+  custom?: <T>(factory: (done: (value: T | undefined) => void) => unknown) => Promise<T | undefined>;
+} | undefined {
+  if (!ctx || typeof ctx !== "object") {
+    return undefined;
+  }
+  const ui = (ctx as { ui?: unknown }).ui;
+  if (!ui || typeof ui !== "object") {
+    return undefined;
+  }
+  const notify = (ui as { notify?: unknown }).notify;
+  const select = (ui as { select?: unknown }).select;
+  const custom = (ui as { custom?: unknown }).custom;
+  if (typeof notify !== "function" && typeof select !== "function" && typeof custom !== "function") {
+    return undefined;
+  }
+  return {
+    notify: typeof notify === "function" ? (notify as (message: string, type?: string) => void) : undefined,
+    select: typeof select === "function" ? (select as (title: string, options: string[]) => Promise<string | undefined>) : undefined,
+    custom: typeof custom === "function" ? (custom as <T>(factory: (...args: unknown[]) => unknown) => Promise<T | undefined>) : undefined,
+  };
 }
 
 function recoverySummaryRenderText(message: unknown, options: unknown, theme: unknown): string {
@@ -559,6 +942,19 @@ function activateLoreTools(pi: PiExtensionApi, toolNames: string[]): void {
   } catch {
     // Active-tool actions are unavailable during extension loading. The same
     // activation runs again on session_start/model_select after Pi binds core.
+  }
+}
+
+function currentActiveLoreToolNames(pi: PiExtensionApi, registeredLoreToolNames: string[]): string[] {
+  try {
+    const activeTools = pi.getActiveTools?.();
+    if (!activeTools) {
+      return registeredLoreToolNames;
+    }
+    const active = new Set(activeTools);
+    return registeredLoreToolNames.filter((name) => active.has(name));
+  } catch {
+    return registeredLoreToolNames;
   }
 }
 
@@ -953,7 +1349,12 @@ function filePathFromImportMeta(): string {
 
 export const __test = {
   appendLoreContextMarkerGuidance,
+  currentActiveLoreToolNames,
+  parseLoreSettingsPatch,
+  projectLoreConfigPath,
+  registerLoreSettingsCommand,
   registerLoreSystemPromptGuidance,
+  registerLoreRestartCommand,
   registerUsageStatsCommand,
   normalizePiMessages,
   toLlmMessages,

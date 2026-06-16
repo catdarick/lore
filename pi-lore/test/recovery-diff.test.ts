@@ -28,6 +28,8 @@ test("large textual diffs are retained as artifacts and bounded in context", asy
     maxInlineDiffBytes: 100,
     allowToolOverride: false,
     stateDir,
+    tools: { disabled: [] },
+    recovery: { compilation: true, tests: true },
   };
   const recoveryId = "lore-recovery-00000000-0000-4000-8000-000000000020";
   await captureRecoveryBaseline(config, recoveryId);
@@ -121,6 +123,8 @@ async function makeDiffFixture(name: string): Promise<{ projectDir: string; conf
       maxInlineDiffBytes: 1_000,
       allowToolOverride: false,
       stateDir: join(projectDir, "state"),
+      tools: { disabled: [] },
+      recovery: { compilation: true, tests: true },
     },
   };
 }

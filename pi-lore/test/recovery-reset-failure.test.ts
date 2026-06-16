@@ -26,6 +26,8 @@ test("cache sync failure after completion does not undo completedRecovery", asyn
     maxInlineDiffBytes: 50_000,
     allowToolOverride: false,
     stateDir,
+    tools: { disabled: [] },
+    recovery: { compilation: true, tests: true },
   };
   const store = new SessionStateStore(host);
   const ui = new LoreRecoveryUi(host);

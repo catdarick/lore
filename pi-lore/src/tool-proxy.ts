@@ -35,7 +35,7 @@ export class LoreToolProxy {
 
   async registerAll(): Promise<McpTool[]> {
     const tools = await this.client.listTools();
-    const publicTools = tools.filter((tool) => !isPrivateLoreMethod(tool.name));
+    const publicTools = tools.filter((tool) => !isPrivateLoreMethod(tool.name) && toolEnabled(this.config, tool.name));
     const names = new Set<string>();
     const registrations: PiToolRegistration[] = [];
     for (const tool of publicTools) {
@@ -54,7 +54,7 @@ export class LoreToolProxy {
       }
       await this.host.registerTool(registration);
     }
-    return tools;
+    return publicTools;
   }
 
   registrationFor(tool: McpTool): PiToolRegistration {
@@ -121,6 +121,10 @@ export class LoreToolProxy {
   }
 }
 
+function toolEnabled(config: LoreConfig, name: string): boolean {
+  return !config.tools.disabled.includes(name);
+}
+
 function ensureVisibleToolContent(toolName: string, result: LoreStructuredToolResult): LoreStructuredToolResult["content"] {
   if (hasTextContent(result.content)) {
     return result.content;
@@ -146,6 +150,6 @@ function truncate(text: string, maxChars: number): string {
   return `${text.slice(0, half)}\n...truncated...\n${text.slice(-half)}`;
 }
 
-function isPrivateLoreMethod(name: string): boolean {
+export function isPrivateLoreMethod(name: string): boolean {
   return name.startsWith("lore/");
 }

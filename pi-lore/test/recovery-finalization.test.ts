@@ -7,6 +7,44 @@ import { FakePiHost } from "./test-support.ts";
 
 const projectRoot = resolve(process.cwd(), "../");
 
+test("recovery feature gates suppress compilation recovery starts", async () => {
+  const host = new FakePiHost(projectRoot);
+  const baseConfig = host.getConfig();
+  host.getConfig = () => ({
+    ...(baseConfig as Record<string, unknown>),
+    recovery: { compilation: false, tests: true },
+  });
+  const runtime = await createLoreExtension(host);
+  await runtime.start();
+  try {
+    await host.tools.get("reloadHomeModules")?.execute("call-1", { success: false }, undefined, undefined, undefined);
+
+    assert.equal(runtime.getState().recovery.phase, "inactive");
+    assert.equal(host.sentMessages.some((event) => event.message.customType === "lore-recovery-context-marker"), false);
+  } finally {
+    await runtime.stop();
+  }
+});
+
+test("recovery feature gates suppress test recovery starts", async () => {
+  const host = new FakePiHost(projectRoot);
+  const baseConfig = host.getConfig();
+  host.getConfig = () => ({
+    ...(baseConfig as Record<string, unknown>),
+    recovery: { compilation: true, tests: false },
+  });
+  const runtime = await createLoreExtension(host);
+  await runtime.start();
+  try {
+    await host.tools.get("runTestSuite")?.execute("call-1", { success: false }, undefined, undefined, undefined);
+
+    assert.equal(runtime.getState().recovery.phase, "inactive");
+    assert.equal(host.sentMessages.some((event) => event.message.customType === "lore-recovery-context-marker"), false);
+  } finally {
+    await runtime.stop();
+  }
+});
+
 test("recovery finalization waits for a context event with the persisted toolResult", async () => {
   const host = new FakePiHost(projectRoot);
   const runtime = await createLoreExtension(host);

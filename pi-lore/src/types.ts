@@ -40,6 +40,13 @@ export type LoreConfig = {
   maxInlineDiffBytes: number;
   allowToolOverride: boolean;
   stateDir: string;
+  tools: {
+    disabled: string[];
+  };
+  recovery: {
+    compilation: boolean;
+    tests: boolean;
+  };
 };
 
 export type LoreCallOptions = {
@@ -268,6 +275,7 @@ export type ExtensionRuntime = {
   start: () => Promise<void>;
   stop: () => Promise<void>;
   restartLore: () => Promise<void>;
+  listAvailableToolNames: () => Promise<string[]>;
   abandonRecovery: () => Promise<void>;
   processContext: (input: { rawMessages: unknown[]; normalizedEntries: PiEntry[] }) => Promise<PiEntry[]>;
   getUsageStats: () => Promise<LoreUsageStats>;
