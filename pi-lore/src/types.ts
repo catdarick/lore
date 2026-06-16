@@ -29,6 +29,7 @@ export type LoreStructuredToolResult = {
 };
 
 export type LoreConfig = {
+  enabled: boolean;
   command?: string;
   args: string[];
   env: Record<string, string>;
@@ -277,6 +278,7 @@ export type PiHost = {
 
 export type ExtensionRuntime = {
   start: () => Promise<void>;
+  startResolved: (processConfig: LoreProcessConfig) => Promise<{ ok: true; registeredToolNames: string[] } | { ok: false; error: Error }>;
   stop: () => Promise<void>;
   restartLore: () => Promise<void>;
   listAvailableToolNames: () => Promise<string[]>;

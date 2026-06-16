@@ -5,6 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import createLoreExtension, { __test, createLoreExtension as namedCreateLoreExtension } from "../index.ts";
+import { fakeKeybindings } from "./test-support.ts";
+
+function fakeSettingsController(overrides: Partial<{
+  setProjectEnabled: (enabled: boolean, ctx?: unknown) => Promise<void>;
+  configureCommand: (ctx?: unknown) => Promise<"applied" | "cancelled">;
+}> = {}) {
+  return {
+    async setProjectEnabled() {},
+    async configureCommand() { return "cancelled" as const; },
+    ...overrides,
+  };
+}
 
 test("root extension entrypoint exports the Pi extension factory", async () => {
   assert.equal(typeof createLoreExtension, "function");
@@ -80,6 +92,24 @@ test("root adapter computes active Lore status from Pi active tools", () => {
     __test.currentActiveLoreToolNames({}, ["getDefinition", "runTestSuite"]),
     ["getDefinition", "runTestSuite"],
   );
+});
+
+test("root adapter syncs Lore active tools to coordinator readiness", () => {
+  let active = ["bash", "getDefinition"];
+  const pi = {
+    getActiveTools: () => active,
+    setActiveTools(next: string[]) { active = next; },
+  };
+  __test.syncLoreToolActivation(pi, { getState: () => ({ kind: "disabled" }) }, ["getDefinition"]);
+  assert.deepEqual(active, ["bash"]);
+  __test.syncLoreToolActivation(pi, { getState: () => ({ kind: "ready" }) }, ["getDefinition"]);
+  assert.deepEqual(active, ["bash", "getDefinition"]);
+});
+
+test("root adapter derives Lore status tone from coordinator state", () => {
+  assert.equal(__test.loreStatusTone({ kind: "ready", command: "lore-mcp", mode: "managed" }, "old error", 0), "info");
+  assert.equal(__test.loreStatusTone({ kind: "failed", failure: { kind: "planning", summary: "boom", details: "boom" } }, undefined, 1), "error");
+  assert.equal(__test.loreStatusTone({ kind: "disabled" }, undefined, 1), "info");
 });
 
 test("root adapter lore-stats command emits hidden immediate display without waiting for idle", async () => {
@@ -204,6 +234,7 @@ test("root adapter lore-settings command shows effective settings", async () => 
     },
     { projectDir: process.cwd() },
     { listAvailableToolNames: async () => [] },
+    fakeSettingsController(),
     () => {},
   );
 
@@ -217,7 +248,7 @@ test("root adapter lore-settings command shows effective settings", async () => 
 
   assert.equal(notices.length, 1);
   assert.equal(notices[0].type, "info");
-  assert.match(notices[0].message, /Effective tool\/recovery settings/);
+  assert.match(notices[0].message, /Effective settings/);
   assert.match(notices[0].message, /"recovery"/);
 });
 
@@ -237,6 +268,7 @@ test("root adapter lore-settings command writes project config patches", async (
     },
     { projectDir },
     { listAvailableToolNames: async () => [] },
+    fakeSettingsController(),
     () => {},
   );
 
@@ -256,11 +288,13 @@ test("root adapter lore-settings command writes project config patches", async (
   assert.match(notices[0].message, /Run \/reload to apply tool registration changes/);
 });
 
-test("root adapter lore-settings opens a two-item menu and tool checkboxes from Lore MCP", async () => {
+test("root adapter lore-settings opens project action, command, tools, and recovery entries", async () => {
   let command: { handler?: (args: unknown, ctx: unknown) => Promise<void> } | undefined;
   const projectDir = await mkdtemp(join(tmpdir(), "lore-settings-tools-"));
   let listedFromRuntime = false;
-  const menuOptionsSeen: string[][] = [];
+  let nativeSelectCalled = false;
+  const screens: string[][] = [];
+  let customCalls = 0;
   let activeTools = ["bash", "getDefinition", "runTestSuite"];
 
   __test.registerLoreSettingsCommand(
@@ -280,29 +314,46 @@ test("root adapter lore-settings opens a two-item menu and tool checkboxes from 
         return ["getDefinition", "runTestSuite"];
       },
     },
+    fakeSettingsController(),
     () => {},
   );
 
-  const selections = ["Tools", undefined];
   await command?.handler?.("", {
     ui: {
-      select: async (_title: string, options: string[]) => {
-        menuOptionsSeen.push(options);
-        return selections.shift();
-      },
+      select: async () => { nativeSelectCalled = true; return undefined; },
       custom: async <T>(factory: (...args: unknown[]) => unknown) =>
         new Promise<T | undefined>((resolve) => {
-          const component = factory(undefined, undefined, undefined, resolve) as { handleInput: (data: string) => void };
-          component.handleInput("\u001b[B");
-          component.handleInput(" ");
-          component.handleInput("\u001b");
+          customCalls += 1;
+          const component = factory(undefined, {
+            fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+            bold: (text: string) => `<bold>${text}</bold>`,
+          }, fakeKeybindings(), resolve) as { render: (width: number) => string[]; handleInput: (data: string) => void };
+          screens.push(component.render(80));
+          if (customCalls === 1) {
+            component.handleInput("down");
+            component.handleInput("down");
+            component.handleInput("enter");
+          } else if (customCalls === 2) {
+            component.handleInput("down");
+            component.handleInput(" ");
+            component.handleInput("escape");
+          } else component.handleInput("escape");
         }),
       notify() {},
     },
   });
 
   assert.equal(listedFromRuntime, true);
-  assert.deepEqual(menuOptionsSeen[0], ["Tools", "Recovery"]);
+  assert.equal(nativeSelectCalled, false);
+  assert.equal(customCalls, 3);
+  assert.equal(screens[0].some((line) => line.includes("<accent><bold>Lore settings</bold></accent>")), true);
+  assert.equal(screens[0].some((line) => line.includes("Disable Lore for this project")), true);
+  assert.equal(screens[0].some((line) => line.includes("Set command to run Lore")), true);
+  assert.equal(screens[1].some((line) => line.includes("<accent><bold>Lore tools</bold></accent>")), true);
+  assert.equal(screens[0][0].startsWith("<border>"), true);
+  assert.equal(screens[1][0].startsWith("<border>"), true);
+  assert.equal(screens[1].some((line) => line.includes("<accent>→ [X] getDefinition</accent>")), true);
+  assert.equal(screens[1].some((line) => line.includes("<dim> ↑↓ navigate")), true);
   assert.deepEqual(JSON.parse(readFileSync(join(projectDir, ".pi", "lore.config.json"), "utf8")), {
     tools: { disabled: ["runTestSuite"] },
   });
@@ -321,27 +372,171 @@ test("root adapter lore-settings recovery checkboxes disable test recovery", asy
     },
     { projectDir },
     { listAvailableToolNames: async () => [] },
+    fakeSettingsController(),
     () => {},
   );
 
-  const selections = ["Recovery", undefined];
+  let customCalls = 0;
   await command?.handler?.("", {
     ui: {
-      select: async () => selections.shift(),
+      select: async () => { throw new Error("native select should not be used when custom UI is available"); },
       custom: async <T>(factory: (...args: unknown[]) => unknown) =>
         new Promise<T | undefined>((resolve) => {
-          const component = factory(undefined, undefined, undefined, resolve) as { handleInput: (data: string) => void };
-          component.handleInput("\u001b[B");
-          component.handleInput("\n");
-          component.handleInput("\u001b");
+          customCalls += 1;
+          const component = factory(undefined, {
+            fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+            bold: (text: string) => `<bold>${text}</bold>`,
+          }, fakeKeybindings(), resolve) as { handleInput: (data: string) => void };
+          if (customCalls === 1) {
+            component.handleInput("down");
+            component.handleInput("down");
+            component.handleInput("down");
+            component.handleInput("enter");
+          } else if (customCalls === 2) {
+            component.handleInput("down");
+            component.handleInput("enter");
+            component.handleInput("escape");
+          } else component.handleInput("escape");
         }),
       notify() {},
     },
   });
+  assert.equal(customCalls, 3);
 
   assert.deepEqual(JSON.parse(readFileSync(join(projectDir, ".pi", "lore.config.json"), "utf8")), {
     recovery: { compilation: true, tests: false },
   });
+});
+
+
+
+test("root adapter lore-settings disables Lore from the root menu", async () => {
+  let command: { handler?: (args: unknown, ctx: unknown) => Promise<void> } | undefined;
+  const projectDir = await mkdtemp(join(tmpdir(), "lore-settings-project-"));
+  const enabledValues: boolean[] = [];
+  __test.registerLoreSettingsCommand(
+    {
+      registerCommand(_name, options) {
+        command = options as typeof command;
+      },
+    },
+    { projectDir },
+    { listAvailableToolNames: async () => [] },
+    fakeSettingsController({
+      async setProjectEnabled(enabled) {
+        enabledValues.push(enabled);
+      },
+    }),
+    () => {},
+  );
+
+  let customCalls = 0;
+  await command?.handler?.("", {
+    ui: {
+      custom: async <T>(factory: (...args: unknown[]) => unknown) =>
+        new Promise<T | undefined>((resolve) => {
+          customCalls += 1;
+          const component = factory(undefined, {
+            fg: (_role: string, text: string) => text,
+            bold: (text: string) => text,
+          }, fakeKeybindings(), resolve) as { handleInput: (data: string) => void };
+          if (customCalls === 1) component.handleInput("enter");
+          else component.handleInput("escape");
+        }),
+    },
+  });
+
+  assert.deepEqual(enabledValues, [false]);
+  assert.equal(customCalls, 2);
+});
+
+
+
+test("root adapter lore-settings enables Lore from the root menu", async () => {
+  let command: { handler?: (args: unknown, ctx: unknown) => Promise<void> } | undefined;
+  const projectDir = await mkdtemp(join(tmpdir(), "lore-settings-enable-"));
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  writeFileSync(join(projectDir, ".pi", "lore.config.json"), JSON.stringify({ enabled: false }), "utf8");
+  const enabledValues: boolean[] = [];
+  const screens: string[][] = [];
+  __test.registerLoreSettingsCommand(
+    {
+      registerCommand(_name, options) {
+        command = options as typeof command;
+      },
+    },
+    { projectDir },
+    { listAvailableToolNames: async () => [] },
+    fakeSettingsController({
+      async setProjectEnabled(enabled) {
+        enabledValues.push(enabled);
+      },
+    }),
+    () => {},
+  );
+
+  let customCalls = 0;
+  await command?.handler?.("", {
+    ui: {
+      custom: async <T>(factory: (...args: unknown[]) => unknown) =>
+        new Promise<T | undefined>((resolve) => {
+          customCalls += 1;
+          const component = factory(undefined, {
+            fg: (_role: string, text: string) => text,
+            bold: (text: string) => text,
+          }, fakeKeybindings(), resolve) as { render: (width: number) => string[]; handleInput: (data: string) => void };
+          screens.push(component.render(80));
+          if (customCalls === 1) component.handleInput("enter");
+          else component.handleInput("escape");
+        }),
+    },
+  });
+
+  assert.equal(screens[0].some((line) => line.includes("Enable Lore for this project")), true);
+  assert.deepEqual(enabledValues, [true]);
+  assert.equal(customCalls, 2);
+});
+
+test("root adapter lore-settings opens command configuration from the root menu", async () => {
+  let command: { handler?: (args: unknown, ctx: unknown) => Promise<void> } | undefined;
+  let commandConfigurations = 0;
+  __test.registerLoreSettingsCommand(
+    {
+      registerCommand(_name, options) {
+        command = options as typeof command;
+      },
+    },
+    { projectDir: process.cwd() },
+    { listAvailableToolNames: async () => [] },
+    fakeSettingsController({
+      async configureCommand() {
+        commandConfigurations += 1;
+        return "cancelled";
+      },
+    }),
+    () => {},
+  );
+
+  let customCalls = 0;
+  await command?.handler?.("", {
+    ui: {
+      custom: async <T>(factory: (...args: unknown[]) => unknown) =>
+        new Promise<T | undefined>((resolve) => {
+          customCalls += 1;
+          const component = factory(undefined, {
+            fg: (_role: string, text: string) => text,
+            bold: (text: string) => text,
+          }, fakeKeybindings(), resolve) as { handleInput: (data: string) => void };
+          if (customCalls === 1) {
+            component.handleInput("down");
+            component.handleInput("enter");
+          } else component.handleInput("escape");
+        }),
+    },
+  });
+
+  assert.equal(commandConfigurations, 1);
+  assert.equal(customCalls, 2);
 });
 
 test("root adapter lore-settings rejects unsupported config keys", () => {
@@ -364,6 +559,7 @@ test("root adapter lore-settings validates patches before writing", async () => 
     },
     { projectDir },
     { listAvailableToolNames: async () => [] },
+    fakeSettingsController(),
     () => {},
   );
 

@@ -11,9 +11,9 @@ import { stableStringify } from "./util.ts";
 
 export class LoreToolProxy {
   private readonly host: PiHost;
-  private readonly config: LoreConfig;
-  private readonly client: LoreClient;
-  private readonly knowledge: KnowledgeSynchronizer;
+  private config: LoreConfig;
+  private client: LoreClient;
+  private knowledge: KnowledgeSynchronizer;
   private readonly recovery: RecoveryManager;
   private readonly ui: LoreRecoveryUi;
 
@@ -31,6 +31,12 @@ export class LoreToolProxy {
     this.knowledge = input.knowledge;
     this.recovery = input.recovery;
     this.ui = input.ui;
+  }
+
+  replaceRuntime(input: { config: LoreConfig; client: LoreClient; knowledge: KnowledgeSynchronizer }): void {
+    this.config = input.config;
+    this.client = input.client;
+    this.knowledge = input.knowledge;
   }
 
   async registerAll(): Promise<McpTool[]> {

@@ -17,7 +17,7 @@ export type BinaryManagerOptions = {
   run?: CommandRunner;
   env?: NodeJS.ProcessEnv;
   download?: Downloader;
-  probe?: (projectDir: string) => Promise<ProbeResult>;
+  probe?: (projectDir: string, options?: { env?: NodeJS.ProcessEnv; timeoutMs?: number }) => Promise<ProbeResult>;
   timeoutMs?: number;
   downloadTimeoutMs?: number;
   onStatus?: (message: string) => void | Promise<void>;
@@ -25,22 +25,40 @@ export type BinaryManagerOptions = {
 
 export type Downloader = (url: string, destination: string, timeoutMs?: number) => Promise<void>;
 
-export async function resolveManagedLoreBinary(options: BinaryManagerOptions): Promise<string> {
+export type ManagedBinaryPlan =
+  | { kind: "ready"; path: string; provider: ProbeResult["provider"]; ghcVersion: string; target: BinaryTarget }
+  | { kind: "downloadRequired"; provider: ProbeResult["provider"]; ghcVersion: string; target: BinaryTarget; manifest: BinaryManifest; asset: BinaryAsset; destination: string }
+  | { kind: "unsupportedGhc"; provider: ProbeResult["provider"]; ghcVersion: string; target: BinaryTarget; loreVersion: string; supportedGhcVersions: string[] };
+
+export async function planManagedLoreBinary(options: BinaryManagerOptions): Promise<ManagedBinaryPlan> {
   await options.onStatus?.("Detecting project GHC version…");
-  const probe = options.probe ? await options.probe(options.projectDir) : await probeProjectGhcVersion({ projectDir: options.projectDir, run: options.run, env: options.env, timeoutMs: options.timeoutMs });
+  const probe = options.probe ? await options.probe(options.projectDir, { env: options.env, timeoutMs: options.timeoutMs }) : await probeProjectGhcVersion({ projectDir: options.projectDir, run: options.run, env: options.env, timeoutMs: options.timeoutMs });
   const manifest = options.manifest ?? loadBundledBinaryManifest();
   const target = options.target ?? currentBinaryTarget();
-  const asset = findManifestAsset(manifest, probe.ghcVersion, target);
-  const finalPath = binaryPath(options.cacheRoot ?? defaultCacheRoot(), manifest, asset, target);
-
-  if (await exists(finalPath)) {
-    if (await validateBinary(finalPath, manifest.loreVersion, probe.ghcVersion, target, options.run, options.env)) return finalPath;
-    await fs.rm(finalPath, { force: true });
+  const asset = manifest.assets.find((candidate) => candidate.ghcVersion === probe.ghcVersion && candidate.platform === target.platform && candidate.arch === target.arch && candidate.libc === target.libc);
+  if (!asset) {
+    const supportedGhcVersions = [...new Set(manifest.assets.filter((candidate) => candidate.platform === target.platform && candidate.arch === target.arch && candidate.libc === target.libc).map((candidate) => candidate.ghcVersion))].sort();
+    return { kind: "unsupportedGhc", provider: probe.provider, ghcVersion: probe.ghcVersion, target, loreVersion: manifest.loreVersion, supportedGhcVersions };
   }
+  // Keep manifest asset validation centralized in the manifest module.
+  findManifestAsset(manifest, probe.ghcVersion, target);
+  const destination = binaryPath(options.cacheRoot ?? defaultCacheRoot(), manifest, asset, target);
+  if (await exists(destination)) {
+    if (await validateLoreCommandForProject({ command: destination, expectedLoreVersion: manifest.loreVersion, expectedGhcVersion: probe.ghcVersion, expectedTarget: target, run: options.run, env: options.env }).then(() => true, () => false)) {
+      return { kind: "ready", path: destination, provider: probe.provider, ghcVersion: probe.ghcVersion, target };
+    }
+    await fs.rm(destination, { force: true });
+  }
+  return { kind: "downloadRequired", provider: probe.provider, ghcVersion: probe.ghcVersion, target, manifest, asset, destination };
+}
 
-  await options.onStatus?.(`Downloading Lore for GHC ${probe.ghcVersion}…`);
-  await downloadInstallValidate({ ...options, manifest, target, asset, finalPath, ghcVersion: probe.ghcVersion });
-  return finalPath;
+export async function installManagedLoreBinary(plan: Extract<ManagedBinaryPlan, { kind: "downloadRequired" }>, options: BinaryManagerOptions): Promise<string> {
+  await downloadInstallValidate({ ...options, manifest: plan.manifest, target: plan.target, asset: plan.asset, finalPath: plan.destination, ghcVersion: plan.ghcVersion });
+  return plan.destination;
+}
+
+export async function validateLoreCommandForProject(options: { command: string; cwd?: string; expectedLoreVersion: string; expectedGhcVersion: string; expectedTarget: BinaryTarget; run?: CommandRunner; env?: NodeJS.ProcessEnv }): Promise<void> {
+  await requireValidLoreCommand(options.command, options.expectedLoreVersion, options.expectedGhcVersion, options.expectedTarget, options.run, options.env, options.cwd);
 }
 
 export function defaultCacheRoot(): string {
@@ -73,7 +91,7 @@ async function downloadInstallValidate(options: InstallOptions): Promise<void> {
     }
     await pipeline(createReadStream(downloadPath), createGunzip(), createWriteStream(installPath, { mode: 0o755 }));
     await fs.chmod(installPath, 0o755);
-    await requireValidBinary(installPath, options.manifest.loreVersion, options.ghcVersion, options.target, options.run, options.env);
+    await requireValidLoreCommand(installPath, options.manifest.loreVersion, options.ghcVersion, options.target, options.run, options.env);
     try {
       await fs.link(installPath, options.finalPath);
     } catch (error) {
@@ -81,7 +99,7 @@ async function downloadInstallValidate(options: InstallOptions): Promise<void> {
     } finally {
       await fs.rm(installPath, { force: true });
     }
-    await requireValidBinary(options.finalPath, options.manifest.loreVersion, options.ghcVersion, options.target, options.run, options.env);
+    await requireValidLoreCommand(options.finalPath, options.manifest.loreVersion, options.ghcVersion, options.target, options.run, options.env);
   } finally {
     await fs.rm(downloadPath, { force: true }).catch(() => undefined);
     await fs.rm(installPath, { force: true }).catch(() => undefined);
@@ -103,21 +121,17 @@ async function downloadFile(url: string, destination: string, timeoutMs = 120_00
   }
 }
 
-async function validateBinary(path: string, loreVersion: string, ghcVersion: string, target: BinaryTarget, run?: CommandRunner, env?: NodeJS.ProcessEnv): Promise<boolean> {
-  try {
-    await requireValidBinary(path, loreVersion, ghcVersion, target, run, env);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function requireValidBinary(path: string, loreVersion: string, ghcVersion: string, target: BinaryTarget, run?: CommandRunner, env?: NodeJS.ProcessEnv): Promise<void> {
+async function requireValidLoreCommand(command: string, loreVersion: string, ghcVersion: string, target: BinaryTarget, run?: CommandRunner, env?: NodeJS.ProcessEnv, cwd = dirname(command)): Promise<void> {
   const runner = run ?? runCommand;
-  const result = await runner(path, ["--version-json"], { cwd: dirname(path), timeoutMs: 10_000, env });
-  if (result.exitCode !== 0) throw new Error(`Lore binary metadata validation failed with exit code ${result.exitCode}:\n${result.stderr}\n${result.stdout}`);
+  let result;
+  try {
+    result = await runner(command, ["--version-json"], { cwd, timeoutMs: 10_000, env });
+  } catch (error) {
+    throw new Error(`Could not run Lore command \`${command}\`: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (result.exitCode !== 0) throw new Error(`Lore command metadata validation failed with exit code ${result.exitCode}:\n${result.stderr}\n${result.stdout}`);
   let parsed: unknown;
-  try { parsed = JSON.parse(result.stdout); } catch (error) { throw new Error(`Lore binary emitted invalid --version-json output: ${error instanceof Error ? error.message : String(error)}`); }
+  try { parsed = JSON.parse(result.stdout); } catch (error) { throw new Error(`Lore command emitted invalid --version-json output: ${error instanceof Error ? error.message : String(error)}`); }
   const obj = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
   const expectedTarget = targetString(target);
   if (obj.loreVersion !== loreVersion) throw new Error(`Lore binary version mismatch. Expected ${loreVersion}, got ${String(obj.loreVersion)}`);

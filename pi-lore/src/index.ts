@@ -1,6 +1,5 @@
-import { resolve } from "node:path";
-import { resolveManagedLoreBinary } from "./binary-manager.ts";
 import { loadLoreConfig } from "./config.ts";
+import { showLoreExtensionStatus } from "./extension-status.ts";
 import { KnowledgeSynchronizer } from "./knowledge.ts";
 import { LoreClient } from "./mcp-client.ts";
 import { RecoveryManager } from "./recovery.ts";
@@ -10,17 +9,8 @@ import type { ExtensionRuntime, LoreConfig, LoreProcessConfig, PiEntry, PiHost }
 import { LoreRecoveryUi } from "./ui.ts";
 import { analyzeLoreUsage } from "./usage-stats.ts";
 
-type ManagedResolver = (input: { projectDir: string; env: NodeJS.ProcessEnv; timeoutMs: number; onStatus?: (message: string) => void | Promise<void> }) => Promise<string>;
-let managedResolver: ManagedResolver = ({ projectDir, env, timeoutMs, onStatus }) => resolveManagedLoreBinary({ projectDir, env, timeoutMs, onStatus });
-
-export function setManagedLoreBinaryResolverForTests(resolver: ManagedResolver): () => void {
-  const previous = managedResolver;
-  managedResolver = resolver;
-  return () => { managedResolver = previous; };
-}
-
 export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionRuntime> {
-  const config = loadLoreConfig(host);
+  let config = loadLoreConfig(host);
   const store = new SessionStateStore(host);
   const ui = new LoreRecoveryUi(host);
   let client: LoreClient | undefined;
@@ -39,24 +29,38 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
   let startupReady = false;
   let loadedBranchKey: string | undefined;
   let branchLoadPromise: Promise<void> | undefined;
+  let runtimeGeneration = 0;
 
   async function resolveProcessConfig(): Promise<LoreProcessConfig> {
     if (processConfig) return processConfig;
-    if (config.command !== undefined) {
-      processConfig = { ...config, command: config.command };
-      return processConfig;
+    if (config.command === undefined) {
+      throw new Error("Lore process configuration is unresolved; use startResolved with an explicit lore-mcp command");
     }
-    const env = { ...process.env, ...config.env };
-    const startupCwd = config.cwd ?? resolve(String(host.projectDir ?? host.cwd ?? process.cwd()));
-    const projectDir = env.LORE_PROJECT_ROOT ? resolve(startupCwd, env.LORE_PROJECT_ROOT) : startupCwd;
-    const command = await managedResolver({
-      projectDir,
-      env,
-      timeoutMs: config.startupTimeoutMs,
-      onStatus: (message) => host.setStatus?.("lore-extension", message, { tone: "info" }),
-    });
-    processConfig = { ...config, command };
+    processConfig = { ...config, command: config.command };
     return processConfig;
+  }
+
+  function invalidateRuntimeState(): void {
+    runtimeGeneration += 1;
+    startupReady = false;
+    loadedBranchKey = undefined;
+    branchLoadPromise = undefined;
+  }
+
+  async function startResolved(resolved: LoreProcessConfig): Promise<{ ok: true; registeredToolNames: string[] } | { ok: false; error: Error }> {
+    invalidateRuntimeState();
+    await client?.stop().catch(() => undefined);
+    config = resolved;
+    processConfig = resolved;
+    client = undefined;
+    knowledge = undefined;
+    try {
+      await start();
+      if (startupError) return { ok: false, error: new Error(startupError) };
+      return { ok: true, registeredToolNames: [...registeredToolNames] };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error : new Error(String(error)) };
+    }
   }
 
   async function ensureRuntime(): Promise<{ client: LoreClient; knowledge: KnowledgeSynchronizer; recovery: RecoveryManager; proxy: LoreToolProxy; processConfig: LoreProcessConfig }> {
@@ -64,14 +68,17 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
     if (client && knowledge && proxy) return { client, knowledge, recovery, proxy, processConfig: resolved };
     client = new LoreClient(resolved);
     knowledge = new KnowledgeSynchronizer(client, store, () => host.getCurrentEntryId?.());
-    proxy = new LoreToolProxy({ host, config, client, knowledge, recovery, ui });
+    if (proxy) proxy.replaceRuntime({ config, client, knowledge });
+    else proxy = new LoreToolProxy({ host, config, client, knowledge, recovery, ui });
     return { client, knowledge, recovery, proxy, processConfig: resolved };
   }
 
   async function restoreBranchState(): Promise<void> {
+    const generation = runtimeGeneration;
     if (!knowledge) return;
     await knowledge.restoreActiveBranch();
     await recovery.restoreUi();
+    if (generation !== runtimeGeneration) return;
     loadedBranchKey = currentBranchKey();
   }
 
@@ -80,7 +87,10 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
     const key = currentBranchKey();
     if (loadedBranchKey === key) return;
     if (!branchLoadPromise) {
-      branchLoadPromise = restoreBranchState().finally(() => { branchLoadPromise = undefined; });
+      const pending = restoreBranchState().finally(() => {
+        if (branchLoadPromise === pending) branchLoadPromise = undefined;
+      });
+      branchLoadPromise = pending;
     }
     await branchLoadPromise;
   }
@@ -90,39 +100,48 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
     try {
       const runtime = await ensureRuntime();
       resolved = runtime.processConfig;
-      await host.setStatus?.("lore-extension", "Starting Lore…", { tone: "info" });
+      await showLoreExtensionStatus(host, "starting");
       await runtime.client.start();
-      const tools = await runtime.proxy.registerAll();
-      registeredToolNames = tools.map((tool) => tool.name).filter((name) => !name.startsWith("lore/"));
+      if (registeredToolNames.length === 0) {
+        const tools = await runtime.proxy.registerAll();
+        registeredToolNames = tools.map((tool) => tool.name).filter((name) => !name.startsWith("lore/"));
+      }
       startupError = undefined;
       startupReady = true;
-      await host.clearStatus?.("lore-extension");
+      await showLoreExtensionStatus(host, "active");
       await host.onLoreToolsRegistered?.(registeredToolNames);
     } catch (error) {
-      registeredToolNames = [];
+      if (registeredToolNames.length === 0) registeredToolNames = [];
       await client?.stop();
       const message = formatStartupError(resolved ?? processConfig ?? config, error);
       startupError = message;
       startupReady = false;
-      await host.setStatus?.("lore-extension", `Lore extension unavailable: ${message}`, { tone: "error" });
-      await host.notify?.(`Lore extension unavailable: ${message}`, { tone: "error" });
+      await showLoreExtensionStatus(host, "unavailable");
     }
   }
 
   async function stop(): Promise<void> {
+    invalidateRuntimeState();
     await client?.stop();
   }
 
   async function restartLore(): Promise<void> {
-    if (!client) {
-      await start();
-      if (startupError) throw new Error(startupError);
-      return;
+    await showLoreExtensionStatus(host, "starting");
+    try {
+      if (!client) {
+        await start();
+        if (startupError) throw new Error(startupError);
+        return;
+      }
+      await client.restart();
+      startupReady = true;
+      startupError = undefined;
+      await restoreBranchState();
+      await showLoreExtensionStatus(host, "active");
+    } catch (error) {
+      await showLoreExtensionStatus(host, "unavailable");
+      throw error;
     }
-    await client.restart();
-    startupReady = true;
-    startupError = undefined;
-    await restoreBranchState();
   }
 
   function runSafely(action: () => Promise<void>): void {
@@ -148,6 +167,7 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
 
   return {
     start,
+    startResolved,
     stop,
     restartLore,
     async listAvailableToolNames() {

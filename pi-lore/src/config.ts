@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { LoreConfig, PiHost } from "./types.ts";
+import { readProjectLoreConfig } from "./project-config.ts";
 import { extensionDataDir } from "./util.ts";
 
 type RawLoreConfig = Partial<{
@@ -17,6 +17,7 @@ type RawLoreConfig = Partial<{
   stateDir: unknown;
   tools: unknown;
   recovery: unknown;
+  enabled: unknown;
 }>;
 
 const defaults = {
@@ -41,12 +42,18 @@ const defaults = {
     compilation: true,
     tests: true,
   },
+  enabled: true,
 };
+
+export function effectiveLoreProjectDir(config: LoreConfig, host: PiHost = {}): string {
+  const startupCwd = config.cwd ?? resolve(String(host.projectDir ?? host.cwd ?? process.cwd()));
+  return config.env.LORE_PROJECT_ROOT ? resolve(startupCwd, config.env.LORE_PROJECT_ROOT) : startupCwd;
+}
 
 export function loadLoreConfig(host: PiHost = {}): LoreConfig {
   const projectDir = resolve(String(host.projectDir ?? host.cwd ?? process.cwd()));
   const hostConfig = normalizeHostConfig(host.getConfig?.("lore") ?? host.getConfig?.());
-  const projectConfig = host.projectTrusted === false ? {} : readProjectConfig(projectDir);
+  const projectConfig = host.projectTrusted === false ? {} : readProjectLoreConfig(projectDir);
   const merged = deepMerge(defaults, deepMerge(projectConfig, hostConfig));
 
   const command = merged.command === undefined ? undefined : requireString(merged.command, "command");
@@ -60,6 +67,7 @@ export function loadLoreConfig(host: PiHost = {}): LoreConfig {
   const allowToolOverride = requireBoolean(merged.allowToolOverride, "allowToolOverride");
   const tools = requireToolsConfig(merged.tools, "tools");
   const recovery = requireRecoveryConfig(merged.recovery, "recovery");
+  const enabled = requireBoolean(merged.enabled, "enabled");
   const cwd = merged.cwd === undefined ? projectDir : resolve(projectDir, requireString(merged.cwd, "cwd"));
   const stateDir =
     merged.stateDir === undefined
@@ -80,6 +88,7 @@ export function loadLoreConfig(host: PiHost = {}): LoreConfig {
     stateDir,
     tools,
     recovery,
+    enabled,
   };
 }
 
@@ -92,22 +101,6 @@ function normalizeHostConfig(value: unknown): RawLoreConfig {
     return obj.lore as RawLoreConfig;
   }
   return obj as RawLoreConfig;
-}
-
-function readProjectConfig(projectDir: string): RawLoreConfig {
-  for (const relative of [".pi/lore.config.json", ".pi/extensions/lore/config.json"]) {
-    const path = join(projectDir, relative);
-    if (!existsSync(path)) {
-      continue;
-    }
-    try {
-      return JSON.parse(readFileSync(path, "utf8")) as RawLoreConfig;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Invalid Lore extension configuration at ${path}: ${message}`);
-    }
-  }
-  return {};
 }
 
 function deepMerge(left: unknown, right: unknown): Record<string, unknown> {

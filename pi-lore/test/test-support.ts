@@ -142,3 +142,20 @@ export class FakePiHost implements PiHost {
     return this.summaryFromMessages;
   }
 }
+
+export function fakeKeybindings(extra: Record<string, string[]> = {}): { matches: (data: string, keybinding: string) => boolean } {
+  const bindings: Record<string, string[]> = {
+    "tui.select.up": ["up"],
+    "tui.select.down": ["down"],
+    "tui.select.confirm": ["enter"],
+    "tui.select.cancel": ["escape", "ctrl+c"],
+    "tui.input.submit": ["enter"],
+    "tui.editor.deleteCharBackward": ["backspace"],
+    ...extra,
+  };
+  return {
+    matches(data, keybinding) {
+      return (bindings[keybinding] ?? []).includes(data);
+    },
+  };
+}
