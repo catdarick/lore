@@ -16,7 +16,7 @@ discoverProjectTool =
   SomeToolWithoutArgs
     ToolWithoutArgs
       { name = "discoverProject",
-        description = Just "Scans the workspace for Haskell package manifests (package.yaml or .cabal) to determine project structure. Useful for identifying available packages and their respective components (libraries, targets, executables).",
+        description = Just "Inspect the workspace manifests and return the discovered Haskell packages and their components, including libraries, executables, tests, and benchmarks. Use this to learn package and component names before filtering tests or exploring an unfamiliar workspace. It inspects project configuration and does not require the home modules to compile.",
         handler = discoverProjectHandler
       }
 

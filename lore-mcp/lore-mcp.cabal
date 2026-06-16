@@ -39,9 +39,9 @@ library
       Lore.Mcp.Tools.Feedback
       Lore.Mcp.Tools.FindDeadCode
       Lore.Mcp.Tools.FindReferences
-      Lore.Mcp.Tools.GetDefinition.Cached
-      Lore.Mcp.Tools.GetDefinition.Regular
-      Lore.Mcp.Tools.GetDefinition.Shared
+      Lore.Mcp.Tools.GetDefinitions.Cached
+      Lore.Mcp.Tools.GetDefinitions.Regular
+      Lore.Mcp.Tools.GetDefinitions.Shared
       Lore.Mcp.Tools.GetTypeOfExpression
       Lore.Mcp.Tools.ListExportedSymbols
       Lore.Mcp.Tools.LookupInstances

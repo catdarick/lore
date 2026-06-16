@@ -9,7 +9,7 @@ import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
-import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), Maximum, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.LookupSymbolInfo
   ( LookupSymbolInfoOptions (..),
@@ -30,7 +30,9 @@ data LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
     skip ::
       Maybe (Field fieldType Int)
         `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
-                      Example 5
+                      Example 5,
+                      Minimum 0,
+                      Maximum 9999
                     ]
   }
   deriving stock (Generic)
@@ -46,10 +48,7 @@ lookupSymbolInfoTool =
       { name = "lookupSymbolInfo",
         description =
           Just
-            "Look up metadata and information for a Haskell symbol in the current session. \
-            \Supports module-qualified queries and semantic fuzzy matching. \
-            \Note on scope: Unexported top-level symbols are available for home modules. For package modules, exported symbols remain visible even if a home-module load fails (provided a load was attempted). \
-            \During partial loads, 'No symbols found' only means the symbol isn't in the loaded session; it does not prove it is absent from the source.",
+            "Resolve a known Haskell symbol name and return its interface metadata, including type or declaration information, constructors, instances, defining location, and export locations where available. Use an unqualified name when the module is unknown; add module qualification only to resolve a known ambiguity. Use getDefinition instead when the implementation source is required. During a partial load, an unresolved result means only that the symbol is not present in the current session index.",
         handler = lookupSymbolInfoHandler
       }
 

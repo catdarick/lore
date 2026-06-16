@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveAnyClass #-}
 
-module Lore.Mcp.Tools.GetDefinition.Shared
+module Lore.Mcp.Tools.GetDefinitions.Shared
   ( DefinitionExpansion (..),
     GetDefinitionArgs (..),
     GetDefinitionResult,
@@ -24,7 +24,7 @@ import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), MinItems, WithMeta)
+import Lore.Mcp.Internal.Annotated (Description, Example, ExampleList, Field, FieldType (..), Maximum, MinItems, Minimum, WithMeta)
 import Lore.Tools.GetDefinition
   ( BuildDefinitionsStrategy,
     FilteredDefinitions (..),
@@ -69,13 +69,15 @@ data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
                       MinItems 1
                     ],
     skip ::
-      Maybe (Field fieldType Int)
+      Field fieldType (Maybe Int)
         `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
-                      Example 30
+                      Example 30,
+                      Minimum 0,
+                      Maximum 9999
                     ],
     expansion ::
-      Field fieldType (Maybe DefinitionExpansion)
-        `WithMeta` '[ Description "How much related definitions to return. Use \"None\" to return only the requested symbol's definitions. Use \"Direct\" to also include definitions of symbols referenced directly by the requested definitions (maxDepth=1). Use \"Recursive\" to include direct dependencies and their dependencies (maxDepth=2, maxSymbols=30)."
+      Maybe (Field fieldType DefinitionExpansion)
+        `WithMeta` '[ Description "How much related definitions to return. Use \"None\" to return only the requested symbol's definitions. Use \"Direct\" to also include definitions of symbols referenced directly by the requested definitions. Use \"Recursive\" to include direct dependencies and their dependencies."
                     ]
   }
   deriving stock (Generic)

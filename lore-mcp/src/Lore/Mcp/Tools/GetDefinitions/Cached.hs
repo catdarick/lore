@@ -1,5 +1,5 @@
-module Lore.Mcp.Tools.GetDefinition.Cached
-  ( cachedGetDefinitionTool,
+module Lore.Mcp.Tools.GetDefinitions.Cached
+  ( cachedGetDefinitionsTool,
   )
 where
 
@@ -16,7 +16,7 @@ import Lore (DeclarationSpans (..), DefinitionId (..), DefinitionSource (..), Mo
 import Lore.Mcp.Internal.Annotated (FieldType (..))
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Mcp.Monad (MonadLoreMcp (..), sentDefinitionHashes)
-import Lore.Mcp.Tools.GetDefinition.Shared
+import Lore.Mcp.Tools.GetDefinitions.Shared
   ( BuildDefinitionsStrategy,
     GetDefinitionArgs,
     GetDefinitionResult,
@@ -39,12 +39,12 @@ import Lore.Tools.Render.Source (declarationBodyText)
 import Lore.Tools.Result (PageRequest (..), Paginated (..), ResultLimit (..))
 import Text.Printf (printf)
 
-cachedGetDefinitionTool :: (MonadLoreMcp m) => Bool -> SomeTool m
-cachedGetDefinitionTool shouldRenderNotifyKnowledgeResetHint =
+cachedGetDefinitionsTool :: (MonadLoreMcp m) => Bool -> SomeTool m
+cachedGetDefinitionsTool shouldRenderNotifyKnowledgeResetHint =
   SomeToolWithArgs
     ToolWithArgs
-      { name = "getDefinition",
-        description = Just "Return source definitions for one or more exported symbols, when source code is available. To reduce duplicate output, definitions that were already returned earlier in this session are omitted if they have not changed.",
+      { name = "getDefinitions",
+        description = Just "Return source definitions for one or more symbols defined in loaded home modules. Use this when implementation logic is needed; it also includes signatures, so a preceding lookupSymbolInfo call is unnecessary. External package symbols may be resolvable by other tools, but source definitions are returned only when project source is available. Unchanged definitions previously returned in this session may be omitted to avoid duplicate context.",
         handler = cachedGetDefinitionHandler shouldRenderNotifyKnowledgeResetHint
       }
 

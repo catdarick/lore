@@ -4,7 +4,7 @@ import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import GHC.Generics (Generic)
 import Lore (HomeModulesLoadSummary (..), LoadHomeModulesResult (..), MonadLore, projectEnvironmentFailureMessage)
-import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), Maximum, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
 import Lore.Tools.ReloadHomeModules
@@ -17,8 +17,10 @@ import Lore.Tools.Result (PageRequest (..), RenderedResult (..), ResultLimit (..
 
 data ReloadHomeModulesArgs (fieldType :: FieldType) = ReloadHomeModulesArgs
   { skip ::
-      Maybe (Field fieldType Int)
+      Field fieldType (Maybe Int)
         `WithMeta` '[ Description "Used for pagination. Number of initial diagnostics to skip. Use it only if you need more context to fix the initial errors.",
+                      Minimum 0,
+                      Maximum 9999,
                       Example 5
                     ]
   }
@@ -33,7 +35,7 @@ reloadHomeModulesTool =
   SomeToolWithArgsStructured
     ToolWithArgs
       { name = "reloadHomeModules",
-        description = Just "Reloads all home modules, checks for errors, and applies safe auto-fixes when possible. This reload resets interpreter state (interactive bindings are cleared). Run this before tools that need up-to-date module information.",
+        description = Just "Reload all project home modules into the current GHC session, refresh symbol and definition indexes, and return compilation diagnostics. The operation may automatically remove redundant imports. It resets interpreter bindings, so values previously introduced interactively are cleared. Use it after source changes and before interpreter or index-dependent operations when the session may be stale.",
         handler = reloadHomeModulesHandler
       }
     reloadHomeModulesStructured

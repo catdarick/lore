@@ -38,8 +38,8 @@ import Lore.Mcp.Tools.ExecuteCode (executeCodeTool)
 import Lore.Mcp.Tools.Feedback (feedbackTool)
 import Lore.Mcp.Tools.FindDeadCode (findDeadCodeTool)
 import Lore.Mcp.Tools.FindReferences (findReferencesTool)
-import Lore.Mcp.Tools.GetDefinition.Cached (cachedGetDefinitionTool)
-import Lore.Mcp.Tools.GetDefinition.Regular (regularGetDefinitionTool)
+import Lore.Mcp.Tools.GetDefinitions.Cached (cachedGetDefinitionsTool)
+import Lore.Mcp.Tools.GetDefinitions.Regular (regularGetDefinitionTool)
 import Lore.Mcp.Tools.GetTypeOfExpression (getTypeOfExpressionTool)
 import Lore.Mcp.Tools.ListExportedSymbols (listExportedSymbolsTool)
 import Lore.Mcp.Tools.LookupInstances (lookupInstancesTool)
@@ -121,7 +121,7 @@ runLoreMcpServer = do
               else []
           getDefinitionTool =
             if definitionKnowledgeCacheEnabled
-              then cachedGetDefinitionTool notifyKnowledgeResetToolEnabled
+              then cachedGetDefinitionsTool notifyKnowledgeResetToolEnabled
               else regularGetDefinitionTool
           customCommandTools =
             map customCommandTool customCommandToolConfigs

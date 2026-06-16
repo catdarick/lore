@@ -38,7 +38,7 @@ getTypeOfExpressionTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "getTypeOfExpression",
-        description = Just "Infer the type of a Haskell expression in the current project interpreter context. Run reloadHomeModules first.",
+        description = Just "Typecheck a Haskell expression in the current project interpreter context and return its inferred type without evaluating it. The input must be an expression, not a declaration, statement, or import. Reload home modules first when project source or interpreter context has changed.",
         handler = getTypeOfExpressionHandler
       }
 

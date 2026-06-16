@@ -21,7 +21,7 @@ import Lore.Mcp.Protocol.Server
     handleMcpRequest,
     initialMcpServerState,
   )
-import Lore.Mcp.Tools.GetDefinition.Cached (cachedGetDefinitionTool)
+import Lore.Mcp.Tools.GetDefinitions.Cached (cachedGetDefinitionsTool)
 import Lore.Mcp.Tools.NotifyKnowledgeReset (notifyKnowledgeResetTool)
 import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
 import McpTestSupport (callToolWithArgs, callToolWithoutArgs, fixtureLoreMcpWithCache, loadFixtureHomeModules)
@@ -175,25 +175,25 @@ spec =
         fixtureLoreMcpWithCache True do
           loadFixtureHomeModules
 
-          _ <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"])
+          _ <- callToolWithArgs (cachedGetDefinitionsTool True) (getDefinitionArgs ["lookupOrZero"])
           stateAfterA <- requireRight =<< getCachedDefinitions Nothing
 
-          _ <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"])
+          _ <- callToolWithArgs (cachedGetDefinitionsTool True) (getDefinitionArgs ["lookupOrOne"])
           stateAfterAB <- requireRight =<< getCachedDefinitions Nothing
 
           _ <- requireRight =<< setCachedDefinitions stateAfterA.hashes
-          _ <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupWithWhere"])
+          _ <- callToolWithArgs (cachedGetDefinitionsTool True) (getDefinitionArgs ["lookupWithWhere"])
           stateAfterAC <- requireRight =<< getCachedDefinitions Nothing
 
           _ <- requireRight =<< setCachedDefinitions stateAfterAB.hashes
-          fromABA <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"])
-          fromABB <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"])
-          fromABC <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupWithWhere"])
+          fromABA <- callToolWithArgs (cachedGetDefinitionsTool True) (getDefinitionArgs ["lookupOrZero"])
+          fromABB <- callToolWithArgs (cachedGetDefinitionsTool True) (getDefinitionArgs ["lookupOrOne"])
+          fromABC <- callToolWithArgs (cachedGetDefinitionsTool True) (getDefinitionArgs ["lookupWithWhere"])
 
           _ <- requireRight =<< setCachedDefinitions stateAfterAC.hashes
-          fromACA <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrZero"])
-          fromACC <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupWithWhere"])
-          fromACB <- callToolWithArgs (cachedGetDefinitionTool True) (getDefinitionArgs ["lookupOrOne"])
+          fromACA <- callToolWithArgs (cachedGetDefinitionsTool True) (getDefinitionArgs ["lookupOrZero"])
+          fromACC <- callToolWithArgs (cachedGetDefinitionsTool True) (getDefinitionArgs ["lookupWithWhere"])
+          fromACB <- callToolWithArgs (cachedGetDefinitionsTool True) (getDefinitionArgs ["lookupOrOne"])
 
           pure (fromABA, fromABB, fromABC, fromACA, fromACC, fromACB)
 

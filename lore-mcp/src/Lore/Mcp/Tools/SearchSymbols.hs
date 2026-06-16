@@ -25,7 +25,7 @@ data SearchSymbolsArgs (fieldType :: FieldType) = SearchSymbolsArgs
                         "A short, approximate symbol name — think 'what would this function or type be called?' rather than describing your problem in prose. \
                         \For functions: use action-oriented phrases matching how a developer would name them (e.g. 'savePaymentIntent', 'loadUserProfile'). \
                         \For types and classes: use noun phrases (e.g. 'SessionConfig', 'PaymentMethod'). \
-                        \Keep queries concise (2–6 words); long sentences perform poorly because matching is against symbol names, not free text. \
+                        \Keep queries concise (2-6 words); long sentences perform poorly because matching is against symbol names, not free text. \
                         \Queries are matched against symbol names, module paths, and type signatures — not against implementations, literals, or documentation. \
                         \Note on ranking: Capitalization guides the results — Uppercase queries bias toward types/classes/constructors; lowercase queries bias toward functions/values."
                     ],
@@ -49,10 +49,10 @@ searchSymbolsTool =
         description =
           Just
             "Fuzzy search for Haskell symbols (functions, types, classes, record selectors etc.) in the current session. \
-            \Use this ONLY when the symbol name is unknown and needs to be discovered via natural-language or approximate queries. \
-            \If you already know the symbol name — even without a module qualifier — use lookupSymbolInfo or getDefinition directly instead; \
+            \Use this ONLY when the symbol name is unknown and needs to be discovered, for example when you are looking for an entry point into some business logic. \
+            \When the symbol name is already known, use lookupSymbolInfo for metadata or getDefinition for source directly if you need it, even if the symbol's module name is unknown; \
             \Important: search is performed based on symbol names, module paths, and type signatures — not on implementations, string literals, or documentation bodies. \
-            \To search for string literals or patterns inside source files, use rg or grep instead.",
+            \To search for string literals or patterns inside source files, use a different tool such as rg instead.",
         handler = searchSymbolsHandler
       }
 

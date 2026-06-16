@@ -8,7 +8,7 @@ import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
-import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Annotated (Description, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.ExecuteCode
   ( ExecuteCodeOptions (..),
@@ -23,10 +23,7 @@ import Lore.Tools.Result
 newtype ExecuteCodeArgs (fieldType :: FieldType) = ExecuteCodeArgs
   { code ::
       Field fieldType Text
-        `WithMeta` '[ Description "The Haskell expression or quick IO action to evaluate. Must be a single line. The result type must be either IO or a pure value with a Show instance.",
-                      Example "print (1 + 2)",
-                      Example "let add a b = a + b in add 5 10",
-                      Example "5 * 10"
+        `WithMeta` '[ Description "The Haskell expression or quick IO action to evaluate. Must be a single line. The result type must be either IO or a pure value with a Show instance. Examples: \"print (1 + 2)\", \"let add a b = a + b in add 5 10\", \"5 * 10\"."
                     ]
   }
   deriving stock (Generic)
@@ -40,7 +37,7 @@ executeCodeTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "executeCode",
-        description = Just "Execute a one-line Haskell expression in the interpreter context. If you need multiple lines, local helpers, or complex logic, you MUST use `createTemporalModule` FIRST to define them, reload, and then call them via this tool. Normal evaluation rules apply (ambiguity, type-defaulting, shadowing). Import declarations are not supported; use fully qualified names. Returns the stdout output and the Show rendering of the result.",
+        description = Just "Execute a one-line Haskell expression in the interpreter context. If you need multiple lines, local helpers, or complex logic, you must use `createTemporalModule` first to define them, reload, and then call them via this tool. Import declarations are not supported; use fully qualified names. Returns the stdout output and the Show rendering of the result.",
         handler = executeCodeHandler
       }
 

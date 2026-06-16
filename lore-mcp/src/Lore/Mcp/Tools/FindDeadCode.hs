@@ -14,6 +14,8 @@ import Lore.Mcp.Internal.Annotated
     ExampleList,
     Field,
     FieldType (..),
+    Maximum,
+    Minimum,
     WithMeta,
   )
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
@@ -35,7 +37,9 @@ data FindDeadCodeArgs (fieldType :: FieldType) = FindDeadCodeArgs
     skip ::
       Maybe (Field fieldType Int)
         `WithMeta` '[ Description "Used for pagination. Number of initial dead definitions to skip.",
-                      Example 25
+                      Example 25,
+                      Minimum 0,
+                      Maximum 9999
                     ]
   }
   deriving stock (Generic)
@@ -49,7 +53,7 @@ findDeadCodeTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "findDeadCode",
-        description = Just "Find top-level dead declarations using project-wide reachability over cached definition indexes.",
+        description = Just "Find loaded home-module top-level declarations that are unreachable from the configured project roots or executables `main`s. Alive modules/symbols can be configured in lore.yaml;",
         handler = findDeadCodeHandler
       }
 

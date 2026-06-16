@@ -10,7 +10,6 @@ import GHC.Generics (Generic)
 import Lore (MonadLore)
 import Lore.Mcp.Internal.Annotated
   ( Description,
-    Example,
     Field,
     FieldType (..),
     WithMeta,
@@ -25,10 +24,7 @@ import Lore.Tools.ResolveInstance
 data ResolveInstanceArgs (fieldType :: FieldType) = ResolveInstanceArgs
   { query ::
       Field fieldType Text
-        `WithMeta` '[ Description "Class application to resolve.",
-                      Example "Render (Maybe Foo)",
-                      Example "Show Bar",
-                      Example "TwoTypeClass TypeOne TypeTwo"
+        `WithMeta` '[ Description "Class application to resolve. Examples: \"Render (Maybe Foo)\", \"Show Bar\", \"TwoTypeClass TypeOne TypeTwo\"."
                     ]
   }
   deriving stock (Generic)
@@ -42,7 +38,7 @@ resolveInstanceTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "resolveInstance",
-        description = Just "Resolve the class instance. When source is available, the tool renders the selected instance definition; otherwise it returns the selected instance head and defining module.",
+        description = Just "Resolve the specific typeclass instance selected by GHC for a concrete class application, such as Render (Maybe Foo). Use this when you need to know which instance dictionary applies to a particular type. When project source is available, the selected instance declaration is rendered; otherwise the instance head and defining module are returned. Use lookupInstances instead to search broadly for indexed instance declarations mentioning several names.",
         handler = resolveInstanceHandler
       }
 

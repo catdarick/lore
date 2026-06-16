@@ -9,7 +9,7 @@ import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
-import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), Maximum, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import Lore.Tools.ListExportedSymbols
   ( ListExportedSymbolsOptions (..),
@@ -44,7 +44,9 @@ data ListExportedSymbolsArgs (fieldType :: FieldType) = ListExportedSymbolsArgs
     skip ::
       Maybe (Field fieldType Int)
         `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
-                      Example 5
+                      Example 5,
+                      Minimum 0,
+                      Maximum 9999
                     ]
   }
   deriving stock (Generic)
@@ -58,7 +60,7 @@ listExportedSymbolsTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "listExportedSymbols",
-        description = Just "List exported symbols for a module visible in the currently loaded session state. Includes direct exports and re-exports. Optionally use typeHint to keep only exports whose own type/signature structure directly mentions the requested occ-name.",
+        description = Just "List the exported symbols of a module in the current loaded session, including both direct exports and re-exports. Use this to inspect a module’s public API without reading its implementation. Optionally provide `typeHint` to include only symbols whose own type signature directly mentions the specified type or class occurrence name. Use `packageName` only to disambiguate modules with the same name from different packages.",
         handler = listExportedSymbolsHandler
       }
 

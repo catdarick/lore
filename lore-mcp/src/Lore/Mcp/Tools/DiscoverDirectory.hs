@@ -7,7 +7,7 @@ import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
-import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), Maximum, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
 import Lore.Tools.DiscoverDirectory
   ( DiscoverDirectoryOptions (..),
@@ -22,16 +22,13 @@ data DiscoverDirectoryArgs (fieldType :: FieldType) = DiscoverDirectoryArgs
   { path ::
       Field fieldType FilePath
         `WithMeta` '[ Description "Path of directory to discover, relative to the project root.",
-                      Example ".",
-                      Example "src",
                       Example "src/features"
                     ],
     depth ::
       Maybe (Field fieldType Int)
         `WithMeta` '[ Description "depth=0 lists the requested directory and its immediate entries. depth=1 also lists direct child directories. depth=2 also lists grandchildren directories.",
-                      Example 0,
-                      Example 1,
-                      Example 2
+                      Minimum 1,
+                      Maximum 10
                     ]
   }
   deriving stock (Generic)
@@ -45,7 +42,7 @@ discoverDirectoryTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "discoverDirectory",
-        description = Just "Discover and render a directory tree recursively. It has depth and item limiters to avoid bloating the context window.",
+        description = Just "Return a bounded directory tree rooted at a project-relative path. Use this for structural file exploration, not for searching file contents. depth=0 returns the directory and its immediate entries; larger values descend into additional directory levels.",
         handler = discoverDirectoryHandler
       }
 

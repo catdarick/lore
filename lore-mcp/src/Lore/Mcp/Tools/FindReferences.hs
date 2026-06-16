@@ -9,7 +9,7 @@ import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (MonadLore)
-import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
+import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), Maximum, Minimum, WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..), renderToolRun)
 import qualified Lore.Tools.FindReferences as ToolsFindReferences
 import Lore.Tools.Pagination (ToolPolicy (..), limitToIntWithDefault, mcpDefaultToolPolicy)
@@ -22,20 +22,21 @@ import Lore.Tools.Result
 data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
   { symbol ::
       Field fieldType Text
-        `WithMeta` '[ Description "Exact symbol name to find references for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
-                      Example "lookupOrZero",
-                      Example "Some.Module.someFunction",
-                      Example "Some.Module.fieldName@OwnerType"
+        `WithMeta` '[ Description "Exact symbol name to find references for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope. Examples: \"lookupOrZero\", \"Some.Module.someFunction\", \"Some.Module.fieldName@OwnerType\"."
                     ],
     skip ::
       Maybe (Field fieldType Int)
         `WithMeta` '[ Description "Used for pagination. Number of initial results to skip. Use it only if a previous result was truncated and you want to see the next page of results.",
-                      Example 15
+                      Example 15,
+                      Minimum 0,
+                      Maximum 9999
                     ],
     maxResults ::
       Maybe (Field fieldType Int)
         `WithMeta` '[ Description "Optional cap for references to return.",
-                      Example 2
+                      Example 2,
+                      Minimum 1,
+                      Maximum 15
                     ],
     verbosity ::
       Field fieldType FindReferencesVerbosity
@@ -63,7 +64,7 @@ findReferencesTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "findReferences",
-        description = Just "Lists the references for the requested symbol.",
+        description = Just "Find source references to a known symbol across loaded home modules. Results include source locations and context controlled by verbosity.",
         handler = findReferencesHandler
       }
 

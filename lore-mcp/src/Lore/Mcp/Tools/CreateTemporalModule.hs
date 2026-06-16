@@ -18,8 +18,7 @@ createTemporalModuleTool =
       { name = "createTemporalModule",
         description =
           Just
-            "Create a temporary Haskell module attached to the session home modules load.\
-            \Persists across reloads for active reuse during debugging. Automatically detached if deleted; pruned on session restart.",
+            "Create a temporary Haskell source module attached to the session's home-module load and return its file path. Use this tool in pair with executeCode for debugging or testing. Write multi-line debugging helpers, temporary types, declarations, imports, or instances into that file, then call reloadHomeModules before invoking its definitions. The module remains attached across reloads, is detached if its file is deleted, and is removed from session state when the session restarts.",
         handler = createTemporalModuleHandler
       }
 
