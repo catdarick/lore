@@ -29,7 +29,7 @@ export type LoreStructuredToolResult = {
 };
 
 export type LoreConfig = {
-  command: string;
+  command?: string;
   args: string[];
   env: Record<string, string>;
   cwd?: string;
@@ -47,6 +47,10 @@ export type LoreConfig = {
     compilation: boolean;
     tests: boolean;
   };
+};
+
+export type LoreProcessConfig = LoreConfig & {
+  command: string;
 };
 
 export type LoreCallOptions = {

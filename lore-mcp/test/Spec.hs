@@ -24,6 +24,7 @@ import qualified SearchSymbolsSpec
 import qualified StructuredToolRpcSpec
 import Test.Hspec
 import qualified ToolBlockedSpec
+import qualified VersionSpec
 
 main :: IO ()
 main =
@@ -48,3 +49,4 @@ main =
     ProtocolServerSpec.spec
     StructuredToolRpcSpec.spec
     KnowledgeCacheRpcSpec.spec
+    VersionSpec.spec

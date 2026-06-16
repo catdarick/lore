@@ -17,6 +17,7 @@ dependencies:
 - exceptions
 - filepath
 - ghc
+- ghc-boot
 - lore-tools
 - lore
 - text

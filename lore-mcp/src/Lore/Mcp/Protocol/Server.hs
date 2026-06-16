@@ -33,6 +33,7 @@ import Lore.JsonRpc.Server
 import qualified Lore.Logger as Log
 import Lore.Mcp.Internal.Tool (DynamicTool (..), SomeTool (..), ToolWithArgs (..), ToolWithoutArgs (..), getSomeToolSpec, getToolName)
 import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Notification (..), McpRequest'Tools (..), parseMcpRequest)
+import Lore.Mcp.Version (loreVersionText)
 import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
 import UnliftIO (MonadUnliftIO, try)
 
@@ -210,7 +211,7 @@ initializeResult serverName =
       "serverInfo"
         .= object
           [ "name" .= serverName,
-            "version" .= ("0.1.0.0" :: Text)
+            "version" .= loreVersionText
           ],
       "capabilities"
         .= object

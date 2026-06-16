@@ -20,7 +20,6 @@ type RawLoreConfig = Partial<{
 }>;
 
 const defaults = {
-  command: "lore-mcp",
   args: [] as string[],
   env: {
     LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE: "true",
@@ -50,7 +49,7 @@ export function loadLoreConfig(host: PiHost = {}): LoreConfig {
   const projectConfig = host.projectTrusted === false ? {} : readProjectConfig(projectDir);
   const merged = deepMerge(defaults, deepMerge(projectConfig, hostConfig));
 
-  const command = requireString(merged.command, "command");
+  const command = merged.command === undefined ? undefined : requireString(merged.command, "command");
   const args = requireStringArray(merged.args, "args");
   const env = requireStringRecord(merged.env, "env");
   const startupTimeoutMs = requirePositiveInteger(merged.startupTimeoutMs, "startupTimeoutMs");
@@ -68,7 +67,7 @@ export function loadLoreConfig(host: PiHost = {}): LoreConfig {
       : resolve(projectDir, requireString(merged.stateDir, "stateDir"));
 
   return {
-    command,
+    ...(command === undefined ? {} : { command }),
     args,
     env,
     cwd,

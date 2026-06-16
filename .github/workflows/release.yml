@@ -1,0 +1,115 @@
+name: Release lore-mcp binaries
+
+on:
+  push:
+    tags:
+      - 'v*.*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-x64-gnu:
+    name: Build lore-mcp GHC ${{ matrix.ghc }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ghc: ['9.6.5', '9.6.7', '9.8.4', '9.10.3', '9.12.2', '9.12.4', '9.14.1']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: latest
+      - name: Install hpack
+        run: |
+          cabal update
+          cabal install hpack-0.39.1 --overwrite-policy=always
+      - name: Check tag matches lore-mcp package version
+        run: |
+          VERSION=$(awk '/^version:/{print $2; exit}' lore-mcp/package.yaml)
+          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+      - name: Build and test
+        run: |
+          cabal build exe:lore-mcp --enable-optimization=2
+          cabal test lore-mcp-test --test-options='--format=failed-examples --no-color'
+      - name: Verify binary identity
+        id: identity
+        run: |
+          EXE=$(cabal list-bin exe:lore-mcp)
+          JSON=$($EXE --version-json)
+          echo "$JSON"
+          ACTUAL_LORE=$(node -e 'let j=JSON.parse(process.argv[1]); console.log(j.loreVersion)' "$JSON")
+          test "$ACTUAL_LORE" = "${GITHUB_REF_NAME#v}"
+          ACTUAL_GHC=$(node -e 'let j=JSON.parse(process.argv[1]); console.log(j.ghcVersion)' "$JSON")
+          test "$ACTUAL_GHC" = "${{ matrix.ghc }}"
+          TARGET=$(node -e 'let j=JSON.parse(process.argv[1]); console.log(j.target)' "$JSON")
+          test "$TARGET" = "linux-x64-gnu"
+          echo "exe=$EXE" >> "$GITHUB_OUTPUT"
+      - name: Package asset
+        id: package
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ASSET="lore-mcp-v${VERSION}-ghc-${{ matrix.ghc }}-linux-x64-gnu.gz"
+          cp "${{ steps.identity.outputs.exe }}" lore-mcp
+          strip lore-mcp
+          ./lore-mcp --version-json
+          gzip -9c lore-mcp > "$ASSET"
+          SHA=$(sha256sum "$ASSET" | awk '{print $1}')
+          printf '{"ghcVersion":"%s","platform":"linux","arch":"x64","libc":"gnu","fileName":"%s","sha256":"%s"}\n' '${{ matrix.ghc }}' "$ASSET" "$SHA" > "${ASSET}.json"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lore-mcp-ghc-${{ matrix.ghc }}
+          path: |
+            ${{ steps.package.outputs.asset }}
+            ${{ steps.package.outputs.asset }}.json
+
+  release:
+    needs: build-linux-x64-gnu
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Generate binaries.json
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const version = process.env.GITHUB_REF_NAME.slice(1);
+          const files = fs.readdirSync('artifacts', { recursive: true }).filter(f => String(f).endsWith('.json'));
+          const assets = files.map(f => {
+            const descriptorPath = path.join('artifacts', f);
+            const asset = JSON.parse(fs.readFileSync(descriptorPath, 'utf8'));
+            const assetPath = path.join(path.dirname(descriptorPath), asset.fileName);
+            if (!fs.existsSync(assetPath)) throw new Error(`missing binary asset ${assetPath}`);
+            return asset;
+          });
+          fs.writeFileSync('binaries.json', JSON.stringify({ schemaVersion: 1, loreVersion: version, assets: assets.sort((a,b) => a.ghcVersion.localeCompare(b.ghcVersion)) }, null, 2) + '\n');
+          NODE
+          cp binaries.json pi-lore/binaries.json
+          cp pi-lore/binaries.json artifacts/binaries.json
+      - name: Test packaged pi-lore contents
+        working-directory: pi-lore
+        run: |
+          node --test test/*.test.ts
+          npm run validate:package
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.gz
+            artifacts/binaries.json
+      - name: Publish pi-lore npm package
+        working-directory: pi-lore
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

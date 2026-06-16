@@ -1,6 +1,6 @@
 cabal-version: 2.2
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.39.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -51,6 +51,7 @@ library
       Lore.Mcp.Tools.ResolveInstance
       Lore.Mcp.Tools.RunTestSuite
       Lore.Mcp.Tools.SearchSymbols
+      Lore.Mcp.Version
   other-modules:
       Paths_lore_mcp
   autogen-modules:
@@ -107,6 +108,7 @@ library
     , exceptions
     , filepath
     , ghc
+    , ghc-boot
     , insert-ordered-containers
     , lens
     , lore
@@ -179,6 +181,7 @@ executable lore-mcp
     , exceptions
     , filepath
     , ghc
+    , ghc-boot
     , insert-ordered-containers
     , lens
     , lore
@@ -219,6 +222,7 @@ test-suite lore-mcp-test
       SearchSymbolsSpec
       StructuredToolRpcSpec
       ToolBlockedSpec
+      VersionSpec
       Paths_lore_mcp
   autogen-modules:
       Paths_lore_mcp
@@ -274,6 +278,7 @@ test-suite lore-mcp-test
     , exceptions
     , filepath
     , ghc
+    , ghc-boot
     , hspec
     , insert-ordered-containers
     , lens

@@ -1,7 +1,7 @@
 import { JsonRpcClient } from "./json-rpc-client.ts";
 import { LoreProcessError, LoreRemoteError } from "./errors.ts";
 import { decodeStructuredToolResult } from "./lore-protocol.ts";
-import type { JsonObject, JsonValue, LoreCallOptions, LoreConfig, LoreStructuredToolResult, McpTool } from "./types.ts";
+import type { JsonObject, JsonValue, LoreCallOptions, LoreProcessConfig, LoreStructuredToolResult, McpTool } from "./types.ts";
 
 type QueueItem<T> = {
   run: () => Promise<T>;
@@ -10,7 +10,7 @@ type QueueItem<T> = {
 };
 
 export class LoreClient {
-  private readonly config: LoreConfig;
+  private readonly config: LoreProcessConfig;
   private rpc?: JsonRpcClient;
   private started = false;
   private queue: Promise<unknown> = Promise.resolve();
@@ -18,7 +18,7 @@ export class LoreClient {
   private staleAfterFailure = false;
   private desiredState: "running" | "stopped" = "stopped";
 
-  constructor(config: LoreConfig) {
+  constructor(config: LoreProcessConfig) {
     this.config = config;
   }
 

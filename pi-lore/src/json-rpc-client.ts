@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
 import { LoreCancelledError, LoreProcessError, LoreProtocolError, LoreRemoteError, LoreTimeoutError } from "./errors.ts";
-import type { JsonValue, LoreConfig } from "./types.ts";
+import type { JsonValue, LoreProcessConfig } from "./types.ts";
 
 type PendingRequest = {
   id: number;
@@ -20,7 +20,7 @@ export type JsonRpcClientEvents = {
 };
 
 export class JsonRpcClient extends EventEmitter<JsonRpcClientEvents> {
-  private readonly config: LoreConfig;
+  private readonly config: LoreProcessConfig;
   private child?: ChildProcessWithoutNullStreams;
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
@@ -30,7 +30,7 @@ export class JsonRpcClient extends EventEmitter<JsonRpcClientEvents> {
   private generation = 0;
   private stopping = false;
 
-  constructor(config: LoreConfig) {
+  constructor(config: LoreProcessConfig) {
     super();
     this.config = config;
   }

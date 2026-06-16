@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadLoreConfig } from "../src/config.ts";
-import { createLoreExtension } from "../src/index.ts";
+import { createLoreExtension, setManagedLoreBinaryResolverForTests } from "../src/index.ts";
 import { LoreClient } from "../src/mcp-client.ts";
 import { FakePiHost } from "./test-support.ts";
 import { join, resolve } from "node:path";
 
 test("default config enables Lore definition knowledge RPC at the producer", () => {
   const config = loadLoreConfig({ projectDir: process.cwd() });
-  assert.equal(config.command, "lore-mcp");
+  assert.equal(config.command, undefined);
   assert.deepEqual(config.args, []);
   assert.equal(config.env.LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE, "true");
   assert.equal(config.env.LORE_MCP_TOOL_ENABLED_NOTIFY_KNOWLEDGE_RESET, "false");
@@ -34,6 +34,108 @@ test("config supports tool and recovery feature gates", () => {
     disabled: ["getDefinition"],
   });
   assert.deepEqual(config.recovery, { compilation: false, tests: true });
+});
+
+
+test("explicit command bypasses managed binary resolution", async () => {
+  let resolved = false;
+  const restore = setManagedLoreBinaryResolverForTests(async () => { resolved = true; throw new Error("should not resolve"); });
+  try {
+    const host = new FakePiHost(resolve(process.cwd(), ".."));
+    const runtime = await createLoreExtension(host);
+    await runtime.start();
+    try {
+      assert.equal(runtime.getState().startupError, undefined);
+      assert.equal(resolved, false);
+    } finally {
+      await runtime.stop();
+    }
+  } finally {
+    restore();
+  }
+});
+
+test("missing command invokes managed binary resolution and restart reuses it", async () => {
+  let calls = 0;
+  const restore = setManagedLoreBinaryResolverForTests(async () => { calls++; return "python3"; });
+  try {
+    const host = new FakePiHost(process.cwd());
+    host.getConfig = () => ({
+      args: [join(process.cwd(), "test/fake-lore-mcp.py")],
+      cwd: process.cwd(),
+      startupTimeoutMs: 5_000,
+      defaultToolTimeoutMs: 5_000,
+      toolTimeoutMs: { reloadHomeModules: 100, runTestSuite: 5_000, echo: 5_000 },
+      summaryTimeoutMs: 5_000,
+      maxInlineDiffBytes: 50_000,
+      stateDir: ".pi/extensions/lore/state-test",
+    });
+    const runtime = await createLoreExtension(host);
+    await runtime.start();
+    await runtime.restartLore();
+    try {
+      assert.equal(runtime.getState().startupError, undefined);
+      assert.equal(calls, 1);
+    } finally {
+      await runtime.stop();
+    }
+  } finally {
+    restore();
+  }
+});
+
+test("managed resolution failure becomes startup status and stop remains safe", async () => {
+  const restore = setManagedLoreBinaryResolverForTests(async () => { throw new Error("no binary"); });
+  try {
+    const host = new FakePiHost(process.cwd());
+    host.getConfig = () => ({ args: [], cwd: process.cwd(), startupTimeoutMs: 500, defaultToolTimeoutMs: 500, toolTimeoutMs: {}, summaryTimeoutMs: 500, maxInlineDiffBytes: 1000 });
+    const runtime = await createLoreExtension(host);
+    await runtime.start();
+    await runtime.stop();
+    assert.match(host.statuses.get("lore-extension") ?? "", /no binary/);
+  } finally {
+    restore();
+  }
+});
+
+
+test("managed resolution receives configured environment and LORE_PROJECT_ROOT", async () => {
+  let seen: { projectDir: string; env: NodeJS.ProcessEnv; timeoutMs: number } | undefined;
+  const restore = setManagedLoreBinaryResolverForTests(async (input) => { seen = { projectDir: input.projectDir, env: input.env, timeoutMs: input.timeoutMs }; throw new Error("stop after resolve input capture"); });
+  try {
+    const host = new FakePiHost(process.cwd());
+    host.getConfig = () => ({
+      args: [],
+      env: { LORE_PROJECT_ROOT: "../lore-root", PATH: "/tmp/lore-bin" },
+      cwd: process.cwd(),
+      startupTimeoutMs: 500,
+      defaultToolTimeoutMs: 500,
+      toolTimeoutMs: {},
+      summaryTimeoutMs: 500,
+      maxInlineDiffBytes: 1000,
+    });
+    const runtime = await createLoreExtension(host);
+    await runtime.start();
+    assert.equal(seen?.projectDir, resolve(process.cwd(), "..", "lore-root"));
+    assert.equal(seen?.env.PATH, "/tmp/lore-bin");
+    assert.equal(seen?.timeoutMs, 500);
+  } finally {
+    restore();
+  }
+});
+
+test("recovery lifecycle methods are available before Lore process resolution", async () => {
+  const restore = setManagedLoreBinaryResolverForTests(async () => { throw new Error("not reached"); });
+  try {
+    const host = new FakePiHost(process.cwd());
+    host.getConfig = () => ({ args: [], cwd: process.cwd(), startupTimeoutMs: 500, defaultToolTimeoutMs: 500, toolTimeoutMs: {}, summaryTimeoutMs: 500, maxInlineDiffBytes: 1000 });
+    const runtime = await createLoreExtension(host);
+    await runtime.abandonRecovery();
+    const entries = [{ id: "one", role: "user", content: "hello" }];
+    assert.deepEqual(await runtime.processContext({ rawMessages: [], normalizedEntries: entries }), entries);
+  } finally {
+    restore();
+  }
 });
 
 test("startup reports unavailable Lore without throwing through Pi", async () => {

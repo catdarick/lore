@@ -1,16 +1,33 @@
 {
-  "name": "@pi/lore-extension",
+  "name": "pi-lore",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "main": "./index.ts",
   "exports": {
     ".": "./index.ts"
   },
   "scripts": {
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "validate:package": "node scripts/validate-package.ts",
+    "prepublishOnly": "npm run validate:package"
   },
   "engines": {
     "node": ">=24"
-  }
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "src",
+    "scripts/validate-package.ts",
+    "binaries.json",
+    "README.md"
+  ]
 }
