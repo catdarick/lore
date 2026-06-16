@@ -24,6 +24,7 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
   });
   const proxy = new LoreToolProxy({ host, config, client, knowledge, recovery, ui });
   let startupError: string | undefined;
+  let startupReady = false;
   let loadedBranchKey: string | undefined;
   let branchLoadPromise: Promise<void> | undefined;
 
@@ -34,6 +35,9 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
   }
 
   async function ensureBranchStateLoaded(): Promise<void> {
+    if (!startupReady || startupError) {
+      return;
+    }
     const key = currentBranchKey();
     if (loadedBranchKey === key) {
       return;
@@ -52,12 +56,14 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
       const tools = await proxy.registerAll();
       registeredToolNames = tools.map((tool) => tool.name).filter((name) => !name.startsWith("lore/"));
       startupError = undefined;
+      startupReady = true;
       await host.onLoreToolsRegistered?.(registeredToolNames);
     } catch (error) {
       registeredToolNames = [];
       await client.stop();
-      const message = error instanceof Error ? error.message : String(error);
+      const message = formatStartupError(config, error);
       startupError = message;
+      startupReady = false;
       await host.setStatus?.("lore-extension", `Lore extension unavailable: ${message}`, { tone: "error" });
       await host.notify?.(`Lore extension unavailable: ${message}`, { tone: "error" });
     }
@@ -69,6 +75,8 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
 
   async function restartLore(): Promise<void> {
     await client.restart();
+    startupReady = true;
+    startupError = undefined;
     await restoreBranchState();
   }
 
@@ -90,7 +98,7 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
 
   host.on?.("session_start", () => scheduleBranchRestore());
   host.on?.("session_tree", () => scheduleBranchRestore());
-  host.on?.("session_compact", () => runSafely(() => knowledge.reset()));
+  host.on?.("session_compact", () => runSafely(() => (startupReady && !startupError ? knowledge.reset() : Promise.resolve())));
   host.on?.("session_shutdown", () => runSafely(stop));
 
   return {
@@ -124,6 +132,16 @@ export async function createLoreExtension(host: PiHost = {}): Promise<ExtensionR
       return { ...store.current(), registeredToolNames: [...registeredToolNames], startupError };
     },
   };
+}
+
+function formatStartupError(config: { command: string; args: string[]; cwd?: string }, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return [
+    message,
+    "",
+    `Lore command: ${[config.command, ...config.args].join(" ")}`,
+    `Lore cwd: ${config.cwd ?? process.cwd()}`,
+  ].join("\n");
 }
 
 export default createLoreExtension;

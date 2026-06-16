@@ -20,8 +20,8 @@ type RawLoreConfig = Partial<{
 }>;
 
 const defaults = {
-  command: "stack",
-  args: ["exec", "lore-mcp"] as string[],
+  command: "lore-mcp",
+  args: [] as string[],
   env: {
     LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE: "true",
     LORE_MCP_TOOL_ENABLED_NOTIFY_KNOWLEDGE_RESET: "false",

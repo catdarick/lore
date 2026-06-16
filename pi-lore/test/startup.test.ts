@@ -8,6 +8,8 @@ import { join, resolve } from "node:path";
 
 test("default config enables Lore definition knowledge RPC at the producer", () => {
   const config = loadLoreConfig({ projectDir: process.cwd() });
+  assert.equal(config.command, "lore-mcp");
+  assert.deepEqual(config.args, []);
   assert.equal(config.env.LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE, "true");
   assert.equal(config.env.LORE_MCP_TOOL_ENABLED_NOTIFY_KNOWLEDGE_RESET, "false");
   assert.deepEqual(config.tools, { disabled: [] });
@@ -38,7 +40,7 @@ test("startup reports unavailable Lore without throwing through Pi", async () =>
   const host = new FakePiHost(process.cwd());
   host.getConfig = () => ({
     command: "python3",
-    args: ["-c", "import sys; sys.exit(2)"],
+    args: ["-c", "import sys; print('lore-mcp failed before initialize', file=sys.stderr); sys.exit(2)"],
     cwd: process.cwd(),
     startupTimeoutMs: 500,
     defaultToolTimeoutMs: 500,
@@ -48,7 +50,42 @@ test("startup reports unavailable Lore without throwing through Pi", async () =>
   });
   const runtime = await createLoreExtension(host);
   await runtime.start();
-  assert.match(host.statuses.get("lore-extension") ?? "", /Lore extension unavailable:/);
+  await host.emit("session_start");
+  const status = host.statuses.get("lore-extension") ?? "";
+  assert.match(status, /Lore extension unavailable:/);
+  assert.match(status, /Lore process output:/);
+  assert.match(status, /lore-mcp failed before initialize/);
+  assert.equal(host.notices.some((notice) => notice.includes("Lore client is stopped")), false);
+});
+
+test("startup timeout reports captured Lore output", async () => {
+  const host = new FakePiHost(process.cwd());
+  host.getConfig = () => ({
+    command: "python3",
+    args: ["-c", "import sys, time; print('lore-mcp stuck after error', file=sys.stderr, flush=True); time.sleep(2)"],
+    cwd: process.cwd(),
+    startupTimeoutMs: 100,
+    defaultToolTimeoutMs: 500,
+    toolTimeoutMs: {},
+    summaryTimeoutMs: 500,
+    maxInlineDiffBytes: 1000,
+  });
+  const runtime = await createLoreExtension(host);
+  await runtime.start();
+  const status = host.statuses.get("lore-extension") ?? "";
+  assert.match(status, /Lore request initialize timed out after 100ms/);
+  assert.match(status, /Lore process output:/);
+  assert.match(status, /lore-mcp stuck after error/);
+});
+
+test("session events before Lore startup settles do not touch the stopped client", async () => {
+  const host = new FakePiHost(process.cwd());
+  const runtime = await createLoreExtension(host);
+
+  await host.emit("session_start");
+  await runtime.processContext({ rawMessages: [], normalizedEntries: [] });
+
+  assert.equal(host.notices.some((notice) => notice.includes("Lore client is stopped")), false);
 });
 
 test("runtime startup does not require an attached Pi session branch", async () => {

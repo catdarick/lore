@@ -18,6 +18,36 @@ test("root adapter rejects missing required Pi capabilities", async () => {
   );
 });
 
+test("root adapter starts Lore MCP outside Pi extension startup", async () => {
+  let startCalled = false;
+  let settled = false;
+  const started = new Promise<void>((resolve) => {
+    __test.startLoreRuntimeInBackground(
+      {
+        async start() {
+          startCalled = true;
+          await new Promise((resume) => setTimeout(resume, 50));
+        },
+        getState() {
+          return { registeredToolNames: [], startupError: undefined } as never;
+        },
+      },
+      {
+        onSettled() {
+          settled = true;
+          resolve();
+        },
+      },
+    );
+  });
+
+  assert.equal(startCalled, false);
+  assert.equal(settled, false);
+  await started;
+  assert.equal(startCalled, true);
+  assert.equal(settled, true);
+});
+
 test("root adapter appends Lore marker guidance to the system prompt", () => {
   let beforeAgentStart: ((event: unknown) => unknown) | undefined;
   __test.registerLoreSystemPromptGuidance({

@@ -148,13 +148,15 @@ export default async function lorePiExtension(pi: PiExtensionApi): Promise<void>
     return { messages: denormalizePiMessages(projected) };
   });
 
-  await runtime.start();
-  const state = runtime.getState();
-  loreToolNames = state.registeredToolNames;
-  startupError = state.startupError;
-  if (!startupError) {
-    activateLoreTools(pi, loreToolNames);
-  }
+  startLoreRuntimeInBackground(runtime, {
+    onSettled(state, unexpectedError) {
+      loreToolNames = state.registeredToolNames;
+      startupError = state.startupError ?? unexpectedError?.message;
+      if (!startupError) {
+        activateLoreTools(pi, loreToolNames);
+      }
+    },
+  });
 }
 
 export { createLoreExtension };
@@ -162,6 +164,25 @@ export type { ExtensionRuntime, PiHost } from "./src/types.ts";
 
 function registerLoreSystemPromptGuidance(pi: PiExtensionApi): void {
   pi.on?.("before_agent_start", (event) => appendLoreContextMarkerGuidance(event));
+}
+
+function startLoreRuntimeInBackground(
+  runtime: Pick<ExtensionRuntime, "start" | "getState">,
+  callbacks: {
+    onSettled: (state: ReturnType<ExtensionRuntime["getState"]>, unexpectedError?: Error) => void;
+  },
+): void {
+  setTimeout(() => {
+    let unexpectedError: Error | undefined;
+    void runtime
+      .start()
+      .catch((error) => {
+        unexpectedError = error instanceof Error ? error : new Error(String(error));
+      })
+      .finally(() => {
+        callbacks.onSettled(runtime.getState(), unexpectedError);
+      });
+  }, 0);
 }
 
 function appendLoreContextMarkerGuidance(event: unknown): { systemPrompt: string } | undefined {
@@ -1356,6 +1377,7 @@ export const __test = {
   registerLoreSystemPromptGuidance,
   registerLoreRestartCommand,
   registerUsageStatsCommand,
+  startLoreRuntimeInBackground,
   normalizePiMessages,
   toLlmMessages,
 };

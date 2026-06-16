@@ -24,6 +24,7 @@ export class JsonRpcClient extends EventEmitter<JsonRpcClientEvents> {
   private child?: ChildProcessWithoutNullStreams;
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
+  private processOutputTail = "";
   private stdoutBuffer = "";
   private stdoutDecoder = new StringDecoder("utf8");
   private generation = 0;
@@ -44,6 +45,7 @@ export class JsonRpcClient extends EventEmitter<JsonRpcClientEvents> {
     }
     this.stopping = false;
     this.generation += 1;
+    this.processOutputTail = "";
     this.stdoutBuffer = "";
     this.stdoutDecoder = new StringDecoder("utf8");
     const child = spawn(this.config.command, this.config.args, {
@@ -58,24 +60,29 @@ export class JsonRpcClient extends EventEmitter<JsonRpcClientEvents> {
       if (processGeneration !== this.generation) {
         return;
       }
+      this.appendProcessOutput("stdout", chunk.toString("utf8"));
       this.handleStdout(chunk);
     });
     child.stderr.on("data", (chunk: Buffer) => {
       if (processGeneration === this.generation) {
-        this.emit("stderr", chunk.toString("utf8"));
+        const text = chunk.toString("utf8");
+        this.appendProcessOutput("stderr", text);
+        this.emit("stderr", text);
       }
     });
     child.on("error", (error) => {
       if (processGeneration === this.generation) {
-        this.failAll(new LoreProcessError(`Lore process error: ${error.message}`));
+        this.failAll(new LoreProcessError(this.withProcessOutput(`Lore process error: ${error.message}`)));
       }
     });
     child.on("exit", (code, signal) => {
       if (processGeneration !== this.generation || this.stopping) {
         return;
       }
-      this.failAll(new LoreProcessError(`Lore process exited unexpectedly (code ${code}, signal ${signal})`));
-      this.emit("fatal", new LoreProcessError("Lore process exited unexpectedly"));
+      this.failAll(
+        new LoreProcessError(this.withProcessOutput(`Lore process exited unexpectedly (code ${code}, signal ${signal})`)),
+      );
+      this.emit("fatal", new LoreProcessError(this.withProcessOutput("Lore process exited unexpectedly")));
     });
   }
 
@@ -121,7 +128,7 @@ export class JsonRpcClient extends EventEmitter<JsonRpcClientEvents> {
         pending.timer = setTimeout(() => {
           this.pending.delete(id);
           this.cleanupPending(pending);
-          reject(new LoreTimeoutError(`Lore request ${method} timed out after ${timeoutMs}ms`));
+          reject(new LoreTimeoutError(this.withProcessOutput(`Lore request ${method} timed out after ${timeoutMs}ms`)));
           void this.stop();
         }, timeoutMs);
       }
@@ -149,9 +156,25 @@ export class JsonRpcClient extends EventEmitter<JsonRpcClientEvents> {
 
   private write(value: unknown): void {
     if (!this.child || !this.child.stdin.writable) {
-      throw new LoreProcessError("Lore process stdin is unavailable");
+      throw new LoreProcessError(this.withProcessOutput("Lore process stdin is unavailable"));
     }
     this.child.stdin.write(`${JSON.stringify(value)}\n`, "utf8");
+  }
+
+  private appendProcessOutput(streamName: "stdout" | "stderr", text: string): void {
+    const labelled = text
+      .split(/(?<=\n)/)
+      .map((line) => (line.length === 0 ? line : `[${streamName}] ${line}`))
+      .join("");
+    this.processOutputTail = (this.processOutputTail + labelled).slice(-12_000);
+  }
+
+  private withProcessOutput(message: string): string {
+    const output = this.processOutputTail.trimEnd();
+    if (output.length === 0) {
+      return message;
+    }
+    return `${message}\n\nLore process output:\n${output}`;
   }
 
   private handleStdout(chunk: Buffer): void {
@@ -170,7 +193,9 @@ export class JsonRpcClient extends EventEmitter<JsonRpcClientEvents> {
       try {
         message = JSON.parse(line);
       } catch {
-        const error = new LoreProtocolError(`Malformed JSON-RPC output from Lore: ${line.slice(0, 200)}`);
+        const error = new LoreProtocolError(
+          this.withProcessOutput(`Malformed JSON-RPC output from Lore: ${line.slice(0, 200)}`),
+        );
         this.failAll(error);
         this.emit("fatal", error);
         void this.stop();
