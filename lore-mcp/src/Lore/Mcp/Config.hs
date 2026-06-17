@@ -76,6 +76,9 @@ data McpConfigError
   | UnknownMcpToolName FilePath Text
   deriving stock (Eq, Show)
 
+overridableToolNames :: Set.Set Text
+overridableToolNames = Set.singleton "runTestSuite"
+
 defaultMcpConfig :: McpConfig
 defaultMcpConfig =
   McpConfig
@@ -91,7 +94,7 @@ parseMcpYamlConfig knownToolNames document =
     J.Error err ->
       Left (InvalidMcpConfig document.configFilePath (T.pack err))
     J.Success overrides ->
-      case firstDuplicateOrKnown knownToolNames customToolNames of
+      case firstDuplicateOrKnown (knownToolNames `Set.difference` overridableToolNames) customToolNames of
         Just duplicateToolName ->
           Left (DuplicateMcpToolName document.configFilePath duplicateToolName)
         Nothing ->

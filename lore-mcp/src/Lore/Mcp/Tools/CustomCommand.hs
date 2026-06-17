@@ -1,5 +1,7 @@
 module Lore.Mcp.Tools.CustomCommand
-  ( customCommandTool,
+  ( CustomCommandResult (..),
+    customCommandTool,
+    customCommandToolStructured,
   )
 where
 
@@ -12,19 +14,40 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Lore.Mcp.Config (CustomCommandToolArgConfig (..), CustomCommandToolArgQuoteMode (..), CustomCommandToolConfig (..))
 import Lore.Mcp.Internal.Tool (DynamicTool (..), SomeTool (..))
-import Lore.Tools.Render.Doc (LoreDoc, paragraph)
+import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (..), paragraph)
 import System.Exit (ExitCode (..))
 import System.Process (readCreateProcessWithExitCode, shell)
 
+data CustomCommandResult = CustomCommandResult
+  { customCommandExitCode :: ExitCode,
+    customCommandStdout :: Text,
+    customCommandStderr :: Text
+  }
+  deriving stock (Eq, Show)
+
+instance ToLoreDoc CustomCommandResult where
+  toLoreDoc = customCommandResultDoc
+
 customCommandTool :: (MonadIO m) => CustomCommandToolConfig -> SomeTool m
 customCommandTool config =
-  SomeDynamicTool
-    DynamicTool
-      { name = config.name,
-        description = config.description,
-        inputSchema = customCommandInputSchema config.args,
-        handler = customCommandHandler config
-      }
+  SomeDynamicTool (customCommandDynamicTool config)
+
+customCommandToolStructured ::
+  (MonadIO m) =>
+  CustomCommandToolConfig ->
+  (J.Value -> CustomCommandResult -> J.Value) ->
+  SomeTool m
+customCommandToolStructured config =
+  SomeDynamicToolStructured (customCommandDynamicTool config)
+
+customCommandDynamicTool :: (MonadIO m) => CustomCommandToolConfig -> DynamicTool m CustomCommandResult
+customCommandDynamicTool config =
+  DynamicTool
+    { name = config.name,
+      description = config.description,
+      inputSchema = customCommandInputSchema config.args,
+      handler = customCommandHandler config
+    }
 
 customCommandInputSchema :: [CustomCommandToolArgConfig] -> J.Value
 customCommandInputSchema args =
@@ -49,13 +72,18 @@ customCommandInputSchema args =
         then J.toJSON (["string", "null"] :: [Text])
         else J.String "string"
 
-customCommandHandler :: (MonadIO m) => CustomCommandToolConfig -> J.Value -> m LoreDoc
+customCommandHandler :: (MonadIO m) => CustomCommandToolConfig -> J.Value -> m CustomCommandResult
 customCommandHandler config rawArgs = do
   argValues <- parseCustomCommandArgs config.args rawArgs
   let commandText = substituteCommandArgs argValues config.command
   (exitCode, stdoutText, stderrText) <-
     liftIO $ readCreateProcessWithExitCode (shell (T.unpack commandText)) ""
-  pure (customCommandResultDoc exitCode (T.pack stdoutText) (T.pack stderrText))
+  pure
+    CustomCommandResult
+      { customCommandExitCode = exitCode,
+        customCommandStdout = T.pack stdoutText,
+        customCommandStderr = T.pack stderrText
+      }
 
 parseCustomCommandArgs :: (MonadIO m) => [CustomCommandToolArgConfig] -> J.Value -> m [(CustomCommandToolArgConfig, Maybe Text)]
 parseCustomCommandArgs args = \case
@@ -123,8 +151,8 @@ escapeDoubleQuotedShellChars =
     '`' -> "\\`"
     char -> T.singleton char
 
-customCommandResultDoc :: ExitCode -> Text -> Text -> LoreDoc
-customCommandResultDoc exitCode stdoutText stderrText =
+customCommandResultDoc :: CustomCommandResult -> LoreDoc
+customCommandResultDoc CustomCommandResult {customCommandExitCode = exitCode, customCommandStdout = stdoutText, customCommandStderr = stderrText} =
   paragraph $ T.intercalate "\n" (filter (not . T.null) [exitStatusText exitCode, stdoutBlock, stderrBlock])
   where
     exitStatusText = \case

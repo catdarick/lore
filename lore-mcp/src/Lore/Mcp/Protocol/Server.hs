@@ -171,6 +171,12 @@ executeToolCall tools render toolName toolArgs =
               pure (Left "missing arguments")
             Just rawArguments ->
               runToolHandler (toolHandler rawArguments) Nothing
+        SomeDynamicToolStructured DynamicTool {handler = toolHandler} structuredProjection ->
+          case toolArgs of
+            Nothing ->
+              pure (Left "missing arguments")
+            Just rawArguments ->
+              runToolHandler (toolHandler rawArguments) (Just (structuredProjection rawArguments))
 
     decodeArguments :: forall args. (J.FromJSON args) => Maybe Value -> Either Text args
     decodeArguments maybeArguments =

@@ -60,6 +60,11 @@ data SomeTool m where
     (ToLoreDoc output) =>
     DynamicTool m output ->
     SomeTool m
+  SomeDynamicToolStructured ::
+    (ToLoreDoc output) =>
+    DynamicTool m output ->
+    (J.Value -> output -> J.Value) ->
+    SomeTool m
 
 getToolName :: SomeTool m -> Text
 getToolName = \case
@@ -68,6 +73,7 @@ getToolName = \case
   SomeToolWithoutArgs tool -> tool.name
   SomeToolWithoutArgsStructured tool _ -> tool.name
   SomeDynamicTool tool -> tool.name
+  SomeDynamicToolStructured tool _ -> tool.name
 
 renderToolRun :: (output -> LoreDoc) -> ToolRun output -> LoreDoc
 renderToolRun renderReady = \case
@@ -83,6 +89,7 @@ getToolDescription = \case
   SomeToolWithoutArgs tool -> tool.description
   SomeToolWithoutArgsStructured tool _ -> tool.description
   SomeDynamicTool tool -> tool.description
+  SomeDynamicToolStructured tool _ -> tool.description
 
 getSomeToolSpec :: SomeTool m -> J.Value
 getSomeToolSpec someTool =
@@ -116,6 +123,8 @@ getSomeToolSpec someTool =
             "additionalProperties" J..= False
           ]
       SomeDynamicTool tool ->
+        tool.inputSchema
+      SomeDynamicToolStructured tool _ ->
         tool.inputSchema
 
 -- | Convert OpenAPI 3.0-style nullable schemas:

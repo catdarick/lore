@@ -10,11 +10,12 @@ import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import Lore.JsonRpc.Server (JsonRpcResponse (..))
+import Lore.Mcp.Config (CustomCommandToolConfig (..))
 import Lore.Mcp.Monad (LoreMcpMonad)
 import Lore.Mcp.Protocol.Request (McpRequest (..), McpRequest'Tools (..))
-import Lore.Mcp.Protocol.Server (McpServer (..), handleMcpRequest, initialMcpServerState)
+import Lore.Mcp.Protocol.Server (ExecutedToolResult (..), McpServer (..), executeToolCall, handleMcpRequest, initialMcpServerState)
 import Lore.Mcp.StructuredToolRpc (structuredToolRequestHandlers)
-import Lore.Mcp.Tools.RunTestSuite (runTestSuiteTool)
+import Lore.Mcp.Tools.RunTestSuite (customRunTestSuiteTool, runTestSuiteTool)
 import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
 import McpTestSupport (callToolWithArgs, fixtureLoreMcpAtWithCache, withFixtureCopy)
 import System.Directory (createDirectoryIfMissing)
@@ -99,6 +100,26 @@ spec =
         result `shouldContainText` T.pack (show (ExitFailure 1))
         result `shouldContainText` "Captured output:"
         result `shouldContainText` "fixture-test-failure-signal"
+
+    it "classifies a successful custom runTestSuite command by exit code" do
+      result <-
+        executeToolCall
+          [customRunTestSuiteTool (customRunTestSuiteConfig "printf custom-success")]
+          renderLoreDocMarkdown
+          "runTestSuite"
+          (Just (J.object []))
+
+      assertCustomRunTestSuiteResult result True "tests-passed" 0 "custom-success"
+
+    it "classifies a failing custom runTestSuite command by exit code" do
+      result <-
+        executeToolCall
+          [customRunTestSuiteTool (customRunTestSuiteConfig "printf custom-failure; exit 7")]
+          renderLoreDocMarkdown
+          "runTestSuite"
+          (Just (J.object []))
+
+      assertCustomRunTestSuiteResult result False "tests-failed" 7 "custom-failure"
 
     it "returns compilation-failure status via private structured calls" do
       withFixtureCopy \fixtureRoot -> do
@@ -196,6 +217,29 @@ spec =
               liftIO (extractInvocationEffectiveArguments structuredValue)
 
           effectiveArguments `shouldBe` ["--from-config", "config value", "--match", "prefix sample"]
+
+customRunTestSuiteConfig :: T.Text -> CustomCommandToolConfig
+customRunTestSuiteConfig command =
+  CustomCommandToolConfig
+    { name = "runTestSuite",
+      description = Just "Run project tests",
+      command,
+      args = []
+    }
+
+assertCustomRunTestSuiteResult :: Either a ExecutedToolResult -> Bool -> T.Text -> Int -> T.Text -> Expectation
+assertCustomRunTestSuiteResult result expectedSuccess expectedStatus expectedExitCode expectedOutput =
+  case result of
+    Right ExecutedToolResult {executedToolContent, executedToolStructuredContent = Just (J.Object structured)} -> do
+      executedToolContent `shouldContainText` expectedOutput
+      KM.lookup "success" structured `shouldBe` Just (J.Bool expectedSuccess)
+      KM.lookup "status" structured `shouldBe` Just (J.String expectedStatus)
+      KM.lookup "exitCode" structured `shouldBe` Just (J.toJSON expectedExitCode)
+      KM.lookup "invocation" structured `shouldBe` Just (J.object [])
+    Right _ ->
+      expectationFailure "expected structured custom runTestSuite result"
+    Left _ ->
+      expectationFailure "expected custom runTestSuite command to execute"
 
 shouldContainText :: T.Text -> T.Text -> Expectation
 shouldContainText actual expected =

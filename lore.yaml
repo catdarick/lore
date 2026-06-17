@@ -13,15 +13,16 @@ mcp:
     runTestSuite: true
     notifyKnowledgeReset: false
   custom-tools:
-    - name: runTests
-      description: Run the test suite.
-      command: stack test @{package} --cabal-verbosity 0 --ta "--format=failed-examples --no-color @{test-args}"
+    # Override the default runTestSuite tool for a better performance.
+    - name: runTestSuite
+      description: Run the test suite. Equivalent to `stack test {package} --cabal-verbosity 0 --ta "--format=failed-examples --no-color {testArgs}"`
+      command: stack test @{package} --cabal-verbosity 0 --ta "--format=failed-examples --no-color @{testArgs}"
       args:
         - name: package
           description: Optional package name to run tests for. If not provided, all tests will be run.
           nullable: true
-        - name: test-args
-          description: Optional additional arguments to pass to the test runner.
+        - name: testArgs
+          description: Optional additional arguments to pass to hspec. For example, you can pass `--match "test name"` to run only tests with names containing "test name".
           nullable: true
           escape-quotes: true
           quote-mode: none

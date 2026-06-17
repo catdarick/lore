@@ -3,8 +3,9 @@ module Lore.Mcp.Server
   )
 where
 
+import Data.List (find)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, isNothing)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Lore
@@ -47,7 +48,7 @@ import Lore.Mcp.Tools.LookupSymbolInfo (lookupSymbolInfoTool)
 import Lore.Mcp.Tools.NotifyKnowledgeReset (notifyKnowledgeResetTool)
 import Lore.Mcp.Tools.ReloadHomeModules (reloadHomeModulesTool)
 import Lore.Mcp.Tools.ResolveInstance (resolveInstanceTool)
-import Lore.Mcp.Tools.RunTestSuite (runTestSuiteTool)
+import Lore.Mcp.Tools.RunTestSuite (customRunTestSuiteTool, runTestSuiteTool)
 import Lore.Mcp.Tools.SearchSymbols (searchSymbolsTool)
 import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
 
@@ -71,13 +72,17 @@ runLoreMcpServer = do
         resolveMcpConfig defaultMcpConfig yamlMcpOverrides environmentMcpOverrides
       runTestSuiteToolEnabled =
         toolEnabled mcpConfig "runTestSuite"
+      customRunTestSuiteConfig =
+        findRunTestSuiteOverride mcpConfig.customCommandTools
+      builtInRunTestSuiteEnabled =
+        runTestSuiteToolEnabled && isNothing customRunTestSuiteConfig
       definitionKnowledgeCacheEnabled =
         mcpConfig.definitionKnowledgeCacheEnabled
       notifyKnowledgeResetToolEnabled =
         toolEnabled mcpConfig "notifyKnowledgeReset"
   let sessionConfig =
         startupConfig.startupSessionConfig
-          { isTestSuiteFunctionalityRequired = runTestSuiteToolEnabled
+          { isTestSuiteFunctionalityRequired = builtInRunTestSuiteEnabled
           }
   mcpContext <- newLoreMcpContext definitionKnowledgeCacheEnabled
   let tools =
@@ -123,8 +128,12 @@ runLoreMcpServer = do
             if definitionKnowledgeCacheEnabled
               then cachedGetDefinitionsTool notifyKnowledgeResetToolEnabled
               else regularGetDefinitionTool
+          customRunTestSuiteConfig =
+            findRunTestSuiteOverride customCommandToolConfigs
+          selectedRunTestSuiteTool =
+            maybe runTestSuiteTool customRunTestSuiteTool customRunTestSuiteConfig
           customCommandTools =
-            map customCommandTool customCommandToolConfigs
+            map customCommandTool (filter ((/= "runTestSuite") . (.name)) customCommandToolConfigs)
        in [ reloadHomeModulesTool,
             discoverProjectTool,
             discoverDirectoryTool,
@@ -139,11 +148,15 @@ runLoreMcpServer = do
             createTemporalModuleTool,
             getTypeOfExpressionTool,
             executeCodeTool,
-            runTestSuiteTool
+            selectedRunTestSuiteTool
           ]
             <> definitionKnowledgeTools
             <> feedbackTools
             <> customCommandTools
+
+    findRunTestSuiteOverride :: [CustomCommandToolConfig] -> Maybe CustomCommandToolConfig
+    findRunTestSuiteOverride =
+      find ((== "runTestSuite") . (.name))
 
     filterEnabledTools :: McpConfig -> [SomeTool m] -> [SomeTool m]
     filterEnabledTools config =

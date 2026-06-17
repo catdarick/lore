@@ -170,7 +170,8 @@ mcp:
 
 Rules and defaults:
 
-*   `name` must not duplicate a built-in tool or another custom tool.
+*   `name` must not duplicate another custom tool. Built-in tool names are reserved, except `runTestSuite`.
+*   A custom tool named `runTestSuite` replaces the built-in test runner, including its input schema. Exit code `0` is reported as structured success; every non-zero exit code is reported as structured failure. The tool remains disabled by default, so enable it with `mcp.tools.runTestSuite: true`.
 *   `command` is executed through the shell. Placeholders use `@{argName}` syntax.
 *   Every placeholder in `command` must be declared in `args`.
 *   Argument values are strings. `nullable: true` also allows `null`, which is substituted as an empty string.
@@ -180,6 +181,25 @@ Rules and defaults:
     *   `single`: shell-safe single-quote wrapping. This is the safest default for normal single arguments.
     *   `double`: double-quote wrapping with shell-sensitive characters escaped.
     *   `none`: no wrapping; use only when the value intentionally contains multiple CLI arguments or must be inserted into an already quoted command fragment.
+
+To replace Lore's built-in test runner with a project-specific command:
+
+```yaml
+mcp:
+  custom-tools:
+    - name: runTestSuite
+      description: Run the project test command
+      command: ./scripts/test @{testArgs}
+      args:
+        - name: testArgs
+          description: Optional arguments forwarded to the test command
+          nullable: true
+          quote-mode: none
+  tools:
+    runTestSuite: true
+```
+
+The public output still contains the command exit code, stdout, and stderr. Private structured calls additionally return `success`, `status`, `exitCode`, and the original invocation arguments.
 
 For simple required string arguments, a short form is accepted:
 

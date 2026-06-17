@@ -1,15 +1,19 @@
 module Lore.Mcp.Tools.RunTestSuite
   ( runTestSuiteTool,
+    customRunTestSuiteTool,
   )
 where
 
+import Control.Monad.IO.Class (MonadIO)
 import qualified Data.Aeson as J
 import Data.OpenApi (ToSchema)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Lore (HomeModulesLoadSummary (..), LoadHomeModulesResult (..), MonadLore, projectEnvironmentFailureMessage)
+import Lore.Mcp.Config (CustomCommandToolConfig)
 import Lore.Mcp.Internal.Annotated (Description, Example, Field, FieldType (..), WithMeta)
 import Lore.Mcp.Internal.Tool (SomeTool (..), ToolWithArgs (..))
+import Lore.Mcp.Tools.CustomCommand (CustomCommandResult (..), customCommandToolStructured)
 import Lore.Tools.Result (RenderedResult (..), ToolRun (..))
 import Lore.Tools.RunTestSuite
   ( RunTestSuiteExecution (..),
@@ -19,6 +23,7 @@ import Lore.Tools.RunTestSuite
     runTestSuiteStatus,
   )
 import qualified Lore.Tools.RunTestSuite as ToolsRunTestSuite
+import System.Exit (ExitCode (..))
 
 data RunTestSuiteArgs (fieldType :: FieldType) = RunTestSuiteArgs
   { package ::
@@ -46,6 +51,29 @@ runTestSuiteTool =
         handler = runTestSuiteHandler
       }
     runTestSuiteStructured
+
+customRunTestSuiteTool :: (MonadIO m) => CustomCommandToolConfig -> SomeTool m
+customRunTestSuiteTool config =
+  customCommandToolStructured config customRunTestSuiteStructured
+
+customRunTestSuiteStructured :: J.Value -> CustomCommandResult -> J.Value
+customRunTestSuiteStructured invocation CustomCommandResult {customCommandExitCode} =
+  J.object
+    [ "tool" J..= ("runTestSuite" :: Text),
+      "success" J..= succeeded,
+      "status" J..= status,
+      "exitCode" J..= exitCodeNumber customCommandExitCode,
+      "invocation" J..= invocation
+    ]
+  where
+    succeeded = customCommandExitCode == ExitSuccess
+    status :: Text
+    status = if succeeded then "tests-passed" else "tests-failed"
+
+exitCodeNumber :: ExitCode -> Int
+exitCodeNumber = \case
+  ExitSuccess -> 0
+  ExitFailure code -> code
 
 runTestSuiteHandler :: (MonadLore m) => RunTestSuiteArgs 'ValueType -> m (ToolRun (RenderedResult RunTestSuiteOutcome))
 runTestSuiteHandler RunTestSuiteArgs {package, testArgs} =

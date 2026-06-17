@@ -14,6 +14,7 @@ import Lore.Mcp.Config
   ( CustomCommandToolArgQuoteMode (..),
     McpConfig (..),
     McpConfigError (..),
+    McpConfigOverrides (..),
     defaultMcpConfig,
     loadMcpEnvironmentOverrides,
     parseMcpYamlConfig,
@@ -71,8 +72,20 @@ spec =
         otherTools ->
           expectationFailure ("expected one custom tool, got: " <> show otherTools)
 
-    it "rejects custom tools that shadow built-in tools" do
-      parseMcpYaml "mcp:\n  custom-tools:\n    - name: runTestSuite\n      command: echo nope\n      args: []\n"
+    it "allows a custom command to override runTestSuite" do
+      overrides <-
+        shouldParseMcpYaml
+          "mcp:\n  custom-tools:\n    - name: runTestSuite\n      command: stack test\n      args: []\n"
+      map (.name) overrides.customCommandToolsOverride `shouldBe` ["runTestSuite"]
+
+    it "still rejects custom tools that shadow other built-in tools" do
+      parseMcpYaml "mcp:\n  custom-tools:\n    - name: notifyKnowledgeReset\n      command: echo nope\n      args: []\n"
+        `shouldSatisfy` \case
+          Left (DuplicateMcpToolName "lore.yaml" "notifyKnowledgeReset") -> True
+          _ -> False
+
+    it "rejects duplicate runTestSuite overrides" do
+      parseMcpYaml "mcp:\n  custom-tools:\n    - name: runTestSuite\n      command: echo one\n      args: []\n    - name: runTestSuite\n      command: echo two\n      args: []\n"
         `shouldSatisfy` \case
           Left (DuplicateMcpToolName "lore.yaml" "runTestSuite") -> True
           _ -> False
