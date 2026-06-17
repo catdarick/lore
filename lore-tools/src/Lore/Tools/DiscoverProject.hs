@@ -7,7 +7,7 @@ where
 
 import Control.Monad.RWS (asks)
 import Data.List (isSuffixOf, sortOn)
-import Data.Maybe (listToMaybe)
+import Data.Maybe (catMaybes, listToMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Lore.Monad (MonadLore)
@@ -22,13 +22,19 @@ import Lore.Project
     normalizeRelativePath,
   )
 import Lore.Session (SessionContext (..))
-import Lore.Tools.Render.Doc (LoreDoc, bulletList, heading2, heading3, paragraph)
+import Lore.Tools.Render.Doc (LoreDoc, bulletList, heading1, heading2, heading3, paragraph)
 import Lore.Tools.Render.Text (renderList)
 import System.FilePath (makeRelative, normalise, (</>))
 
 data DiscoverProjectOutput = DiscoverProjectOutput
   { discoverProjectRootPath :: FilePath,
     discoverProjectPackages :: [PackageData]
+  }
+
+data BuildSettings = BuildSettings
+  { buildDependencies :: Set.Set String,
+    buildGhcOptions :: Set.Set String,
+    buildExtensions :: Set.Set String
   }
 
 discoverProject :: (MonadLore m) => m DiscoverProjectOutput
@@ -49,42 +55,86 @@ renderDiscoverProjectFromPackages :: FilePath -> [PackageData] -> LoreDoc
 renderDiscoverProjectFromPackages _ [] =
   paragraph "No package manifests were found under the project root."
 renderDiscoverProjectFromPackages projectRoot packages =
-  mconcat (map (renderPackage projectRoot) packages)
+  renderWorkspace workspaceSharedSettings
+    <> mconcat (map (renderPackage projectRoot workspaceSharedSettings) packages)
+  where
+    workspaceSharedSettings = sharedBuildSettings (concatMap components packages)
 
-renderPackage :: FilePath -> PackageData -> LoreDoc
-renderPackage projectRoot packageData =
+renderWorkspace :: BuildSettings -> LoreDoc
+renderWorkspace sharedSettings =
+  heading1 "Workspace"
+    <> bulletList (renderBuildSettings "shared" sharedSettings)
+
+renderPackage :: FilePath -> BuildSettings -> PackageData -> LoreDoc
+renderPackage projectRoot workspaceSharedSettings packageData =
   heading2 ("Package: " <> T.pack packageData.packageName)
     <> bulletList
-      [ paragraph ("package root: " <> T.pack (renderDirectoryPath (toProjectRelativePath projectRoot packageData.packageRoot))),
-        paragraph ("package manifest: " <> T.pack (toProjectRelativePath projectRoot packageData.packageManifestPath)),
-        paragraph ("shared dependencies: " <> renderStringSet sharedDependencies),
-        paragraph ("shared GHC options: " <> renderStringSet sharedGhcOptions),
-        paragraph ("shared extensions: " <> renderStringSet sharedExtensions)
-      ]
+      ( [ paragraph ("package root: " <> T.pack (renderDirectoryPath (toProjectRelativePath projectRoot packageData.packageRoot))),
+          paragraph ("package manifest: " <> T.pack (toProjectRelativePath projectRoot packageData.packageManifestPath))
+        ]
+          <> renderBuildSettings "package shared" packageOnlySettings
+      )
     <> mconcat componentDocs
   where
-    sharedDependencies = commonSetIntersection (map dependencies packageData.components)
-    sharedGhcOptions = commonSetIntersection (map (Set.map unGhcOption . ghcOptions) packageData.components)
-    sharedExtensions = commonSetIntersection (map (Set.map unGhcExtension . defaultExtensions) packageData.components)
+    packageSharedSettings = sharedBuildSettings packageData.components
+    packageOnlySettings = differenceBuildSettings packageSharedSettings workspaceSharedSettings
 
     componentDocs =
       case sortOn componentName packageData.components of
         [] -> [heading3 "Component: (none)"]
         components ->
           map
-            (renderComponent projectRoot packageData.packageRoot sharedDependencies sharedGhcOptions sharedExtensions)
+            (renderComponent projectRoot packageData.packageRoot packageSharedSettings)
             components
 
-renderComponent :: FilePath -> FilePath -> Set.Set String -> Set.Set String -> Set.Set String -> ComponentData -> LoreDoc
-renderComponent projectRoot packageRoot sharedDependencies sharedGhcOptions sharedExtensions componentData =
+renderComponent :: FilePath -> FilePath -> BuildSettings -> ComponentData -> LoreDoc
+renderComponent projectRoot packageRoot packageSharedSettings componentData =
   heading3 ("Component: " <> T.pack componentData.componentName)
     <> bulletList
-      [ paragraph ("source dirs: " <> T.pack (renderDirectorySet (Set.map (toProjectRelativePath projectRoot . (packageRoot </>)) componentData.sourceDirs))),
-        paragraph ("main module: " <> maybe "(none)" (T.pack . toProjectRelativePath projectRoot) (listToMaybe (componentMainModulePathCandidates packageRoot componentData))),
-        paragraph ("component specific dependencies: " <> renderStringSet (componentData.dependencies Set.\\ sharedDependencies)),
-        paragraph ("component specific GHC options: " <> renderStringSet (Set.map unGhcOption componentData.ghcOptions Set.\\ sharedGhcOptions)),
-        paragraph ("component specific extensions: " <> renderStringSet (Set.map unGhcExtension componentData.defaultExtensions Set.\\ sharedExtensions))
-      ]
+      ( [ paragraph ("source dirs: " <> T.pack (renderDirectorySet (Set.map (toProjectRelativePath projectRoot . (packageRoot </>)) componentData.sourceDirs))),
+          paragraph ("main module: " <> maybe "(none)" (T.pack . toProjectRelativePath projectRoot) (listToMaybe (componentMainModulePathCandidates packageRoot componentData)))
+        ]
+          <> renderBuildSettings "component specific" componentOnlySettings
+      )
+  where
+    componentOnlySettings = differenceBuildSettings (componentBuildSettings componentData) packageSharedSettings
+
+sharedBuildSettings :: [ComponentData] -> BuildSettings
+sharedBuildSettings componentsData =
+  BuildSettings
+    { buildDependencies = commonSetIntersection (map dependencies componentsData),
+      buildGhcOptions = commonSetIntersection (map (Set.map unGhcOption . ghcOptions) componentsData),
+      buildExtensions = commonSetIntersection (map (Set.map unGhcExtension . defaultExtensions) componentsData)
+    }
+
+componentBuildSettings :: ComponentData -> BuildSettings
+componentBuildSettings componentData =
+  BuildSettings
+    { buildDependencies = componentData.dependencies,
+      buildGhcOptions = Set.map unGhcOption componentData.ghcOptions,
+      buildExtensions = Set.map unGhcExtension componentData.defaultExtensions
+    }
+
+differenceBuildSettings :: BuildSettings -> BuildSettings -> BuildSettings
+differenceBuildSettings settings inheritedSettings =
+  BuildSettings
+    { buildDependencies = settings.buildDependencies Set.\\ inheritedSettings.buildDependencies,
+      buildGhcOptions = settings.buildGhcOptions Set.\\ inheritedSettings.buildGhcOptions,
+      buildExtensions = settings.buildExtensions Set.\\ inheritedSettings.buildExtensions
+    }
+
+renderBuildSettings :: T.Text -> BuildSettings -> [LoreDoc]
+renderBuildSettings scope settings =
+  catMaybes
+    [ renderSetting (scope <> " dependencies") settings.buildDependencies,
+      renderSetting (scope <> " GHC options") settings.buildGhcOptions,
+      renderSetting (scope <> " extensions") settings.buildExtensions
+    ]
+
+renderSetting :: T.Text -> Set.Set String -> Maybe LoreDoc
+renderSetting label values
+  | Set.null values = Nothing
+  | otherwise = Just (paragraph (label <> ": " <> renderStringSet values))
 
 renderStringSet :: Set.Set String -> T.Text
 renderStringSet values =

@@ -56,14 +56,39 @@ default-extensions:
   - RecordWildCards
   - NamedFieldPuns
   - DuplicateRecordFields
+  - OverloadedLabels
   - OverloadedStrings
-  - DeriveGeneric
-  - DerivingStrategies
-  - LambdaCase
   - FlexibleContexts
+  - FlexibleInstances
+  - StandaloneDeriving
+  - ScopedTypeVariables
+  - ExplicitForAll
+  - TypeOperators
+  - TypeApplications
+  - DeriveGeneric
+  - MonoLocalBinds
+  - DerivingStrategies
+  - BlockArguments
+  - PostfixOperators
+  - TupleSections
+  - LambdaCase
   - NumericUnderscores
   - MultiWayIf
-  - BlockArguments
+  - BangPatterns
+  - ConstraintKinds
+  - DataKinds
+  - DefaultSignatures
+  - DerivingVia
+  - EmptyDataDecls
+  - ExistentialQuantification
+  - FunctionalDependencies
   - GADTs
-  - TypeApplications
+  - KindSignatures
+  - MultiParamTypeClasses
+  - NumDecimals
+  - PatternSynonyms
+  - RankNTypes
+  - TypeFamilies
+  - ViewPatterns
+  - PartialTypeSignatures
   - OverloadedRecordDot
