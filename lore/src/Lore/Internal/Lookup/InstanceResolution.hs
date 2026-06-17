@@ -252,6 +252,7 @@ lookupChosenClassInstance cls argTypes = do
     Left err ->
       pure (Left (ChosenInstanceLookupFailed (renderLookupInstanceError err)))
 
+{- ORMOLU_DISABLE -}
 solveSelectedInstanceContext ::
   (MonadLore m) =>
   [GHC.Type] ->
@@ -274,6 +275,7 @@ solveSelectedInstanceContext contextPredicates = do
         Right ()
       _ ->
         Left (renderUnsatisfiedContextFailure contextPredicates messages)
+{- ORMOLU_ENABLE -}
 
 renderUnsatisfiedContextFailure ::
   [GHC.Type] ->

@@ -203,6 +203,7 @@ symbolMatchesOwnerHint ownerHint' symbol = do
     matchesOwnerHint hintedOwner name =
       (parseAndNormalizeName (T.pack (GHC.getOccString name))).occName == hintedOwner
 
+{- ORMOLU_DISABLE -}
 classifySymbolCategory :: GHC.TyThing -> SymbolCategory
 classifySymbolCategory = \case
   GHC.AnId {} -> SymbolValue
@@ -220,6 +221,7 @@ classifySymbolCategory = \case
     | GHC.isDataTyCon tyCon -> SymbolData
 #endif
     | otherwise -> SymbolUnknown
+{- ORMOLU_ENABLE -}
 
 data Instances = Instances
   { classInstances :: [InstEnv.ClsInst],

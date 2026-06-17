@@ -25,6 +25,7 @@ import Lore.Internal.HomeModules.Plan (ComponentSpecificOptions (..), HomeModule
 import Lore.Internal.SourcePath (normalizeSourceFilePathM)
 import Lore.Monad (MonadLore)
 
+{- ORMOLU_DISABLE -}
 applyModuleScopedArgs ::
   (MonadLore m) =>
   Map.Map HomeModuleKey ComponentSpecificOptions ->
@@ -64,6 +65,7 @@ applyModuleScopedArgs homeModulesWithComponentOptions modGraph = do
               pure summary {GHC.ms_hspp_opts = dynFlags}
         _ ->
           pure summary
+{- ORMOLU_ENABLE -}
 
 applySourcePragmas ::
   (MonadLore m) =>

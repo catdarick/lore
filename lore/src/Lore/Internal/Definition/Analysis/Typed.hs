@@ -162,6 +162,7 @@ collectExportedOccAliases homeModule tcg =
     (collectDefinitionOccAliases homeModule tcg)
     (Set.fromList (collectExportedNames homeModule tcg))
 
+{- ORMOLU_DISABLE -}
 collectMinimalTypedOccurrences :: GHC.Tc.TcGblEnv -> [MinimalTypedOccurrence]
 collectMinimalTypedOccurrences tcg =
   case GHC.Tc.tcg_rn_decls tcg of
@@ -241,6 +242,7 @@ collectMinimalTypedOccurrences tcg =
 
     isDotFieldSelectorGre =
       maybe False (const True) . globalRdrEltFieldLabel
+{- ORMOLU_ENABLE -}
 
 data OccurrenceSeed = OccurrenceSeed
   { occurrenceSeedSpan :: !GHC.SrcSpan,
@@ -265,6 +267,7 @@ localFieldLabels tcg =
       gre.gre_lcl
     ]
 
+{- ORMOLU_DISABLE -}
 fieldOccurrenceSelectorName :: GHC.FieldOcc GHC.GhcRn -> GHC.Name
 #if MIN_VERSION_ghc(9,12,0)
 fieldOccurrenceSelectorName (GHC.FieldOcc _ selectorName) =
@@ -272,7 +275,9 @@ fieldOccurrenceSelectorName (GHC.FieldOcc _ selectorName) =
 #else
 fieldOccurrenceSelectorName = GHC.foExt
 #endif
+{- ORMOLU_ENABLE -}
 
+{- ORMOLU_DISABLE -}
 fieldOccurrenceRdrName :: GHC.FieldOcc GHC.GhcRn -> GHC.RdrName
 #if MIN_VERSION_ghc(9,12,0)
 fieldOccurrenceRdrName (GHC.FieldOcc rdrName _) =
@@ -280,14 +285,18 @@ fieldOccurrenceRdrName (GHC.FieldOcc rdrName _) =
 #else
 fieldOccurrenceRdrName = GHC.unLoc . (.foLabel)
 #endif
+{- ORMOLU_ENABLE -}
 
+{- ORMOLU_DISABLE -}
 globalRdrEltName :: GHC.GlobalRdrElt -> GHC.Name
 #if MIN_VERSION_ghc(9,8,0)
 globalRdrEltName = GHC.greName
 #else
 globalRdrEltName = GHC.grePrintableName
 #endif
+{- ORMOLU_ENABLE -}
 
+{- ORMOLU_DISABLE -}
 globalRdrEltFieldLabel :: GHC.GlobalRdrElt -> Maybe GHC.FieldLabel
 #if MIN_VERSION_ghc(9,8,0)
 globalRdrEltFieldLabel gre =
@@ -302,7 +311,9 @@ globalRdrEltFieldLabel gre =
     GHC.FieldGreName fieldLabel -> Just fieldLabel
     GHC.NormalGreName _ -> Nothing
 #endif
+{- ORMOLU_ENABLE -}
 
+{- ORMOLU_DISABLE -}
 lookupGlobalRdrEnvRdrName :: GHC.RdrName -> GHC.GlobalRdrEnv -> [GHC.GlobalRdrElt]
 #if MIN_VERSION_ghc(9,8,0)
 lookupGlobalRdrEnvRdrName rdrName globalRdrEnv =
@@ -310,3 +321,4 @@ lookupGlobalRdrEnvRdrName rdrName globalRdrEnv =
 #else
 lookupGlobalRdrEnvRdrName = GHC.lookupGRE_RdrName
 #endif
+{- ORMOLU_ENABLE -}

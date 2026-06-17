@@ -306,6 +306,7 @@ interactiveImportKey import_ =
               GHC.QualifiedPost -> "qualified-post"
        in ("decl:" <> qualifier, moduleName)
 
+{- ORMOLU_DISABLE -}
 interactiveImportModuleName ::
 #if MIN_VERSION_ghc(9,14,0)
   GHC.Module ->
@@ -318,6 +319,7 @@ interactiveImportModuleName = GHC.moduleName
 #else
 interactiveImportModuleName = id
 #endif
+{- ORMOLU_ENABLE -}
 
 withAdditionalInteractiveImports :: (MonadLore m) => [GHC.InteractiveImport] -> m a -> m a
 withAdditionalInteractiveImports extraImports action =

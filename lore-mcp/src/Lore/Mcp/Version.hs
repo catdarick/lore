@@ -23,6 +23,7 @@ loreVersionText = "0.1.0.0"
 ghcVersionText :: Text
 ghcVersionText = T.pack cProjectVersion
 
+{- ORMOLU_DISABLE -}
 targetText :: Text
 targetText =
 #if defined(linux_HOST_OS) && defined(x86_64_HOST_ARCH)
@@ -30,6 +31,7 @@ targetText =
 #else
   "unknown"
 #endif
+{- ORMOLU_ENABLE -}
 
 versionJson :: Value
 versionJson =
