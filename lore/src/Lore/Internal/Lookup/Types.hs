@@ -5,6 +5,7 @@ module Lore.Internal.Lookup.Types
     SymbolsIndex (..),
     ModSummaries (..),
     NameToInstancesIndex (..),
+    InstanceEnvironmentInputs (..),
     Symbol (..),
     SymbolSuggestion (..),
     SymbolVisibility (..),
@@ -17,6 +18,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified GHC
+import qualified GHC.Core.InstEnv as InstEnv
 import GHC.Generics (Generic)
 import qualified GHC.Types.Name.Env as NameEnv
 import Lore.Internal.Ghc.ValueTypeHead (ValueTypeHeadNames)
@@ -39,6 +41,11 @@ newtype ModSummaries = ModSummaries
 
 newtype NameToInstancesIndex = NameToInstancesIndex
   { unNameToInstancesIndex :: NameEnv.NameEnv ([GHC.ClsInst], [GHC.FamInst])
+  }
+
+data InstanceEnvironmentInputs = InstanceEnvironmentInputs
+  { instanceEnvironmentLocalInstEnv :: !InstEnv.InstEnv,
+    instanceEnvironmentVisibleModules :: ![GHC.Module]
   }
 
 data Symbol = Symbol

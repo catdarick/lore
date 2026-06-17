@@ -14,6 +14,7 @@ import Lore.Internal.Definition.Cache.ParsedModuleFacts (retainParsedModuleFacts
 import Lore.Internal.Definition.Cache.ParsedOccurrenceModuleIndex (invalidateParsedOccurrenceModuleIndexCache)
 import Lore.Internal.Definition.Cache.TypedModuleFacts (retainTypedModuleFactsCacheForLoadedModules)
 import Lore.Internal.Interpreter (invalidateInterpreterContextCache)
+import Lore.Internal.Lookup.InstanceEnvironment (invalidateInstanceEnvironmentInputsCache)
 import Lore.Internal.Lookup.ModSummaries (invalidateModSummariesCache)
 import Lore.Internal.Lookup.NameToInstances (invalidateNameToInstancesIndexCache)
 import Lore.Internal.Lookup.SymbolsMap (invalidateHomeSymbolsIndexCache)
@@ -25,6 +26,7 @@ invalidateCachesForHomeModuleConfigurationChange = do
   invalidateModSummariesCache
   invalidateHomeSymbolsIndexCache
   invalidateNameToInstancesIndexCache
+  invalidateInstanceEnvironmentInputsCache
   invalidateDefinitionDerivedCaches
 
 invalidateCachesAfterSourceEdits :: (MonadLore m) => m ()
@@ -32,6 +34,7 @@ invalidateCachesAfterSourceEdits = do
   invalidateHomeSymbolsIndexCache
   invalidateModSummariesCache
   invalidateNameToInstancesIndexCache
+  invalidateInstanceEnvironmentInputsCache
   invalidateDefinitionDerivedCaches
 
 invalidateDefinitionDerivedCaches :: (MonadLore m) => m ()

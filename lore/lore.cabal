@@ -112,6 +112,7 @@ library
       Lore.Internal.Interpreter
       Lore.Internal.List
       Lore.Internal.Lookup.Cache.Types
+      Lore.Internal.Lookup.InstanceEnvironment
       Lore.Internal.Lookup.InstanceResolution
       Lore.Internal.Lookup.ModSummaries
       Lore.Internal.Lookup.Name

@@ -6,12 +6,13 @@ module Lore.Internal.Lookup.Cache.Types
     ExternalSymbolsEnvironmentKeyCache (..),
     ModSummariesCache (..),
     NameToInstancesIndexCache (..),
+    InstanceEnvironmentInputsCache (..),
   )
 where
 
 import qualified Data.Set as Set
 import Lore.Internal.Lookup.SymbolSearch.Types (SymbolSearchIndex)
-import Lore.Internal.Lookup.Types (ModSummaries, NameToInstancesIndex, SymbolsIndex)
+import Lore.Internal.Lookup.Types (InstanceEnvironmentInputs, ModSummaries, NameToInstancesIndex, SymbolsIndex)
 
 newtype HomeSymbolsIndexCache = HomeSymbolsIndexCache
   { cachedHomeSymbolsIndex :: Maybe SymbolsIndex
@@ -40,4 +41,8 @@ newtype ModSummariesCache = ModSummariesCache
 
 newtype NameToInstancesIndexCache = NameToInstancesIndexCache
   { cachedNameToInstancesIndex :: Maybe NameToInstancesIndex
+  }
+
+newtype InstanceEnvironmentInputsCache = InstanceEnvironmentInputsCache
+  { cachedInstanceEnvironmentInputs :: Maybe InstanceEnvironmentInputs
   }

@@ -10,6 +10,7 @@ module Lore.Internal.Session
     emptyLastLoadHomeModulesResultCache,
     emptyModSummariesCache,
     emptyNameToInstancesIndexCache,
+    emptyInstanceEnvironmentInputsCache,
     emptyParsedModuleFactsCache,
     emptyParsedOccurrenceModuleIndexCache,
     emptySymbolSearchIndexCache,
@@ -43,6 +44,7 @@ import Lore.Internal.Lookup.Cache.Types
   ( ExternalSymbolsEnvironmentKeyCache (..),
     ExternalSymbolsIndexCache (..),
     HomeSymbolsIndexCache (..),
+    InstanceEnvironmentInputsCache (..),
     ModSummariesCache (..),
     NameToInstancesIndexCache (..),
     SymbolSearchIndexCache (..),
@@ -82,6 +84,7 @@ data SessionContext = SessionContext
     externalSymbolsEnvironmentKeyCacheVar :: MVar ExternalSymbolsEnvironmentKeyCache,
     modSummariesCacheVar :: MVar ModSummariesCache,
     nameToInstancesIndexCacheVar :: MVar NameToInstancesIndexCache,
+    instanceEnvironmentInputsCacheVar :: MVar InstanceEnvironmentInputsCache,
     parsedOccurrenceModuleIndexCacheVar :: MVar ParsedOccurrenceModuleIndexCache,
     definitionModuleIndexCacheVar :: MVar DefinitionModuleIndexCache,
     typedModuleFactsCacheVar :: MVar TypedModuleFactsCache,
@@ -128,6 +131,10 @@ emptyModSummariesCache =
 emptyNameToInstancesIndexCache :: NameToInstancesIndexCache
 emptyNameToInstancesIndexCache =
   NameToInstancesIndexCache Nothing
+
+emptyInstanceEnvironmentInputsCache :: InstanceEnvironmentInputsCache
+emptyInstanceEnvironmentInputsCache =
+  InstanceEnvironmentInputsCache Nothing
 
 emptyParsedOccurrenceModuleIndexCache :: ParsedOccurrenceModuleIndexCache
 emptyParsedOccurrenceModuleIndexCache =
@@ -193,6 +200,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, conf
               externalSymbolsEnvironmentKeyCacheVar <- GHC.newMVar emptyExternalSymbolsEnvironmentKeyCache
               modSummariesCacheVar <- GHC.newMVar emptyModSummariesCache
               nameToInstancesIndexCacheVar <- GHC.newMVar emptyNameToInstancesIndexCache
+              instanceEnvironmentInputsCacheVar <- GHC.newMVar emptyInstanceEnvironmentInputsCache
               parsedOccurrenceModuleIndexCacheVar <- GHC.newMVar emptyParsedOccurrenceModuleIndexCache
               definitionModuleIndexCacheVar <- GHC.newMVar emptyDefinitionModuleIndexCache
               typedModuleFactsCacheVar <- GHC.newMVar emptyTypedModuleFactsCache
@@ -223,6 +231,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, conf
                       externalSymbolsEnvironmentKeyCacheVar,
                       modSummariesCacheVar,
                       nameToInstancesIndexCacheVar,
+                      instanceEnvironmentInputsCacheVar,
                       parsedOccurrenceModuleIndexCacheVar,
                       definitionModuleIndexCacheVar,
                       typedModuleFactsCacheVar,

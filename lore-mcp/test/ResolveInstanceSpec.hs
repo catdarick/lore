@@ -3,6 +3,7 @@ module ResolveInstanceSpec
   )
 where
 
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as J
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -32,6 +33,21 @@ spec =
 
         result `shouldContainText` "Selected instance:"
         result `shouldContainText` "instance Render Foo where"
+
+    it "invalidates the shared instance environment after reload" do
+      withFixtureCopy \fixtureRoot -> do
+        addReloadableInstanceFixture fixtureRoot reloadableGenericInstanceFixtureModuleSource
+        (beforeReload, afterReload) <-
+          fixtureLoreMcpAtWithCache False fixtureRoot do
+            loadFixtureHomeModules
+            beforeReload <- callToolWithArgs resolveInstanceTool (resolveInstanceArgs "TestInstance.Reload.Render TestInstance.Reload.Foo")
+            liftIO (addReloadableInstanceFixture fixtureRoot reloadableSpecificInstanceFixtureModuleSource)
+            loadFixtureHomeModules
+            afterReload <- callToolWithArgs resolveInstanceTool (resolveInstanceArgs "TestInstance.Reload.Render TestInstance.Reload.Foo")
+            pure (beforeReload, afterReload)
+
+        beforeReload `shouldContainText` "instance {-# OVERLAPPABLE #-} Show a => Render a where"
+        afterReload `shouldContainText` "instance {-# OVERLAPPING #-} Render Foo where"
 
     it "accepts optional instance prefix in query text" do
       withFixtureCopy \fixtureRoot -> do
@@ -286,6 +302,13 @@ addUnsatisfiedGenericInstanceFixture fixtureRoot = do
   createDirectoryIfMissing True moduleDir
   TIO.writeFile moduleFile unsatisfiedGenericInstanceFixtureModuleSource
 
+addReloadableInstanceFixture :: FilePath -> Text -> IO ()
+addReloadableInstanceFixture fixtureRoot source = do
+  let moduleDir = fixtureRoot </> "src" </> "TestInstance"
+      moduleFile = moduleDir </> "Reload.hs"
+  createDirectoryIfMissing True moduleDir
+  TIO.writeFile moduleFile source
+
 addMultiParamInstanceFixture :: FilePath -> IO ()
 addMultiParamInstanceFixture fixtureRoot = do
   let moduleDir = fixtureRoot </> "src" </> "TestInstance"
@@ -395,6 +418,51 @@ unsatisfiedGenericInstanceFixtureModuleSource =
       "",
       "instance Show a => Render a where",
       "  render a = show a"
+    ]
+
+reloadableGenericInstanceFixtureModuleSource :: Text
+reloadableGenericInstanceFixtureModuleSource =
+  T.unlines
+    [ "{-# LANGUAGE FlexibleInstances #-}",
+      "{-# LANGUAGE UndecidableInstances #-}",
+      "",
+      "module TestInstance.Reload",
+      "  ( Render (..),",
+      "    Foo (..)",
+      "  ) where",
+      "",
+      "class Render a where",
+      "  render :: a -> String",
+      "",
+      "data Foo = Foo",
+      "  deriving (Show)",
+      "",
+      "instance {-# OVERLAPPABLE #-} Show a => Render a where",
+      "  render a = show a"
+    ]
+
+reloadableSpecificInstanceFixtureModuleSource :: Text
+reloadableSpecificInstanceFixtureModuleSource =
+  T.unlines
+    [ "{-# LANGUAGE FlexibleInstances #-}",
+      "{-# LANGUAGE UndecidableInstances #-}",
+      "",
+      "module TestInstance.Reload",
+      "  ( Render (..),",
+      "    Foo (..)",
+      "  ) where",
+      "",
+      "class Render a where",
+      "  render :: a -> String",
+      "",
+      "data Foo = Foo",
+      "  deriving (Show)",
+      "",
+      "instance {-# OVERLAPPABLE #-} Show a => Render a where",
+      "  render a = show a",
+      "",
+      "instance {-# OVERLAPPING #-} Render Foo where",
+      "  render _ = \"specific\""
     ]
 
 multiParamInstanceFixtureModuleSource :: Text

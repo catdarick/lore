@@ -50,6 +50,7 @@ import Lore.Internal.Session
     emptyExternalSymbolsIndexCache,
     emptyGeneratedMainModulesRegistry,
     emptyHomeSymbolsIndexCache,
+    emptyInstanceEnvironmentInputsCache,
     emptyInterpreterContextCache,
     emptyLastLoadHomeModulesResultCache,
     emptyModSummariesCache,
@@ -274,6 +275,11 @@ sessionCacheResetActions =
       { sessionCacheResetActionName = "nameToInstancesIndexCacheVar",
         sessionCacheResetActionRun = \sessionContext ->
           setCacheVarStrict sessionContext.nameToInstancesIndexCacheVar emptyNameToInstancesIndexCache
+      },
+    SessionCacheResetAction
+      { sessionCacheResetActionName = "instanceEnvironmentInputsCacheVar",
+        sessionCacheResetActionRun = \sessionContext ->
+          setCacheVarStrict sessionContext.instanceEnvironmentInputsCacheVar emptyInstanceEnvironmentInputsCache
       },
     SessionCacheResetAction
       { sessionCacheResetActionName = "parsedOccurrenceModuleIndexCacheVar",

@@ -14,10 +14,8 @@ where
 -- instance is selected, and checks the selected instance context with GHC's
 -- interactive constraint solver.
 
-import Control.Monad (forM)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
-import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
@@ -40,7 +38,7 @@ import qualified GHC.Tc.Utils.Zonk as Zonk
 #endif
 import qualified GHC.Types.Error as TypeError
 import qualified GHC.Unit.External as External
-import Lore.Internal.Lookup.Orphans (collectIndexModules)
+import Lore.Internal.Lookup.InstanceEnvironment (getCachedInstanceEnvironmentInputs)
 import Lore.Internal.Lookup.TypeQuery
   ( ParsedTypeQuery (..),
     ResolvedTypeQuery (..),
@@ -51,6 +49,7 @@ import Lore.Internal.Lookup.TypeQuery
     resolveParsedTypeQueryNames,
     withAdditionalInteractiveImports,
   )
+import Lore.Internal.Lookup.Types (InstanceEnvironmentInputs (..))
 import Lore.Monad (MonadLore)
 import UnliftIO (tryAny)
 
@@ -157,39 +156,12 @@ buildInstanceEnvs :: (MonadLore m) => m InstEnv.InstEnvs
 buildInstanceEnvs = do
   hscEnv <- GHC.getSession
   eps <- liftIO (DriverEnv.hscEPS hscEnv)
-  loadedInfo <- collectLoadedHomeInstanceInfo
-  visibleOrphans <- collectIndexModules loadedInfo.loadedHomeModules
-  let localInstEnv =
-        InstEnv.extendInstEnvList InstEnv.emptyInstEnv loadedInfo.loadedHomeClassInstances
+  inputs <- getCachedInstanceEnvironmentInputs
   pure
     InstEnv.InstEnvs
       { InstEnv.ie_global = External.eps_inst_env eps,
-        InstEnv.ie_local = localInstEnv,
-        InstEnv.ie_visible = Plugins.mkModuleSet visibleOrphans
-      }
-
-data LoadedHomeInstanceInfo = LoadedHomeInstanceInfo
-  { loadedHomeModules :: ![GHC.Module],
-    loadedHomeClassInstances :: ![InstEnv.ClsInst]
-  }
-
-collectLoadedHomeInstanceInfo :: (MonadLore m) => m LoadedHomeInstanceInfo
-collectLoadedHomeInstanceInfo = do
-  moduleGraph <- GHC.getModuleGraph
-  let modules = [GHC.ms_mod ms | ms <- GHC.mgModSummaries moduleGraph]
-  loaded <- fmap catMaybes $
-    forM modules \module_ ->
-      tryAny (GHC.getModuleInfo module_) >>= \case
-        Right (Just info) ->
-          pure (Just (module_, GHC.modInfoInstances info))
-        Right Nothing ->
-          pure Nothing
-        Left _ ->
-          pure Nothing
-  pure
-    LoadedHomeInstanceInfo
-      { loadedHomeModules = map fst loaded,
-        loadedHomeClassInstances = concatMap snd loaded
+        InstEnv.ie_local = inputs.instanceEnvironmentLocalInstEnv,
+        InstEnv.ie_visible = Plugins.mkModuleSet inputs.instanceEnvironmentVisibleModules
       }
 
 resolveInstanceContextStatus ::
