@@ -3,6 +3,13 @@ version: "3"
 dotenv: ['.env']
 
 tasks:
+  release:set-version:
+    desc: Set the Lore release version (for example, VERSION=0.2.0.0)
+    requires:
+      vars: [VERSION]
+    cmds:
+      - python3 scripts/set-release-version.py "{{.VERSION}}"
+
   build:
     desc: Build the workspace with stack
     cmds:
