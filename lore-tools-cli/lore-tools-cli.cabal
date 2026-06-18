@@ -32,6 +32,7 @@ library
       Lore.Tools.Cli.Registry
       Lore.Tools.Cli.Render
       Lore.Tools.Cli.SingleShot
+      Lore.Tools.Cli.Tools.AnalyzeCompilationBottlenecks
       Lore.Tools.Cli.Tools.Common
       Lore.Tools.Cli.Tools.CreateTemporalModule
       Lore.Tools.Cli.Tools.DebugCacheMemory

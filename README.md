@@ -8,7 +8,7 @@ Choose the frontend that matches the intended workflow:
 
 - **[`pi-lore`](pi-lore/README.md)** — the easiest way to use Lore in Pi, with automatic server setup and context-management features.
 - **[`lore-mcp`](lore-mcp/README.md)** — a stdio Model Context Protocol server for Pi, IDEs, and other MCP clients.
-- **`lore-cli`** — an interactive and single-command terminal frontend, useful for exploration and CI.
+- **[`lore-cli`](lore-tools-cli/README.md)** — an interactive and single-command terminal frontend, useful for exploration and CI.
 
 ## What Lore provides
 

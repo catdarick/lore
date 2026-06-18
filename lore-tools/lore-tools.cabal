@@ -22,6 +22,7 @@ source-repository head
 library
   exposed-modules:
       Lore.Tools
+      Lore.Tools.AnalyzeCompilationBottlenecks
       Lore.Tools.CreateTemporalModule
       Lore.Tools.DebugCacheMemory
       Lore.Tools.Directory

@@ -4,6 +4,7 @@ module Lore.Internal.HomeModules.Plan
     HomeModulesSelection (..),
     HomeModulesLoadPlan (..),
     HomeModulesComponentPlan (..),
+    HomeModuleComponent (..),
     HomeModuleKey (..),
     ComponentSpecificOptions (..),
     prepareHomeModulesLoadInputsFromProjectEnvironment,
@@ -32,6 +33,7 @@ import Lore.Internal.Ghc.PackageEnvironment.Types
 import Lore.Internal.HomeModules.SyntheticMain (entryHomeModuleSource)
 import Lore.Internal.Package
   ( ComponentData (..),
+    ComponentKind,
     PackageData (..),
     commonSetIntersection,
     componentMainModulePathCandidates,
@@ -54,7 +56,21 @@ data HomeModulesComponentPlan = HomeModulesComponentPlan
   { commonLanguage :: Maybe Language,
     commonExtensions :: Set.Set Extension,
     commonGhcOptions :: Set.Set GhcOption,
-    homeModulesWithComponentOptions :: Map.Map HomeModuleKey ComponentSpecificOptions
+    homeModulesWithComponentOptions :: Map.Map HomeModuleKey ComponentSpecificOptions,
+    homeModulesWithComponents :: Map.Map HomeModuleKey (Set.Set HomeModuleComponent)
+  }
+
+data HomeModuleComponent = HomeModuleComponent
+  { homeModuleComponentPackageName :: String,
+    homeModuleComponentName :: String,
+    homeModuleComponentKind :: ComponentKind
+  }
+  deriving stock (Eq, Ord, Show)
+
+data ComponentHomeModules = ComponentHomeModules
+  { componentHomeModulesIdentity :: HomeModuleComponent,
+    componentHomeModulesOptions :: ComponentSpecificOptions,
+    componentHomeModulesKeys :: Set.Set HomeModuleKey
   }
 
 data ComponentSpecificOptions = ComponentSpecificOptions
@@ -89,7 +105,8 @@ data HomeModulesSelection = HomeModulesSelection
 data HomeModulesLoadPlan = HomeModulesLoadPlan
   { homeModulesLoadConfig :: HomeModulesLoadConfig,
     homeModulesSelection :: HomeModulesSelection,
-    homeModulesComponentOptions :: Map.Map HomeModuleKey ComponentSpecificOptions
+    homeModulesComponentOptions :: Map.Map HomeModuleKey ComponentSpecificOptions,
+    homeModulesComponents :: Map.Map HomeModuleKey (Set.Set HomeModuleComponent)
   }
 
 prepareHomeModulesLoadInputsFromProjectEnvironment :: (MonadLore m) => ProjectEnvironmentState -> m HomeModulesLoadInputs
@@ -131,7 +148,8 @@ prepareHomeModulesLoadPlan inputs = do
               homeModulesCommonGhcOptions = componentPlan.commonGhcOptions
             },
         homeModulesSelection = selection,
-        homeModulesComponentOptions = componentPlan.homeModulesWithComponentOptions
+        homeModulesComponentOptions = componentPlan.homeModulesWithComponentOptions,
+        homeModulesComponents = componentPlan.homeModulesWithComponents
       }
 
 computeHomeModuleSourceDirs :: [PackageData] -> [TemporalModule] -> Set.Set FilePath
@@ -186,7 +204,7 @@ prepareHomeModulesComponentPlan packages = do
       commonExtensions = commonSetIntersection (map defaultExtensions components)
       commonGhcOptions = commonSetIntersection (map (.ghcOptions) components)
 
-  homeModulesWithComponentOptionsByComponent <- forM rootedComponents \(packageName, packageRoot, component) -> do
+  componentHomeModules <- forM rootedComponents \(packageName, packageRoot, component) -> do
     let componentSpecificExtensions = component.defaultExtensions Set.\\ commonExtensions
         componentSpecificGhcOptions = component.ghcOptions Set.\\ commonGhcOptions
         componentSpecificLanguage =
@@ -199,17 +217,39 @@ prepareHomeModulesComponentPlan packages = do
               extensions = componentSpecificExtensions,
               ghcOptions = componentSpecificGhcOptions
             }
-    componentHomeModules <- homeModuleKeysForComponent packageName packageRoot component
-    pure (Map.fromSet (const componentSpecificOptions) componentHomeModules)
+        componentIdentity =
+          HomeModuleComponent
+            { homeModuleComponentPackageName = packageName,
+              homeModuleComponentName = component.componentName,
+              homeModuleComponentKind = component.componentKind
+            }
+    componentHomeModuleKeys <- homeModuleKeysForComponent packageName packageRoot component
+    pure
+      ComponentHomeModules
+        { componentHomeModulesIdentity = componentIdentity,
+          componentHomeModulesOptions = componentSpecificOptions,
+          componentHomeModulesKeys = componentHomeModuleKeys
+        }
 
-  homeModulesWithComponentOptions <- mergeHomeModuleComponentOptions homeModulesWithComponentOptionsByComponent
+  homeModulesWithComponentOptions <-
+    mergeHomeModuleComponentOptions
+      [ Map.fromSet (const component.componentHomeModulesOptions) component.componentHomeModulesKeys
+      | component <- componentHomeModules
+      ]
+  let homeModulesWithComponents =
+        Map.unionsWith
+          Set.union
+          [ Map.fromSet (const (Set.singleton component.componentHomeModulesIdentity)) component.componentHomeModulesKeys
+          | component <- componentHomeModules
+          ]
 
   pure
     HomeModulesComponentPlan
       { commonLanguage = commonLanguage,
         commonExtensions = commonExtensions,
         commonGhcOptions = commonGhcOptions,
-        homeModulesWithComponentOptions = homeModulesWithComponentOptions
+        homeModulesWithComponentOptions = homeModulesWithComponentOptions,
+        homeModulesWithComponents = homeModulesWithComponents
       }
 
 commonComponentLanguage :: [ComponentData] -> Maybe Language

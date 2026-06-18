@@ -1,5 +1,6 @@
 module Lore.Tools
   ( module Lore.Tools.CreateTemporalModule,
+    module Lore.Tools.AnalyzeCompilationBottlenecks,
     module Lore.Tools.DebugCacheMemory,
     module Lore.Tools.DiscoverDirectory,
     module Lore.Tools.DiscoverProject,
@@ -22,6 +23,7 @@ module Lore.Tools
   )
 where
 
+import Lore.Tools.AnalyzeCompilationBottlenecks
 import Lore.Tools.CreateTemporalModule
 import Lore.Tools.DebugCacheMemory
 import Lore.Tools.DiscoverDirectory

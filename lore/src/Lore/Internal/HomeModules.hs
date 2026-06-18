@@ -5,6 +5,7 @@ module Lore.Internal.HomeModules
     defaultLoadHomeModulesOptions,
     lookupLastLoadHomeModulesResultCache,
     storeLastLoadHomeModulesResultCache,
+    prepareConfiguredHomeModulesLoadPlan,
     loadHomeModules,
   )
 where
@@ -31,7 +32,7 @@ import Lore.Internal.HomeModules.Result (HomeModulesLoadSummary (..), LoadHomeMo
 import Lore.Internal.Interpreter (refreshInterpreterContext)
 import Lore.Internal.Lookup.SymbolsMap (setExternalSymbolsEnvironmentKey)
 import Lore.Internal.ProjectEnvironment.Refresh (refreshProjectEnvironment)
-import Lore.Internal.ProjectEnvironment.Types (ProjectEnvironmentRefresh (..))
+import Lore.Internal.ProjectEnvironment.Types (ProjectEnvironmentFailure, ProjectEnvironmentRefresh (..))
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.Session.Cache.Types (LastLoadHomeModulesResultCache (..))
 import Lore.Internal.Session.CacheInvalidation (invalidateCachesForHomeModuleConfigurationChange)
@@ -64,17 +65,26 @@ storeLastLoadHomeModulesResultCache loadHomeModulesResult = do
 
 loadHomeModules :: (MonadLore m) => LoadHomeModulesOptions -> m LoadHomeModulesResult
 loadHomeModules options = do
-  refreshResult <- refreshProjectEnvironment
-  result <- case refreshResult of
+  configuredPlan <- prepareConfiguredHomeModulesLoadPlan
+  result <- case configuredPlan of
     Left failure -> pure (LoadHomeModulesPreparationFailed failure)
-    Right refresh -> do
-      inputs <- prepareHomeModulesLoadInputsFromProjectEnvironment refresh.refreshedProjectEnvironment
-      plan <- prepareHomeModulesLoadPlan inputs
-      configureHomeModulesSession refresh.projectEnvironmentChanged plan
+    Right plan -> do
       attempt <- runHomeModulesLoad options plan
       finalizeHomeModulesLoad plan attempt
   storeLastLoadHomeModulesResultCache result
   pure result
+
+prepareConfiguredHomeModulesLoadPlan :: (MonadLore m) => m (Either ProjectEnvironmentFailure HomeModulesLoadPlan)
+prepareConfiguredHomeModulesLoadPlan = do
+  refreshResult <- refreshProjectEnvironment
+  case refreshResult of
+    Left failure ->
+      pure (Left failure)
+    Right refresh -> do
+      inputs <- prepareHomeModulesLoadInputsFromProjectEnvironment refresh.refreshedProjectEnvironment
+      plan <- prepareHomeModulesLoadPlan inputs
+      configureHomeModulesSession refresh.projectEnvironmentChanged plan
+      pure (Right plan)
 
 configureHomeModulesSession :: (MonadLore m) => Bool -> HomeModulesLoadPlan -> m ()
 configureHomeModulesSession packageEnvironmentChanged plan = do

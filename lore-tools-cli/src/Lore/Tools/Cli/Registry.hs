@@ -7,6 +7,7 @@ import Lore.Tools.Cli.Internal.Tool
   ( LoreCliM,
     SomeCliTool (SomeCliTool),
   )
+import Lore.Tools.Cli.Tools.AnalyzeCompilationBottlenecks (analyzeCompilationBottlenecksCliTool)
 import Lore.Tools.Cli.Tools.CreateTemporalModule (createTemporalModuleCliTool)
 import Lore.Tools.Cli.Tools.DebugCacheMemory (debugCacheMemoryCliTool)
 import Lore.Tools.Cli.Tools.DiscoverDirectory (discoverDirectoryCliTool)
@@ -27,6 +28,7 @@ import Lore.Tools.Cli.Tools.SearchSymbols (searchSymbolsCliTool)
 cliTools :: [SomeCliTool LoreCliM]
 cliTools =
   [ SomeCliTool reloadCliTool,
+    SomeCliTool analyzeCompilationBottlenecksCliTool,
     SomeCliTool discoverProjectCliTool,
     SomeCliTool discoverDirectoryCliTool,
     SomeCliTool searchSymbolsCliTool,

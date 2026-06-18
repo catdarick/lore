@@ -10,7 +10,6 @@ module Lore.Internal.HomeModules.LoadAttempt
 where
 
 import qualified Control.Concurrent.MVar as MVar
-import Control.Monad (unless)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
 import Data.List (intercalate)
@@ -22,8 +21,8 @@ import qualified GHC.Driver.Make as GHC
 import qualified GHC.Types.Error as GHC.Error
 #endif
 import GHC.Utils.Monad (mapMaybeM)
-import Lore.Diagnostics (Diagnostic (..), driverMessagesToDiagnostics, withDiagnosticsCapturing)
-import Lore.Internal.HomeModules.ModuleGraphPatch (applyModuleScopedArgs)
+import Lore.Diagnostics (Diagnostic (..), withDiagnosticsCapturing)
+import Lore.Internal.HomeModules.ModuleGraph (PreparedHomeModuleGraph (..), preparePatchedHomeModuleGraph)
 import Lore.Internal.HomeModules.Plan (HomeModulesLoadPlan (..))
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
@@ -44,21 +43,8 @@ data HomeModulesLoadAttempt = HomeModulesLoadAttempt
 {- ORMOLU_DISABLE -}
 loadHomeModulesOnce :: (MonadLore m) => HomeModulesLoadPlan -> m HomeModulesLoadAttempt
 loadHomeModulesOnce plan = do
-  Log.debug "Starting dependency analysis and home-module loading..."
-#if MIN_VERSION_ghc(9,14,0)
-  (errs, modGraph) <- GHC.depanalE GHC.Error.mkUnknownDiagnostic Nothing [] False
-#else
-  (errs, modGraph) <- GHC.depanalE [] False
-#endif
-  let dependencyDiagnostics = driverMessagesToDiagnostics errs
-  unless (null errs) $
-    Log.err $
-      "Errors during dependency analysis: "
-        <> intercalate "\n" (map show dependencyDiagnostics)
-
-  Log.debug "Patching module graph with component-specific GHC options..."
-  patchedModGraph <- applyModuleScopedArgs plan.homeModulesComponentOptions modGraph
-  moduleSummariesByFile <- buildModuleSummariesByFile patchedModGraph
+  preparedGraph <- preparePatchedHomeModuleGraph plan
+  let patchedModGraph = preparedGraph.preparedHomeModuleGraphModuleGraph
 
   ifaceCacheVar <- asks ifaceCacheVar
   ifaceCache <- liftIO (MVar.readMVar ifaceCacheVar)
@@ -76,26 +62,13 @@ loadHomeModulesOnce plan = do
 
   pure
     HomeModulesLoadAttempt
-      { homeModulesLoadAttemptDiagnostics = dependencyDiagnostics <> diagnostics,
+      { homeModulesLoadAttemptDiagnostics = preparedGraph.preparedHomeModuleGraphDiagnostics <> diagnostics,
         homeModulesLoadAttemptResult = loadResult,
-        homeModulesLoadAttemptModuleSummariesByFile = moduleSummariesByFile,
+        homeModulesLoadAttemptModuleSummariesByFile = preparedGraph.preparedHomeModuleGraphSummariesByFile,
         homeModulesLoadAttemptAutoRefactFiles = Set.empty,
         homeModulesLoadAttemptAutoRefactSummaryByFile = []
       }
 {- ORMOLU_ENABLE -}
-
-buildModuleSummariesByFile :: (MonadLore m) => GHC.ModuleGraph -> m (Map.Map FilePath GHC.ModSummary)
-buildModuleSummariesByFile moduleGraph = do
-  pairs <- mapMaybeM summaryPair (GHC.mgModSummaries moduleGraph)
-  pure (Map.fromList pairs)
-  where
-    summaryPair summary =
-      case GHC.ml_hs_file (GHC.ms_location summary) of
-        Nothing ->
-          pure Nothing
-        Just sourceFile -> do
-          normalizedFilePath <- normalizeSourceFilePathM sourceFile
-          pure (Just (normalizedFilePath, summary))
 
 collectLoadedModules :: (MonadLore m) => GHC.ModuleGraph -> m (Set.Set GHC.Module)
 collectLoadedModules moduleGraph = do

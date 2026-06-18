@@ -8,9 +8,11 @@ module Lore.HomeModules
     defaultLoadHomeModulesOptions,
     lookupLastLoadHomeModulesResult,
     loadHomeModules,
+    module Lore.HomeModules.CompilationGraph,
   )
 where
 
+import Lore.HomeModules.CompilationGraph
 import Lore.Internal.HomeModules
   ( HomeModulesLoadSummary (..),
     LoadHomeModulesOptions (..),

@@ -78,6 +78,7 @@ library:
   - Lore.TestSuite
   - Lore.TemporalModules
   - Lore.HomeModules
+  - Lore.HomeModules.CompilationGraph
   - Lore.HomeModules.Plan
   - Lore.Internal.Ghc.ValueTypeHead
   - Lore.Internal.Lookup.ModulePattern
@@ -127,6 +128,7 @@ tests:
     - Lore.Definition.Rendering
     - Lore.Diagnostics
     - Lore.HomeModules
+    - Lore.HomeModules.CompilationGraph
     - Lore.HomeModules.Plan
     - Lore.Internal.BuildTool.Dependencies
     - Lore.Internal.BuildTool.Environment
@@ -169,8 +171,10 @@ tests:
     - Lore.Internal.Ghc.ValueTypeHead
     - Lore.Internal.HomeModules
     - Lore.Internal.HomeModules.AutoRefactorLoop
+    - Lore.Internal.HomeModules.CompilationGraph
     - Lore.Internal.HomeModules.EntryModules
     - Lore.Internal.HomeModules.LoadAttempt
+    - Lore.Internal.HomeModules.ModuleGraph
     - Lore.Internal.HomeModules.ModuleGraphPatch
     - Lore.Internal.HomeModules.Plan
     - Lore.Internal.HomeModules.Result
