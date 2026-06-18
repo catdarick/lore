@@ -26,6 +26,7 @@ import qualified GHC.Driver.Errors.Types as GHC.Driver
 import qualified GHC.Driver.Flags as DriverFlags
 import GHC.Types.Error (MessageClass (..))
 import qualified GHC.Types.Error as GHC
+import qualified GHC.Utils.Error as GHC
 import GHC.Utils.Logger (LogAction)
 import qualified GHC.Utils.Outputable as GHC
 import Lore.Internal.SourceSpan (srcSpanToSpan)
@@ -98,7 +99,7 @@ driverMessageEnvelopeToDiagnostic env =
           diagnosticWarningFlag = reasonToWarningFlag (GHC.diagnosticReason msg),
           diagnosticCode = fmap fromDiagnosticCode (GHC.diagnosticCode msg),
           diagnosticSpan = toDiagnosticSpan (GHC.errMsgSpan env),
-          diagnosticMessage = renderDecorated (GHC.diagnosticMessage (GHC.defaultDiagnosticOpts @GHC.Driver.DriverMessage) msg),
+          diagnosticMessage = renderSDoc (GHC.pprLocMsgEnvelope (GHC.defaultDiagnosticOpts @GHC.Driver.DriverMessage) env),
           diagnosticHints = map renderHint (GHC.diagnosticHints msg)
         }
 
@@ -112,7 +113,7 @@ ghcMessageEnvelopeToDiagnostic env =
           diagnosticWarningFlag = reasonToWarningFlag (GHC.diagnosticReason msg),
           diagnosticCode = fmap fromDiagnosticCode (GHC.diagnosticCode msg),
           diagnosticSpan = toDiagnosticSpan (GHC.errMsgSpan env),
-          diagnosticMessage = renderDecorated (GHC.diagnosticMessage (GHC.defaultDiagnosticOpts @GHC.Driver.GhcMessage) msg),
+          diagnosticMessage = renderSDoc (GHC.pprLocMsgEnvelope (GHC.defaultDiagnosticOpts @GHC.Driver.GhcMessage) env),
           diagnosticHints = map renderHint (GHC.diagnosticHints msg)
         }
 
@@ -199,12 +200,9 @@ toDiagnosticSpan srcSpan =
           _ ->
             T.pack (show srcSpan)
 
-renderDecorated :: GHC.DecoratedSDoc -> Text
-renderDecorated =
-  T.pack
-    . GHC.showSDocUnsafe
-    . GHC.vcat
-    . GHC.unDecorated
+renderSDoc :: GHC.SDoc -> Text
+renderSDoc =
+  T.pack . GHC.showSDocUnsafe
 
 renderHint :: GHC.GhcHint -> Text
 renderHint =

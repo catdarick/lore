@@ -12,7 +12,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Lore (Diagnostic (..))
 import qualified Lore as Core
-import Lore.Tools.Render.Diagnostics (diagnosticSummaryDoc)
+import Lore.Tools.Render.Diagnostics (diagnosticHintsDoc, diagnosticMessageBody)
 import Lore.Tools.Render.Doc (LoreDoc, bulletList, heading2, paragraph)
 import Lore.Tools.Result
   ( PartialLoadWarning,
@@ -56,8 +56,17 @@ renderExecuteCode = \case
   ExecuteCodeFailed warning diagnostics hints ->
     withPartialLoadWarning warning $
       heading2 "Execution failed"
-        <> diagnosticSummaryDoc diagnostics
+        <> executionDiagnosticsDoc diagnostics
         <> likelyFixesDoc hints
+
+executionDiagnosticsDoc :: [Diagnostic] -> LoreDoc
+executionDiagnosticsDoc diagnostics =
+  case diagnostics of
+    [] ->
+      bulletList [paragraph "No diagnostics were produced."]
+    _ ->
+      bulletList (map (paragraph . diagnosticMessageBody) diagnostics)
+        <> diagnosticHintsDoc (concatMap (.diagnosticHints) diagnostics)
 
 likelyFixesDoc :: [Text] -> LoreDoc
 likelyFixesDoc hints =

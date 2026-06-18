@@ -20,6 +20,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
+import qualified GHC.Driver.Session as GHC.Session
 import GHC.IO.Handle (hDuplicate, hDuplicateTo)
 import qualified GHC.Types.SourceError as GHC.SourceError
 import Lore.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (..), ghcMessagesToDiagnostics)
@@ -114,26 +115,37 @@ mapMMaybe f =
 
 executeCompiledStatement :: (MonadLore m) => Maybe FilePath -> Text -> m (Either [Diagnostic] String)
 executeCompiledStatement maybeDirectory source =
-  withInterpretExecutionContext helperImports do
-    catches
-      ( do
-          redirectedExecution <- runStatementWithRedirect maybeDirectory (T.unpack source)
-          case redirectedExecResult redirectedExecution of
-            Left runtimeException ->
-              pure (Left [runtimeExceptionDiagnostic (Just redirectedExecution.redirectedOutput) runtimeException])
-            Right executionResult ->
-              case executionResult of
-                GHC.ExecComplete {GHC.execResult = Left runtimeException} ->
-                  pure (Left [runtimeExceptionDiagnostic (Just redirectedExecution.redirectedOutput) runtimeException])
-                GHC.ExecBreak {} ->
-                  pure (Left [unexpectedInterpreterResultDiagnostic "ExecBreak"])
-                GHC.ExecComplete {} ->
-                  pure (Right redirectedExecution.redirectedOutput)
-      )
-      [ Handler \sourceError ->
-          pure (Left (ghcMessagesToDiagnostics (GHC.SourceError.srcErrorMessages sourceError))),
-        Handler (pure . Left . pure . runtimeExceptionDiagnostic Nothing)
-      ]
+  withInterpreterWarningsAllowed $
+    withInterpretExecutionContext helperImports do
+      catches
+        ( do
+            redirectedExecution <- runStatementWithRedirect maybeDirectory (T.unpack source)
+            case redirectedExecResult redirectedExecution of
+              Left runtimeException ->
+                pure (Left [runtimeExceptionDiagnostic (Just redirectedExecution.redirectedOutput) runtimeException])
+              Right executionResult ->
+                case executionResult of
+                  GHC.ExecComplete {GHC.execResult = Left runtimeException} ->
+                    pure (Left [runtimeExceptionDiagnostic (Just redirectedExecution.redirectedOutput) runtimeException])
+                  GHC.ExecBreak {} ->
+                    pure (Left [unexpectedInterpreterResultDiagnostic "ExecBreak"])
+                  GHC.ExecComplete {} ->
+                    pure (Right redirectedExecution.redirectedOutput)
+        )
+        [ Handler \sourceError ->
+            pure (Left (ghcMessagesToDiagnostics (GHC.SourceError.srcErrorMessages sourceError))),
+          Handler (pure . Left . pure . runtimeExceptionDiagnostic Nothing)
+        ]
+
+withInterpreterWarningsAllowed :: (MonadLore m) => m a -> m a
+withInterpreterWarningsAllowed action = do
+  originalDynFlags <- GHC.getSessionDynFlags
+  logger <- GHC.getLogger
+  (parsedDynFlags, _leftoverArgs, _warnings) <-
+    GHC.parseDynamicFlags logger originalDynFlags [GHC.noLoc "-Wwarn"]
+  let interpreterDynFlags = GHC.Session.gopt_unset parsedDynFlags GHC.Session.Opt_WarnIsError
+  GHC.setSessionDynFlags interpreterDynFlags
+  action `finally` GHC.setSessionDynFlags originalDynFlags
 
 runStatementWithRedirect :: (MonadLore m) => Maybe FilePath -> String -> m RedirectedExecution
 runStatementWithRedirect maybeDirectory statement = do
