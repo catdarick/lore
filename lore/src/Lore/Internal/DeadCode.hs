@@ -1,6 +1,7 @@
 module Lore.Internal.DeadCode
   ( DeadCodeOptions (..),
     DeadDefinition (..),
+    DeadDefinitionKind (..),
     DeadCodeResult (..),
     findDeadCode,
   )
@@ -16,6 +17,7 @@ import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
 import Lore.Internal.Definition.ProjectIndex
   ( ProjectDefinitionIndex (..),
+    dependenciesForDeclaration,
     loadProjectDefinitionIndex,
   )
 import Lore.Internal.Definition.Reachability (reachableDeclarationIds)
@@ -35,8 +37,14 @@ data DeadCodeOptions = DeadCodeOptions
     deadCodeAliveNames :: Set.Set GHC.Name
   }
 
+data DeadDefinitionKind
+  = SafeDeleteDeadDefinition
+  | TestOnlyDeadDefinition
+  deriving stock (Eq, Generic)
+
 data DeadDefinition = DeadDefinition
-  { deadDefinitionSource :: DefinitionSource,
+  { deadDefinitionKind :: DeadDefinitionKind,
+    deadDefinitionSource :: DefinitionSource,
     deadDefinitionNames :: Set.Set GHC.Name
   }
   deriving stock (Eq, Generic)
@@ -49,10 +57,13 @@ data DeadCodeResult = DeadCodeResult
   }
   deriving stock (Eq, Generic)
 
+instance NFData DeadDefinitionKind
+
 instance NFData DeadDefinition where
-  rnf DeadDefinition {deadDefinitionSource, deadDefinitionNames} =
-    rnf deadDefinitionSource `seq`
-      rnf deadDefinitionNames
+  rnf DeadDefinition {deadDefinitionKind, deadDefinitionSource, deadDefinitionNames} =
+    rnf deadDefinitionKind `seq`
+      rnf deadDefinitionSource `seq`
+        rnf deadDefinitionNames
 
 instance NFData DeadCodeResult where
   rnf DeadCodeResult {deadCodeTotalDefinitions, deadCodeAliveDefinitions, deadCodeDeadDefinitions, deadCodeWarnings} =
@@ -100,7 +111,12 @@ findDeadCode options = do
       allDefinitionIds =
         Map.keysSet definitionSourcesById
       deadDefinitions =
-        collectDeadDefinitions options projectIndex aliveDefinitionIds
+        collectDeadDefinitions
+          options
+          projectIndex
+          aliveDefinitionIds
+          reachableFromNonTestRoots
+          reachableFromTestRoots
   let result =
         DeadCodeResult
           { deadCodeTotalDefinitions = Set.size allDefinitionIds,
@@ -204,18 +220,26 @@ collectDeadDefinitions ::
   DeadCodeOptions ->
   ProjectDefinitionIndex ->
   Set.Set DefinitionId ->
+  Set.Set DefinitionId ->
+  Set.Set DefinitionId ->
   [DeadDefinition]
-collectDeadDefinitions options projectIndex aliveDefinitionIds =
-  sortOn deadDefinitionSortKey $
-    [ DeadDefinition
-        { deadDefinitionSource = source,
-          deadDefinitionNames = source.definitionSourceNames
-        }
-    | (definitionId, source) <- Map.toList projectIndex.projectDefinitionCatalog.definitionSourcesById,
-      Set.notMember definitionId aliveDefinitionIds,
-      isReportableDefinition source
-    ]
+collectDeadDefinitions options projectIndex aliveDefinitionIds reachableFromNonTestRoots reachableFromTestRoots =
+  orderedDeadDefinitions SafeDeleteDeadDefinition safeDeleteDeadDefinitionIds
+    <> orderedDeadDefinitions TestOnlyDeadDefinition testOnlyDeadDefinitionIds
   where
+    (safeDeleteDeadDefinitionIds, testOnlyDeadDefinitionIds) =
+      Map.foldlWithKey' collectDefinition (Set.empty, Set.empty) projectIndex.projectDefinitionCatalog.definitionSourcesById
+
+    collectDefinition (safeIds, testOnlyIds) definitionId source
+      | Set.member definitionId aliveDefinitionIds =
+          (safeIds, testOnlyIds)
+      | not (isReportableDefinition source) =
+          (safeIds, testOnlyIds)
+      | definitionIsReachableOnlyFromTests definitionId =
+          (safeIds, Set.insert definitionId testOnlyIds)
+      | otherwise =
+          (Set.insert definitionId safeIds, testOnlyIds)
+
     isReportableDefinition source =
       case options.deadCodeTargetModules of
         Nothing ->
@@ -223,10 +247,109 @@ collectDeadDefinitions options projectIndex aliveDefinitionIds =
         Just targetModules ->
           definitionSourceModule source `Set.member` targetModules
 
-deadDefinitionSortKey ::
-  DeadDefinition ->
+    definitionIsReachableOnlyFromTests definitionId =
+      Set.member definitionId reachableFromTestRoots
+        && Set.notMember definitionId reachableFromNonTestRoots
+
+    orderedDeadDefinitions kind definitionIds =
+      [ DeadDefinition
+          { deadDefinitionKind = kind,
+            deadDefinitionSource = source,
+            deadDefinitionNames = source.definitionSourceNames
+          }
+      | definitionId <- safeDeleteOrderedDefinitionIds projectIndex definitionIds,
+        Just source <- [Map.lookup definitionId projectIndex.projectDefinitionCatalog.definitionSourcesById]
+      ]
+
+safeDeleteOrderedDefinitionIds ::
+  ProjectDefinitionIndex ->
+  Set.Set DefinitionId ->
+  [DefinitionId]
+safeDeleteOrderedDefinitionIds projectIndex definitionIds =
+  go initialRemaining initialReady initialDependentCounts []
+  where
+    sourceOrderedDefinitionIds =
+      sortOn (definitionIdSortKey projectIndex) (Set.toList definitionIds)
+    rankByDefinitionId =
+      Map.fromList (zip sourceOrderedDefinitionIds [0 :: Int ..])
+    rankedDefinitionId definitionId =
+      (Map.findWithDefault maxBound definitionId rankByDefinitionId, definitionId)
+    dependenciesById =
+      Map.fromSet dependenciesWithinDeadDefinitions definitionIds
+    dependenciesWithinDeadDefinitions definitionId =
+      dependenciesForDeclaration projectIndex definitionId `Set.intersection` definitionIds
+    initialDependentCounts =
+      Map.foldl' countDependents (Map.fromSet (const (0 :: Int)) definitionIds) dependenciesById
+    countDependents dependentCounts dependencies =
+      Set.foldl'
+        (\counts dependencyId -> Map.adjust (+ 1) dependencyId counts)
+        dependentCounts
+        dependencies
+    initialRemaining =
+      Set.fromList (map rankedDefinitionId sourceOrderedDefinitionIds)
+    initialReady =
+      Set.filter
+        (\(_, definitionId) -> Map.findWithDefault 0 definitionId initialDependentCounts == 0)
+        initialRemaining
+
+    go remaining ready dependentCounts ordered
+      | Set.null remaining =
+          reverse ordered
+      | otherwise =
+          let selected@(_, selectedDefinitionId) =
+                case Set.minView ready of
+                  Just (readyDefinitionId, _) ->
+                    readyDefinitionId
+                  Nothing ->
+                    case Set.minView remaining of
+                      Just (cycleDefinitionId, _) ->
+                        cycleDefinitionId
+                      Nothing ->
+                        error "safeDeleteOrderedDefinitionIds: impossible empty remaining set"
+              remainingWithoutSelected =
+                Set.delete selected remaining
+              readyWithoutSelected =
+                Set.delete selected ready
+              (dependentCounts', ready') =
+                unblockDependencies
+                  selectedDefinitionId
+                  remainingWithoutSelected
+                  dependentCounts
+                  readyWithoutSelected
+           in go remainingWithoutSelected ready' dependentCounts' (selectedDefinitionId : ordered)
+
+    unblockDependencies selectedDefinitionId remaining dependentCounts ready =
+      Set.foldl' unblockOne (dependentCounts, ready) (Map.findWithDefault Set.empty selectedDefinitionId dependenciesById)
+      where
+        unblockOne (counts, readyDefinitions) dependencyId =
+          let nextCount =
+                max (0 :: Int) (Map.findWithDefault 0 dependencyId counts - 1)
+              counts' =
+                Map.insert dependencyId nextCount counts
+              rankedDependencyId =
+                rankedDefinitionId dependencyId
+              readyDefinitions' =
+                if nextCount == 0 && Set.member rankedDependencyId remaining
+                  then Set.insert rankedDependencyId readyDefinitions
+                  else readyDefinitions
+           in (counts', readyDefinitions')
+
+definitionIdSortKey ::
+  ProjectDefinitionIndex ->
+  DefinitionId ->
   (String, String, Int, Int, [String])
-deadDefinitionSortKey deadDefinition =
+definitionIdSortKey projectIndex definitionId =
+  case Map.lookup definitionId projectIndex.projectDefinitionCatalog.definitionSourcesById of
+    Just source ->
+      definitionSourceSortKey source source.definitionSourceNames
+    Nothing ->
+      ("", "", maxBound, maxBound, [])
+
+definitionSourceSortKey ::
+  DefinitionSource ->
+  Set.Set GHC.Name ->
+  (String, String, Int, Int, [String])
+definitionSourceSortKey source names =
   ( moduleNameKey,
     sourceFileKey,
     sourceLineKey,
@@ -234,12 +357,10 @@ deadDefinitionSortKey deadDefinition =
     nameKeys
   )
   where
-    source =
-      deadDefinition.deadDefinitionSource
     moduleNameKey =
       GHC.moduleNameString (GHC.moduleName (definitionSourceModule source))
     nameKeys =
-      map GHC.getOccString (Set.toAscList deadDefinition.deadDefinitionNames)
+      map GHC.getOccString (Set.toAscList names)
     (sourceFileKey, sourceLineKey, sourceColumnKey) =
       case realSrcSpanFromSrcSpan source.definitionSourceSpans.declarationSpan of
         Just realSrcSpan ->

@@ -10,6 +10,7 @@ import Lore
   ( DeadCodeOptions (..),
     DeadCodeResult (..),
     DeadDefinition (..),
+    DeadDefinitionKind (..),
     Diagnostic (..),
     HomeModulesLoadSummary (..),
     LoadHomeModulesResult (..),
@@ -36,6 +37,12 @@ spec = withFixtureSpec do
         deadNames `shouldContain` ["deadRoot", "deadDependency"]
         deadNames `shouldNotContain` ["liveRoot", "liveDependency"]
         deadNames `shouldNotContain` ["testMainHelper"]
+
+    it "orders safe dead definitions before their dependencies" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
+        safeDeadDefinitionOccNames result `shouldPlaceBefore` ("deadBranch", "deadLeaf")
 
     it "filters reported dead definitions by target module without changing global reachability" \fixture -> do
       withFixtureDeadCodeProject fixture \fixtureRoot -> do
@@ -72,11 +79,12 @@ spec = withFixtureSpec do
         let deadNames = deadDefinitionOccNames result
         deadNames `shouldNotContain` ["deadRoot", "deadDependency"]
 
-    it "does not treat test mains as alive roots" \fixture -> do
+    it "separates definitions only reachable from tests" \fixture -> do
       withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
           runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
-        deadDefinitionOccNames result `shouldContain` ["testOnly"]
+        testOnlyDeadDefinitionOccNames result `shouldContain` ["testOnly"]
+        safeDeadDefinitionOccNames result `shouldNotContain` ["testOnly"]
 
     it "keeps used type-family instances alive" \fixture -> do
       withFixtureDeadCodeProject fixture \fixtureRoot -> do
@@ -268,18 +276,46 @@ matchesSymbol moduleName occName symbol =
 
 deadDefinitionOccNames :: DeadCodeResult -> [String]
 deadDefinitionOccNames result =
+  deadDefinitionOccNamesFromDefinitions (reportedDeadDefinitions result)
+
+safeDeadDefinitionOccNames :: DeadCodeResult -> [String]
+safeDeadDefinitionOccNames result =
+  deadDefinitionOccNamesFromDefinitions (deadDefinitionsByKind SafeDeleteDeadDefinition result)
+
+testOnlyDeadDefinitionOccNames :: DeadCodeResult -> [String]
+testOnlyDeadDefinitionOccNames result =
+  deadDefinitionOccNamesFromDefinitions (deadDefinitionsByKind TestOnlyDeadDefinition result)
+
+deadDefinitionOccNamesFromDefinitions :: [DeadDefinition] -> [String]
+deadDefinitionOccNamesFromDefinitions deadDefinitions =
   [ GHC.getOccString name
-  | deadDefinition <- result.deadCodeDeadDefinitions,
+  | deadDefinition <- deadDefinitions,
     name <- Set.toList deadDefinition.deadDefinitionNames
   ]
+
+deadDefinitionsByKind :: DeadDefinitionKind -> DeadCodeResult -> [DeadDefinition]
+deadDefinitionsByKind kind result =
+  filter ((== kind) . deadDefinitionKind) result.deadCodeDeadDefinitions
+
+reportedDeadDefinitions :: DeadCodeResult -> [DeadDefinition]
+reportedDeadDefinitions result =
+  result.deadCodeDeadDefinitions
 
 deadDefinitionOccNamesInModule :: String -> DeadCodeResult -> [String]
 deadDefinitionOccNamesInModule moduleName result =
   [ GHC.getOccString name
-  | deadDefinition <- result.deadCodeDeadDefinitions,
+  | deadDefinition <- reportedDeadDefinitions result,
     isDefinitionInModule moduleName deadDefinition,
     name <- Set.toList deadDefinition.deadDefinitionNames
   ]
+
+shouldPlaceBefore :: [String] -> (String, String) -> Expectation
+shouldPlaceBefore names (earlier, later) =
+  case (List.elemIndex earlier names, List.elemIndex later names) of
+    (Just earlierIndex, Just laterIndex) ->
+      earlierIndex `shouldSatisfy` (< laterIndex)
+    _ ->
+      expectationFailure ("Expected " <> show names <> " to contain " <> show earlier <> " before " <> show later)
 
 shouldNotContainPrefix :: [String] -> String -> Expectation
 shouldNotContainPrefix names prefix =
@@ -348,6 +384,12 @@ deadCodeLibSource =
       "",
       "liveDependency :: Int",
       "liveDependency = 1",
+      "",
+      "deadLeaf :: Int",
+      "deadLeaf = 4",
+      "",
+      "deadBranch :: Int",
+      "deadBranch = deadLeaf",
       "",
       "deadRoot :: Int",
       "deadRoot = deadDependency",

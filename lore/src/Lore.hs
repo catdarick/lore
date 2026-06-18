@@ -86,6 +86,7 @@ module Lore
     findDeadCode,
     DeadCodeOptions (..),
     DeadDefinition (..),
+    DeadDefinitionKind (..),
     DeadCodeResult (..),
     DefinitionId (..),
     DefinitionSource (..),

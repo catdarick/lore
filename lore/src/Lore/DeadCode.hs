@@ -8,6 +8,7 @@
 module Lore.DeadCode
   ( DeadCodeOptions (..),
     DeadDefinition (..),
+    DeadDefinitionKind (..),
     DeadCodeResult (..),
     findDeadCode,
   )

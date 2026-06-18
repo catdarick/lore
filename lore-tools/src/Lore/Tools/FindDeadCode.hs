@@ -14,7 +14,6 @@ where
 
 import qualified Data.List as List
 import Data.Maybe (mapMaybe)
-import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -24,6 +23,7 @@ import Lore
   ( DeadCodeOptions (..),
     DeadCodeResult (..),
     DeadDefinition (..),
+    DeadDefinitionKind (..),
     MonadLore,
     definitionSourceModule,
   )
@@ -33,7 +33,7 @@ import Lore.Tools.FindDeadCode.Request
     ResolvedFindDeadCodeRequest (..),
     resolveFindDeadCodeRequest,
   )
-import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc), paragraph)
+import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc), paragraph, heading3)
 import Lore.Tools.Render.Text (renderModuleName, renderSymbolName)
 import Lore.Tools.Result
   ( Paginated (..),
@@ -67,7 +67,8 @@ data FindDeadCodeReady = FindDeadCodeReady
   }
 
 data RenderedDeadDefinition = RenderedDeadDefinition
-  { renderedDeadDefinitionModuleName :: Text,
+  { renderedDeadDefinitionKind :: DeadDefinitionKind,
+    renderedDeadDefinitionModuleName :: Text,
     renderedDeadDefinitionSymbolNames :: Set.Set Text
   }
 
@@ -95,15 +96,17 @@ findDeadCode options@FindDeadCodeOptions {findDeadCodePageRequest} = do
               }
         let deadDefinitions =
               filterRenderableDeadDefinitions deadCodeResult.deadCodeDeadDefinitions
-            hasDeadDefinitions = not (null deadDefinitions)
+            renderedDeadDefinitions =
+              map renderDeadDefinition deadDefinitions
+            hasDeadDefinitions = not (null renderedDeadDefinitions)
             summaryLine = renderSummary deadCodeResult deadDefinitions
-            maybePage = paginateItemsWithPageRequest pageRequest deadDefinitions
+            maybePage = paginateItemsWithPageRequest pageRequest renderedDeadDefinitions
         pure $
           FindDeadCodeReadyResult
             FindDeadCodeReady
               { findDeadCodeSummary = summaryLine,
                 findDeadCodeHasDeadDefinitions = hasDeadDefinitions,
-                findDeadCodePage = renderDeadDefinitionPage <$> maybePage,
+                findDeadCodePage = maybePage,
                 findDeadCodeWarnings = deadCodeResult.deadCodeWarnings,
                 findDeadCodePartialLoadWarning = partialLoadWarning
               }
@@ -118,21 +121,25 @@ renderSummary deadCodeResult deadDefinitions =
     <> " definitions: "
     <> T.pack (show deadCodeResult.deadCodeAliveDefinitions)
     <> " alive, "
-    <> T.pack (show (length deadDefinitions))
-    <> " dead."
+    <> T.pack (show safeDeadDefinitionCount)
+    <> " safe-delete dead, "
+    <> T.pack (show testOnlyDeadDefinitionCount)
+    <> " test-only dead."
+  where
+    safeDeadDefinitionCount =
+      countDeadDefinitionsByKind SafeDeleteDeadDefinition deadDefinitions
+    testOnlyDeadDefinitionCount =
+      countDeadDefinitionsByKind TestOnlyDeadDefinition deadDefinitions
 
-renderDeadDefinitionPage ::
-  Paginated DeadDefinition ->
-  Paginated RenderedDeadDefinition
-renderDeadDefinitionPage page =
-  page
-    { paginatedItems = map renderDeadDefinition page.paginatedItems
-    }
+countDeadDefinitionsByKind :: DeadDefinitionKind -> [DeadDefinition] -> Int
+countDeadDefinitionsByKind kind =
+  length . filter ((== kind) . deadDefinitionKind)
 
 renderDeadDefinition :: DeadDefinition -> RenderedDeadDefinition
 renderDeadDefinition deadDefinition =
   RenderedDeadDefinition
-    { renderedDeadDefinitionModuleName =
+    { renderedDeadDefinitionKind = deadDefinition.deadDefinitionKind,
+      renderedDeadDefinitionModuleName =
         renderModuleName (definitionSourceModule deadDefinition.deadDefinitionSource),
       renderedDeadDefinitionSymbolNames =
         Set.map renderSymbolName deadDefinition.deadDefinitionNames
@@ -185,21 +192,34 @@ renderFindDeadCodeReady ready =
 renderDeadDefinitionListing :: [RenderedDeadDefinition] -> LoreDoc
 renderDeadDefinitionListing renderedDeadDefinitions =
   mconcat
-    ( map renderDeadDefinitionGroup
-        (Map.toAscList (groupDeadDefinitionsByModule renderedDeadDefinitions))
-    )
+    [ renderDeadDefinitionSection "Completely unreachable" safeDeadDefinitions,
+      renderDeadDefinitionSection "Only reachable from tests" testOnlyDeadDefinitions
+    ]
+  where
+    (safeDeadDefinitions, testOnlyDeadDefinitions) =
+      List.partition ((== SafeDeleteDeadDefinition) . renderedDeadDefinitionKind) renderedDeadDefinitions
 
-groupDeadDefinitionsByModule :: [RenderedDeadDefinition] -> Map.Map Text [Text]
-groupDeadDefinitionsByModule =
-  List.foldl'
-    ( \grouped rendered ->
-        Map.insertWith
-          (flip (++))
-          rendered.renderedDeadDefinitionModuleName
-          (Set.toAscList rendered.renderedDeadDefinitionSymbolNames)
-          grouped
-    )
-    Map.empty
+renderDeadDefinitionSection :: Text -> [RenderedDeadDefinition] -> LoreDoc
+renderDeadDefinitionSection title renderedDeadDefinitions =
+  if null renderedDeadDefinitions
+    then mempty
+    else
+      heading3 title
+        <> mconcat
+          (map renderDeadDefinitionGroup (groupAdjacentDeadDefinitionsByModule renderedDeadDefinitions))
+
+groupAdjacentDeadDefinitionsByModule :: [RenderedDeadDefinition] -> [(Text, [Text])]
+groupAdjacentDeadDefinitionsByModule [] =
+  []
+groupAdjacentDeadDefinitionsByModule (rendered : rest) =
+  let (sameModule, remaining) =
+        span ((== rendered.renderedDeadDefinitionModuleName) . renderedDeadDefinitionModuleName) rest
+      moduleDefinitions =
+        rendered : sameModule
+   in ( rendered.renderedDeadDefinitionModuleName,
+        concatMap (Set.toAscList . renderedDeadDefinitionSymbolNames) moduleDefinitions
+      )
+        : groupAdjacentDeadDefinitionsByModule remaining
 
 renderDeadDefinitionGroup :: (Text, [Text]) -> LoreDoc
 renderDeadDefinitionGroup (moduleName, symbolNames) =

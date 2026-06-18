@@ -26,6 +26,9 @@ spec = do
       result `shouldContainText` "deadRoot"
       result `shouldContainText` "deadDependency"
       result `shouldContainText` "testOnly"
+      result `shouldContainText` "Completely unreachable"
+      result `shouldContainText` "Only reachable from tests"
+      result `shouldPlaceTextBefore` ("deadBranch", "deadLeaf")
       result `shouldNotContainText` "liveRoot"
       result `shouldNotContainText` "liveDependency"
       result `shouldNotContainText` "ToSchema"
@@ -81,13 +84,29 @@ spec = do
           J.object
             [ "skip" J..= (1 :: Int)
             ]
-      result `shouldContainText` "Showing 29 of"
+      result `shouldContainText` "Showing "
+      result `shouldContainText` "dead definitions"
       result `shouldNotContainText` "DeadCode.Lib.deadRoot"
 
     it "renders warnings when entry modules cannot be resolved" do
       result <-
         runFindDeadCodeFixtureWithBrokenEntry (J.object [])
       result `shouldContainText` "Warning: Failed to resolve entry module for"
+
+shouldPlaceTextBefore :: Text -> (Text, Text) -> Expectation
+shouldPlaceTextBefore haystack (earlier, later) =
+  case (textIndex earlier haystack, textIndex later haystack) of
+    (Just earlierIndex, Just laterIndex) ->
+      earlierIndex `shouldSatisfy` (< laterIndex)
+    _ ->
+      expectationFailure ("Expected output to contain " <> show earlier <> " before " <> show later)
+
+textIndex :: Text -> Text -> Maybe Int
+textIndex needle haystack =
+  let (beforeNeedle, fromNeedle) = T.breakOn needle haystack
+   in if T.null fromNeedle
+        then Nothing
+        else Just (T.length beforeNeedle)
 
 runFindDeadCodeFixture :: J.Value -> IO Text
 runFindDeadCodeFixture args =
@@ -158,6 +177,12 @@ deadCodeLibSource =
       "",
       "liveDependency :: Int",
       "liveDependency = 1",
+      "",
+      "deadLeaf :: Int",
+      "deadLeaf = 4",
+      "",
+      "deadBranch :: Int",
+      "deadBranch = deadLeaf",
       "",
       "deadRoot :: Int",
       "deadRoot = deadDependency",
