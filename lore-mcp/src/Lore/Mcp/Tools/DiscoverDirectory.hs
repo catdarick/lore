@@ -27,7 +27,7 @@ data DiscoverDirectoryArgs (fieldType :: FieldType) = DiscoverDirectoryArgs
     depth ::
       Maybe (Field fieldType Int)
         `WithMeta` '[ Description "depth=0 lists the requested directory and its immediate entries. depth=1 also lists direct child directories. depth=2 also lists grandchildren directories.",
-                      Minimum 1,
+                      Minimum 0,
                       Maximum 10
                     ]
   }

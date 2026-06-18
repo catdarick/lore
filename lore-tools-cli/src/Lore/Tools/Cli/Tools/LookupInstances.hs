@@ -13,13 +13,12 @@ import Lore.Tools.Cli.Internal.Completion (completeSymbols)
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (limitArg, offsetArg)
+import qualified Lore.Tools.LookupInstances as LookupInstances
 import Lore.Tools.Render.Doc (LoreDoc, ToLoreDoc (toLoreDoc))
 import Lore.Tools.Result (PageRequest (..), ResultLimit)
-import qualified Lore.Tools.LookupInstances as LookupInstances
 
 data LookupInstancesArgs = LookupInstancesArgs
   { lookupInstancesNamesArg :: [Text],
@@ -39,8 +38,7 @@ lookupInstancesCliTool =
           "lore-cli lookup-instances Render Maybe Foo --limit 10"
         ],
       cliToolArgs = lookupInstancesArgs,
-      cliToolRun = successfulCliToolRun runLookupInstances,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runLookupInstances
     }
 
 lookupInstancesArgs :: CliArgs LoreCliM LookupInstancesArgs

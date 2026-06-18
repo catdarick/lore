@@ -12,9 +12,10 @@ import qualified GHC
 import qualified GHC.IO.Handle as IO
 import qualified GHC.Utils.Outputable as Outputable
 import Lore.Diagnostics (Diagnostic (..))
-import Lore.Interpreter (executeStatement, getTypeOfExpression)
+import Lore.Internal.Interpreter (executeStatementRawInDirectory)
+import Lore.Interpreter (executeStatement, getTypeOfExpression, loadInterpreterContext)
 import Lore.Session (SessionConfig (..), defaultSessionConfig)
-import System.Directory (removeFile)
+import System.Directory (createDirectoryIfMissing, getCurrentDirectory, removeFile)
 import System.FilePath ((</>))
 import System.IO (Handle, hClose, hFlush, hPutStrLn, openTempFile, stderr, stdout)
 import System.IO.Error (catchIOError)
@@ -57,6 +58,23 @@ spec =
             any (\diagnostic -> "parse error" `T.isInfixOf` diagnostic.diagnosticMessage) diagnostics `shouldBe` True
           Right rendered ->
             expectationFailure ("Expected parse failure, got: " <> show rendered)
+
+      it "runs an interpreted statement in a requested host directory" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          let executionDirectory = fixtureRoot </> "execution-directory"
+          createDirectoryIfMissing True executionDirectory
+          TIO.writeFile (executionDirectory </> "marker.txt") "directory-marker"
+
+          (workingDirectoryBefore, result, workingDirectoryAfter) <-
+            fixtureLoreAt fixture fixtureRoot do
+              loadInterpreterContext
+              workingDirectoryBefore <- liftIO getCurrentDirectory
+              result <- executeStatementRawInDirectory executionDirectory "readFile \"marker.txt\" >>= putStr"
+              workingDirectoryAfter <- liftIO getCurrentDirectory
+              pure (workingDirectoryBefore, result, workingDirectoryAfter)
+
+          result `shouldBe` Right "directory-marker"
+          workingDirectoryAfter `shouldBe` workingDirectoryBefore
 
       it "executes IO expressions instead of wrapping them in show" \fixture -> do
         result <-

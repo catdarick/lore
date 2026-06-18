@@ -6,12 +6,11 @@ where
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (noArgs)
-import Lore.Tools.Render.Doc (LoreDoc)
 import qualified Lore.Tools.CreateTemporalModule as CreateTemporalModule
+import Lore.Tools.Render.Doc (LoreDoc)
 
 createTemporalModuleCliTool :: CliTool LoreCliM ()
 createTemporalModuleCliTool =
@@ -24,8 +23,7 @@ createTemporalModuleCliTool =
         [ "lore-cli create-temporal-module"
         ],
       cliToolArgs = noArgs,
-      cliToolRun = successfulCliToolRun runCreateTemporalModule,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runCreateTemporalModule
     }
 
 runCreateTemporalModule :: () -> LoreCliM LoreDoc

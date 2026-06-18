@@ -33,7 +33,7 @@ data RunTestSuiteArgs (fieldType :: FieldType) = RunTestSuiteArgs
     testArgs ::
       Field fieldType (Maybe Text)
         `WithMeta` '[ Description "Optional arguments to be forwarded to the test suite.",
-                      Example "--match \"some test name\""
+                      Example "--match \"publishes a valid article\""
                     ]
   }
   deriving stock (Generic)

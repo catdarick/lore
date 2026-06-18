@@ -10,11 +10,10 @@ import Lore.Tools.Cli.Internal.Tool
     CliInvocationStatus (..),
     CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
   )
 import Lore.Tools.Cli.Tools.Common (limitArg, offsetArg)
-import Lore.Tools.Result (PageRequest (..), RenderedResult (..), ResultLimit)
 import qualified Lore.Tools.ReloadHomeModules as ReloadHomeModules
+import Lore.Tools.Result (PageRequest (..), RenderedResult (..), ResultLimit)
 
 data ReloadArgs = ReloadArgs
   { reloadOffset :: Int,
@@ -33,8 +32,7 @@ reloadCliTool =
           "lore-cli reload --offset 20 --limit 50"
         ],
       cliToolArgs = reloadArgs,
-      cliToolRun = runReload,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = runReload
     }
 
 reloadArgs :: CliArgs m ReloadArgs

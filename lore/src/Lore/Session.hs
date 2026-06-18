@@ -117,8 +117,7 @@ defaultSessionConfig =
       loggerHandle = noLogHandle,
       customPrelude = Nothing,
       parallelWorkersLimit = WorkersAsNumProcessors,
-      testSuiteDefaultArguments = [],
-      isTestSuiteFunctionalityRequired = False
+      testSuiteDefaultArguments = []
     }
 
 data ResolvedStartupConfig = ResolvedStartupConfig

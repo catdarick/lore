@@ -11,12 +11,11 @@ import Lore.Tools.Cli.Internal.Annotated
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (noCompletion, renderToolRun)
-import Lore.Tools.Render.Doc (LoreDoc)
 import qualified Lore.Tools.GetTypeOfExpression as GetTypeOfExpression
+import Lore.Tools.Render.Doc (LoreDoc)
 
 newtype GetTypeOfExpressionArgs = GetTypeOfExpressionArgs
   { getTypeOfExpressionInputArg :: Text
@@ -33,8 +32,7 @@ getTypeOfExpressionCliTool =
         [ "lore-cli type-of 'map (+1) [1,2,3]'"
         ],
       cliToolArgs = getTypeOfExpressionArgs,
-      cliToolRun = successfulCliToolRun runGetTypeOfExpression,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runGetTypeOfExpression
     }
 
 getTypeOfExpressionArgs :: CliArgs m GetTypeOfExpressionArgs

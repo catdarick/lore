@@ -13,8 +13,6 @@ import Lore.Tools.Cli.Internal.Completion (completePackages)
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    SessionRequirements (..),
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (noCompletion)
@@ -38,8 +36,7 @@ runTestSuiteCliTool =
           "lore-cli run-test-suite --package lore --test-args '--match \"some test\"'"
         ],
       cliToolArgs = runTestSuiteArgs,
-      cliToolRun = successfulCliToolRun runRunTestSuite,
-      cliToolSession = const testSuiteSessionRequirements
+      cliToolRun = successfulCliToolRun runRunTestSuite
     }
 
 runTestSuiteArgs :: CliArgs LoreCliM RunTestSuiteArgs
@@ -57,9 +54,3 @@ runRunTestSuite args = do
           runTestSuiteRawArgs = args.runTestSuiteRawArgsArg
         }
   pure (toLoreDoc result)
-
-testSuiteSessionRequirements :: SessionRequirements
-testSuiteSessionRequirements =
-  defaultSessionRequirements
-    { requiresTestSuiteFunctionality = True
-    }

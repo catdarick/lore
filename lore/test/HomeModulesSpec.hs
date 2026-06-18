@@ -41,23 +41,13 @@ spec =
     describe "home-modules planning helpers" do
       it "prepareProjectDescription derives required external dependencies from prepared packages" \fixture -> do
         withFixtureCopy fixture \fixtureRoot -> do
-          depsWithoutTestSuite <-
+          dependencies <-
             fixtureLoreAt fixture fixtureRoot preparedRequiredExternalDependenciesForTest
-          depsWithTestSuite <-
-            fixtureLoreAtWithConfig
-              fixture
-              defaultSessionConfig {isTestSuiteFunctionalityRequired = True}
-              fixtureRoot
-              preparedRequiredExternalDependenciesForTest
 
-          Set.member "demo-fixture" depsWithoutTestSuite `shouldBe` False
-          Set.member "directory" depsWithoutTestSuite `shouldBe` False
-          Set.member "base" depsWithoutTestSuite `shouldBe` True
-          Set.member "containers" depsWithoutTestSuite `shouldBe` True
-          Set.member "demo-fixture" depsWithTestSuite `shouldBe` False
-          Set.member "directory" depsWithTestSuite `shouldBe` True
-          Set.member "base" depsWithTestSuite `shouldBe` True
-          Set.member "containers" depsWithTestSuite `shouldBe` True
+          Set.member "demo-fixture" dependencies `shouldBe` False
+          Set.member "directory" dependencies `shouldBe` False
+          Set.member "base" dependencies `shouldBe` True
+          Set.member "containers" dependencies `shouldBe` True
 
       it "prepareHomeModulesLoadPlan derives cache identity from package environment" \fixture -> do
         withFixtureCopy fixture \fixtureRoot -> do

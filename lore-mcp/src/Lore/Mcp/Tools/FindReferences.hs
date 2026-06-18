@@ -22,7 +22,7 @@ import Lore.Tools.Result
 data FindReferencesArgs (fieldType :: FieldType) = FindReferencesArgs
   { symbol ::
       Field fieldType Text
-        `WithMeta` '[ Description "Exact symbol name to find references for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope. Examples: \"lookupOrZero\", \"Some.Module.someFunction\", \"Some.Module.fieldName@OwnerType\"."
+        `WithMeta` '[ Description "Exact symbol name to find references for. Module qualification (e.g., Blog.Article.publishArticle) is supported and can be used to resolve ambiguity or provide specific scope. Examples: \"publishArticle\", \"Blog.Article.publishArticle\", \"Blog.Article.articleTitle@Article\"."
                     ],
     skip ::
       Maybe (Field fieldType Int)

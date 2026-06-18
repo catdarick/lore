@@ -25,7 +25,7 @@ import Lore.Tools.Result
 data LookupSymbolInfoArgs (fieldType :: FieldType) = LookupSymbolInfoArgs
   { symbol ::
       Field fieldType Text
-        `WithMeta` '[ Description "Symbol name to look up. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope. Important: if you are not sure about the exact module, omit the module qualification, do not try to guess. Examples: \"lookupOrZero\", \"Some.Module.someFunction\"."
+        `WithMeta` '[ Description "Symbol name to look up. Module qualification (e.g., Blog.Article.publishArticle) is supported and can be used to resolve ambiguity or provide specific scope. Important: if you are not sure about the exact module, omit the module qualification, do not try to guess. Examples: \"publishArticle\", \"Blog.Article.publishArticle\"."
                     ],
     skip ::
       Maybe (Field fieldType Int)
@@ -48,7 +48,7 @@ lookupSymbolInfoTool =
       { name = "lookupSymbolInfo",
         description =
           Just
-            "Resolve a known Haskell symbol name and return its interface metadata, including type or declaration information, constructors, instances, defining location, and export locations where available. Use an unqualified name when the module is unknown; add module qualification only to resolve a known ambiguity. Use getDefinition instead when the implementation source is required. During a partial load, an unresolved result means only that the symbol is not present in the current session index.",
+            "Resolve a known Haskell symbol name and return its interface metadata, including type or declaration information, constructors, instances, defining location, and export locations where available. Use an unqualified name when the module is unknown; add module qualification only to resolve a known ambiguity. Use getDefinitions instead when the implementation source is required. During a partial load, an unresolved result means only that the symbol is not present in the current session index.",
         handler = lookupSymbolInfoHandler
       }
 

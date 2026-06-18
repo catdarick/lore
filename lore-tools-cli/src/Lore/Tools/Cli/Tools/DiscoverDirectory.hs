@@ -13,7 +13,6 @@ import Lore.Tools.Cli.Internal.Annotated
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common
@@ -21,9 +20,9 @@ import Lore.Tools.Cli.Tools.Common
     noCompletion,
     resultLimitToMaybeInt,
   )
+import qualified Lore.Tools.DiscoverDirectory as DiscoverDirectory
 import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result (ResultLimit)
-import qualified Lore.Tools.DiscoverDirectory as DiscoverDirectory
 import Options.Applicative (ReadM, eitherReader)
 
 data DiscoverDirectoryArgs = DiscoverDirectoryArgs
@@ -44,8 +43,7 @@ discoverDirectoryCliTool =
           "lore-cli discover-directory lore/src --depth 2 --directory-budget 150"
         ],
       cliToolArgs = discoverDirectoryArgs,
-      cliToolRun = successfulCliToolRun runDiscoverDirectory,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runDiscoverDirectory
     }
 
 discoverDirectoryArgs :: CliArgs m DiscoverDirectoryArgs

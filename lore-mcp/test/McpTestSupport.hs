@@ -60,8 +60,7 @@ fixtureLoreMcpAtWithCache cacheEnabled fixtureRoot action = do
           ghcWorkDir = fixtureRoot </> ".lore-work-test-mcp",
           configFilePath = fixtureRoot </> "lore.yaml",
           projectProviderOverride = Just provider,
-          loggerHandle = noLogHandle,
-          isTestSuiteFunctionalityRequired = True
+          loggerHandle = noLogHandle
         }
 
     failWithSessionConfigError =

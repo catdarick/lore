@@ -6,12 +6,11 @@ where
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (noArgs)
-import Lore.Tools.Render.Doc (LoreDoc)
 import qualified Lore.Tools.DiscoverProject as DiscoverProject
+import Lore.Tools.Render.Doc (LoreDoc)
 
 discoverProjectCliTool :: CliTool LoreCliM ()
 discoverProjectCliTool =
@@ -24,8 +23,7 @@ discoverProjectCliTool =
         [ "lore-cli discover-project"
         ],
       cliToolArgs = noArgs,
-      cliToolRun = successfulCliToolRun runDiscoverProject,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runDiscoverProject
     }
 
 runDiscoverProject :: () -> LoreCliM LoreDoc

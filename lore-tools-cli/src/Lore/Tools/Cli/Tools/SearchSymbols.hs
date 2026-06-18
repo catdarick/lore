@@ -15,7 +15,6 @@ import Lore.Tools.Cli.Internal.Completion (completeSymbols)
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (limitArg, noCompletion, renderToolRun)
@@ -43,8 +42,7 @@ searchSymbolsCliTool =
           "lore-cli search-symbols createUser --module-pattern \"Placid.Gateways.*\" --module-pattern \"ExternalProviders.*.Database.*\""
         ],
       cliToolArgs = searchSymbolsArgs,
-      cliToolRun = successfulCliToolRun runSearchSymbols,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runSearchSymbols
     }
 
 searchSymbolsArgs :: CliArgs LoreCliM SearchSymbolsArgs

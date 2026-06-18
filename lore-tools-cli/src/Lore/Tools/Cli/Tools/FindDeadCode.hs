@@ -15,11 +15,10 @@ import Lore.Tools.Cli.Internal.Tool
     CliInvocationStatus (..),
     CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
   )
 import Lore.Tools.Cli.Tools.Common (limitArg, offsetArg, renderToolRun)
-import Lore.Tools.Result (PageRequest (..), ResultLimit, ToolRun (..))
 import qualified Lore.Tools.FindDeadCode as FindDeadCode
+import Lore.Tools.Result (PageRequest (..), ResultLimit, ToolRun (..))
 
 data FindDeadCodeArgs = FindDeadCodeArgs
   { findDeadCodeModulesArg :: [Text],
@@ -39,8 +38,7 @@ findDeadCodeCliTool =
           "lore-cli find-dead-code --module Demo --limit 20"
         ],
       cliToolArgs = findDeadCodeArgs,
-      cliToolRun = runFindDeadCode,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = runFindDeadCode
     }
 
 findDeadCodeArgs :: CliArgs LoreCliM FindDeadCodeArgs

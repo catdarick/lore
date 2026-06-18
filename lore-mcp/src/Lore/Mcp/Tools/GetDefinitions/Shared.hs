@@ -64,8 +64,8 @@ import Lore.Tools.Result
 data GetDefinitionArgs (fieldType :: FieldType) = GetDefinitionArgs
   { symbols ::
       Field fieldType [Text]
-        `WithMeta` '[ Description "Exact symbol names to resolve and render definitions for. Module qualification (e.g., Some.Module.someFunction) is supported and can be used to resolve ambiguity or provide specific scope.",
-                      ExampleList '["HasIndex", "mkIndexed", "Some.Module.someFunction"],
+        `WithMeta` '[ Description "Exact symbol names to resolve and render definitions for. Module qualification (e.g., Blog.Article.publishArticle) is supported and can be used to resolve ambiguity or provide specific scope.",
+                      ExampleList '["Article", "publishArticle", "Blog.Article.publishArticle"],
                       MinItems 1
                     ],
     skip ::

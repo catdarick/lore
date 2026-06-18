@@ -16,13 +16,12 @@ import Lore.Tools.Cli.Internal.Parser (verbosityReader)
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (limitArg, offsetArg, renderToolRun, staticCompletionValues)
+import qualified Lore.Tools.FindReferences as FindReferences
 import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result (PageRequest (..), ResultLimit)
-import qualified Lore.Tools.FindReferences as FindReferences
 
 data FindReferencesArgs = FindReferencesArgs
   { findReferencesSymbolArg :: Text,
@@ -43,8 +42,7 @@ findReferencesCliTool =
           "lore-cli refs Demo.lookupOrZero --verbosity high --limit 20"
         ],
       cliToolArgs = findReferencesArgs,
-      cliToolRun = successfulCliToolRun runFindReferences,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runFindReferences
     }
 
 findReferencesArgs :: CliArgs LoreCliM FindReferencesArgs

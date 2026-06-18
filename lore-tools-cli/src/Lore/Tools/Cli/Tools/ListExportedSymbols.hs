@@ -14,13 +14,12 @@ import Lore.Tools.Cli.Internal.Completion (completeLoadedModules, completePackag
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (limitArg, noCompletion, offsetArg, renderToolRun)
+import qualified Lore.Tools.ListExportedSymbols as ListExportedSymbols
 import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result (PageRequest (..), ResultLimit)
-import qualified Lore.Tools.ListExportedSymbols as ListExportedSymbols
 
 data ListExportedSymbolsArgs = ListExportedSymbolsArgs
   { listExportedModuleArg :: Text,
@@ -42,8 +41,7 @@ listExportedSymbolsCliTool =
           "lore-cli list-exported-symbols Data.Map --package containers --type-hint Text"
         ],
       cliToolArgs = listExportedSymbolsArgs,
-      cliToolRun = successfulCliToolRun runListExportedSymbols,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runListExportedSymbols
     }
 
 listExportedSymbolsArgs :: CliArgs LoreCliM ListExportedSymbolsArgs

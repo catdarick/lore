@@ -32,7 +32,7 @@ data FindDeadCodeArgs (fieldType :: FieldType) = FindDeadCodeArgs
   { modules ::
       Maybe (Field fieldType [Text])
         `WithMeta` '[ Description "Only report dead definitions from these loaded home modules.",
-                      ExampleList '["Demo", "Demo.Support"]
+                      ExampleList '["Blog.Article", "Blog.Article.Support"]
                     ],
     skip ::
       Maybe (Field fieldType Int)
@@ -53,7 +53,7 @@ findDeadCodeTool =
   SomeToolWithArgs
     ToolWithArgs
       { name = "findDeadCode",
-        description = Just "Find loaded home-module top-level declarations that are unreachable from the configured project roots or executables `main`s. Alive modules/symbols can be configured in lore.yaml;",
+        description = Just "Find loaded home-module top-level declarations that are unreachable from the configured project roots or executable `main` functions. Alive modules and symbols can be configured in `lore.yaml`.",
         handler = findDeadCodeHandler
       }
 

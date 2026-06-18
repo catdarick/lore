@@ -30,16 +30,14 @@ prepareProjectDescription = do
   provider <- asks projectProvider
   root <- asks projectRoot
   toolchain <- asks ghcToolchain
-  testSuiteRequired <- asks isTestSuiteFunctionalityRequired
-  liftIO $ prepareProjectDescriptionIO provider root toolchain.ghcToolchainCompilerVersion testSuiteRequired
+  liftIO $ prepareProjectDescriptionIO provider root toolchain.ghcToolchainCompilerVersion
 
 prepareProjectDescriptionIO ::
   ProjectProvider ->
   FilePath ->
   Version ->
-  Bool ->
   IO (Either ProjectEnvironmentFailure PreparedProjectDescription)
-prepareProjectDescriptionIO provider root ghcVersion testSuiteRequired = do
+prepareProjectDescriptionIO provider root ghcVersion = do
   packagesResult <-
     preparePackagesIO
       (defaultPackageMaterializeRunnerFor provider)
@@ -56,12 +54,8 @@ prepareProjectDescriptionIO provider root ghcVersion testSuiteRequired = do
         providerInputs <- providerInputsResult
         let localPackageNames = Set.fromList (map (.packageName) packages)
             declaredDependencies = Set.unions (concatMap (map (.dependencies) . (.components)) packages)
-            runtimeDependencies =
-              if testSuiteRequired
-                then Set.singleton "directory"
-                else Set.empty
             requiredDependencies =
-              (declaredDependencies <> runtimeDependencies) Set.\\ localPackageNames
+              declaredDependencies Set.\\ localPackageNames
             dependencySnapshot = dependencySnapshotForPackages packages
         pure
           PreparedProjectDescription

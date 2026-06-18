@@ -5,12 +5,9 @@ module Lore.Tools.Cli.Internal.Tool
     CliInvocation (..),
     CliInvocationResult (..),
     CliInvocationStatus (..),
-    SessionRequirements (..),
-    defaultSessionRequirements,
     successfulCliToolRun,
     runCliInvocation,
     cliInvocationName,
-    cliInvocationSessionRequirements,
   )
 where
 
@@ -28,8 +25,7 @@ data CliTool m args = CliTool
     cliToolDescription :: Text,
     cliToolExamples :: [Text],
     cliToolArgs :: CliArgs m args,
-    cliToolRun :: args -> m CliInvocationResult,
-    cliToolSession :: args -> SessionRequirements
+    cliToolRun :: args -> m CliInvocationResult
   }
 
 data CliInvocationResult = CliInvocationResult
@@ -47,17 +43,6 @@ data SomeCliTool m where
 
 data CliInvocation m where
   CliInvocation :: CliTool m args -> args -> CliInvocation m
-
-data SessionRequirements = SessionRequirements
-  { requiresTestSuiteFunctionality :: Bool
-  }
-  deriving stock (Eq, Show)
-
-defaultSessionRequirements :: SessionRequirements
-defaultSessionRequirements =
-  SessionRequirements
-    { requiresTestSuiteFunctionality = False
-    }
 
 successfulCliToolRun :: (Functor m) => (args -> m LoreDoc) -> args -> m CliInvocationResult
 successfulCliToolRun run args =
@@ -77,7 +62,3 @@ runCliInvocation (CliInvocation tool args) =
 cliInvocationName :: CliInvocation m -> Text
 cliInvocationName (CliInvocation tool _args) =
   cliToolName tool
-
-cliInvocationSessionRequirements :: CliInvocation m -> SessionRequirements
-cliInvocationSessionRequirements (CliInvocation tool args) =
-  cliToolSession tool args

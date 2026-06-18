@@ -14,7 +14,7 @@ notifyKnowledgeResetTool =
   SomeToolWithoutArgs
     ToolWithoutArgs
       { name = "notifyKnowledgeReset",
-        description = Just "Notify the server that client-side context was compacted or reset. This clears getDefinition duplicate-suppression memory so previously shown definitions can be returned again.",
+        description = Just "Notify the server that client-side context was compacted or reset. This clears `getDefinitions` duplicate-suppression memory so previously shown definitions can be returned again.",
         handler = notifyKnowledgeResetHandler
       }
 

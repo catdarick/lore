@@ -13,13 +13,12 @@ import Lore.Tools.Cli.Internal.Completion (completeSymbols)
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (limitArg, offsetArg, renderToolRun)
+import qualified Lore.Tools.LookupSymbolInfo as LookupSymbolInfo
 import Lore.Tools.Render.Doc (LoreDoc)
 import Lore.Tools.Result (PageRequest (..), ResultLimit)
-import qualified Lore.Tools.LookupSymbolInfo as LookupSymbolInfo
 
 data LookupSymbolInfoArgs = LookupSymbolInfoArgs
   { lookupSymbolInfoSymbolArg :: Text,
@@ -39,8 +38,7 @@ lookupSymbolInfoCliTool =
           "lore-cli info lookupOrZero --limit 20"
         ],
       cliToolArgs = lookupSymbolInfoArgs,
-      cliToolRun = successfulCliToolRun runLookupSymbolInfo,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runLookupSymbolInfo
     }
 
 lookupSymbolInfoArgs :: CliArgs LoreCliM LookupSymbolInfoArgs

@@ -11,7 +11,6 @@ import Lore.Tools.Cli.Internal.Annotated
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (noCompletion)
@@ -33,8 +32,7 @@ resolveInstanceCliTool =
         [ "lore-cli resolve-instance 'Render (Maybe Foo)'"
         ],
       cliToolArgs = resolveInstanceArgs,
-      cliToolRun = successfulCliToolRun runResolveInstance,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runResolveInstance
     }
 
 resolveInstanceArgs :: CliArgs m ResolveInstanceArgs

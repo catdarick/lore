@@ -5,6 +5,7 @@ module Lore.Internal.Interpreter
     invalidateInterpreterContextCache,
     refreshInterpreterContext,
     executeStatementRaw,
+    executeStatementRawInDirectory,
     getTypeOfExpressionRaw,
   )
 where
@@ -32,6 +33,7 @@ import System.IO (BufferMode (NoBuffering), Handle, hClose, hFlush, hSetBufferin
 import System.IO.Error (catchIOError)
 import System.IO.Unsafe (unsafePerformIO)
 import UnliftIO (modifyMVar, readMVar, withRunInIO)
+import qualified UnliftIO.Directory as Dir
 
 data RedirectedExecution = RedirectedExecution
   { redirectedExecResult :: Either Exception.SomeException GHC.ExecResult,
@@ -91,7 +93,11 @@ refreshInterpreterContext = do
 
 executeStatementRaw :: (MonadLore m) => Text -> m (Either [Diagnostic] String)
 executeStatementRaw =
-  executeCompiledStatement
+  executeCompiledStatement Nothing
+
+executeStatementRawInDirectory :: (MonadLore m) => FilePath -> Text -> m (Either [Diagnostic] String)
+executeStatementRawInDirectory directory =
+  executeCompiledStatement (Just directory)
 
 getTypeOfExpressionRaw :: (MonadLore m) => Text -> m GHC.Type
 getTypeOfExpressionRaw source = do
@@ -106,12 +112,12 @@ mapMMaybe f =
         (\item acc -> maybe acc (: acc) item)
         []
 
-executeCompiledStatement :: (MonadLore m) => Text -> m (Either [Diagnostic] String)
-executeCompiledStatement source =
+executeCompiledStatement :: (MonadLore m) => Maybe FilePath -> Text -> m (Either [Diagnostic] String)
+executeCompiledStatement maybeDirectory source =
   withInterpretExecutionContext helperImports do
     catches
       ( do
-          redirectedExecution <- runStatementWithRedirect (T.unpack source)
+          redirectedExecution <- runStatementWithRedirect maybeDirectory (T.unpack source)
           case redirectedExecResult redirectedExecution of
             Left runtimeException ->
               pure (Left [runtimeExceptionDiagnostic (Just redirectedExecution.redirectedOutput) runtimeException])
@@ -129,22 +135,29 @@ executeCompiledStatement source =
         Handler (pure . Left . pure . runtimeExceptionDiagnostic Nothing)
       ]
 
-runStatementWithRedirect :: (MonadLore m) => String -> m RedirectedExecution
-runStatementWithRedirect statement = do
+runStatementWithRedirect :: (MonadLore m) => Maybe FilePath -> String -> m RedirectedExecution
+runStatementWithRedirect maybeDirectory statement = do
   (executionResult, redirectedOutput) <-
-    captureProcessOutput do
-      result <-
-        catches
-          (Right <$> GHC.execStmt statement GHC.execOptions)
-          [Handler (\runtimeException -> pure (Left runtimeException))]
-      _ <- GHC.execStmt "System.IO.hFlush System.IO.stdout" GHC.execOptions
-      _ <- GHC.execStmt "System.IO.hFlush System.IO.stderr" GHC.execOptions
-      pure result
+    captureProcessOutput $
+      withExecutionDirectory maybeDirectory do
+        result <-
+          catches
+            (Right <$> GHC.execStmt statement GHC.execOptions)
+            [Handler (\runtimeException -> pure (Left runtimeException))]
+        _ <- GHC.execStmt "System.IO.hFlush System.IO.stdout" GHC.execOptions
+        _ <- GHC.execStmt "System.IO.hFlush System.IO.stderr" GHC.execOptions
+        pure result
   pure
     RedirectedExecution
       { redirectedExecResult = executionResult,
         redirectedOutput
       }
+
+withExecutionDirectory :: (MonadLore m) => Maybe FilePath -> m a -> m a
+withExecutionDirectory maybeDirectory action =
+  case maybeDirectory of
+    Nothing -> action
+    Just directory -> Dir.withCurrentDirectory directory action
 
 withInterpretExecutionContext :: (MonadLore m) => [GHC.InteractiveImport] -> m a -> m a
 withInterpretExecutionContext extraImports action = do

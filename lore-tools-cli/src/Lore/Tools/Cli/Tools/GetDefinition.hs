@@ -20,7 +20,6 @@ import Lore.Tools.Cli.Internal.Parser (depthReader)
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common
@@ -74,8 +73,7 @@ getDefinitionCliTool =
           "lore-cli get-definition Demo.lookupOrZero --recursive --max-depth 5"
         ],
       cliToolArgs = getDefinitionArgs,
-      cliToolRun = successfulCliToolRun runGetDefinition,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runGetDefinition
     }
 
 getDefinitionArgs :: CliArgs LoreCliM GetDefinitionArgs

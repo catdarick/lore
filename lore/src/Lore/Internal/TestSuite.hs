@@ -23,7 +23,7 @@ import Lore.Internal.HomeModules.EntryModules
     lookupGeneratedMainModulesByKey,
     resolveLoadedComponentEntryModule,
   )
-import Lore.Internal.Interpreter (executeStatementRaw)
+import Lore.Internal.Interpreter (executeStatementRawInDirectory)
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries, getCachedModSummariesByFile)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Package (ComponentData (..), ComponentKind (..), PackageData (..))
@@ -85,10 +85,10 @@ runTestSuite options@RunTestSuiteOptions {packageName = packageFilter} = do
                   }
               ]
           }
-    Just projectEnvironment -> runTestSuiteWithPackages options sessionProjectRoot absoluteSessionProjectRoot defaultArguments projectEnvironment.projectEnvironmentPackages
+    Just projectEnvironment -> runTestSuiteWithPackages options absoluteSessionProjectRoot defaultArguments projectEnvironment.projectEnvironmentPackages
 
-runTestSuiteWithPackages :: (MonadLore m) => RunTestSuiteOptions -> FilePath -> FilePath -> [String] -> [PackageData] -> m RunTestSuiteResult
-runTestSuiteWithPackages options@RunTestSuiteOptions {packageName = packageFilter} _sessionProjectRoot absoluteSessionProjectRoot defaultArguments packages = do
+runTestSuiteWithPackages :: (MonadLore m) => RunTestSuiteOptions -> FilePath -> [String] -> [PackageData] -> m RunTestSuiteResult
+runTestSuiteWithPackages options@RunTestSuiteOptions {packageName = packageFilter} absoluteSessionProjectRoot defaultArguments packages = do
   generatedMainModulesByKey <- lookupGeneratedMainModulesByKey
   modSummariesByFile <- getCachedModSummariesByFile
   ModSummaries modSummariesByModule <- getCachedModSummaries
@@ -122,8 +122,8 @@ runTestSuiteWithPackages options@RunTestSuiteOptions {packageName = packageFilte
         let entryModuleName =
               GHC.moduleNameString (GHC.moduleName entryModule)
             executionDir = resolveExecutionDir absoluteSessionProjectRoot pkgRoot
-            statement = renderRunStatement executionDir entryModuleName effectiveArguments
-        runResult <- executeStatementRaw (T.pack statement)
+            statement = renderRunStatement entryModuleName effectiveArguments
+        runResult <- executeStatementRawInDirectory executionDir (T.pack statement)
         componentStatus <-
           case runResult of
             Left runDiagnostics -> do
@@ -154,17 +154,13 @@ packageMatches maybePackageName packageName =
     Nothing -> True
     Just expectedPackageName -> expectedPackageName == packageName
 
-renderRunStatement :: FilePath -> String -> [String] -> String
-renderRunStatement executionDir entryModuleName args =
-  -- CWD must be switched inside the interpreted statement because execStmt runs
-  -- in the external interpreter process, not in the host process running lore.
-  "System.Directory.withCurrentDirectory "
-    <> show executionDir
-    <> " (System.Environment.withArgs "
+renderRunStatement :: String -> [String] -> String
+renderRunStatement entryModuleName args =
+  "System.Environment.withArgs "
     <> show args
     <> " "
     <> entryModuleName
-    <> ".main)"
+    <> ".main"
 
 resolveExecutionDir :: FilePath -> FilePath -> FilePath
 resolveExecutionDir absoluteSessionProjectRoot packageRoot

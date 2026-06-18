@@ -11,12 +11,11 @@ import Lore.Tools.Cli.Internal.Annotated
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (noCompletion, renderToolRun)
-import Lore.Tools.Render.Doc (LoreDoc)
 import qualified Lore.Tools.ExecuteCode as ExecuteCode
+import Lore.Tools.Render.Doc (LoreDoc)
 
 newtype ExecuteCodeArgs = ExecuteCodeArgs
   { executeCodeInputArg :: Text
@@ -33,8 +32,7 @@ executeCodeCliTool =
         [ "lore-cli exec 'print (1 + 2)'"
         ],
       cliToolArgs = executeCodeArgs,
-      cliToolRun = successfulCliToolRun runExecuteCode,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runExecuteCode
     }
 
 executeCodeArgs :: CliArgs m ExecuteCodeArgs

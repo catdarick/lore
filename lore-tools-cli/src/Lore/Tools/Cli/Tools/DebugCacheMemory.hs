@@ -6,12 +6,11 @@ where
 import Lore.Tools.Cli.Internal.Tool
   ( CliTool (..),
     LoreCliM,
-    defaultSessionRequirements,
     successfulCliToolRun,
   )
 import Lore.Tools.Cli.Tools.Common (noArgs)
-import Lore.Tools.Render.Doc (LoreDoc)
 import qualified Lore.Tools.DebugCacheMemory as DebugCacheMemory
+import Lore.Tools.Render.Doc (LoreDoc)
 
 debugCacheMemoryCliTool :: CliTool LoreCliM ()
 debugCacheMemoryCliTool =
@@ -24,8 +23,7 @@ debugCacheMemoryCliTool =
         [ "lore-cli debug-cache-memory"
         ],
       cliToolArgs = noArgs,
-      cliToolRun = successfulCliToolRun runDebugCacheMemory,
-      cliToolSession = const defaultSessionRequirements
+      cliToolRun = successfulCliToolRun runDebugCacheMemory
     }
 
 runDebugCacheMemory :: () -> LoreCliM LoreDoc

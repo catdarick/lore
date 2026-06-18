@@ -193,7 +193,6 @@ shouldMatchDefaultSessionConfig actual expected = do
   actual.customPrelude `shouldBe` expected.customPrelude
   actual.parallelWorkersLimit `shouldBe` expected.parallelWorkersLimit
   actual.testSuiteDefaultArguments `shouldBe` expected.testSuiteDefaultArguments
-  actual.isTestSuiteFunctionalityRequired `shouldBe` expected.isTestSuiteFunctionalityRequired
 
 withSessionEnvironment :: [(String, String)] -> IO a -> IO a
 withSessionEnvironment overrides action =

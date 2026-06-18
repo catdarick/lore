@@ -5,12 +5,11 @@ where
 
 import Data.List (find)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, isNothing)
+import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Lore
-  ( SessionConfig (..),
-    loadStartupConfig,
+  ( loadStartupConfig,
     renderSessionConfigError,
     startupConfigDocument,
     startupSessionConfig,
@@ -70,20 +69,10 @@ runLoreMcpServer = do
     loadMcpEnvironmentOverrides allKnownToolNames >>= either failWithMcpConfigError pure
   let mcpConfig =
         resolveMcpConfig defaultMcpConfig yamlMcpOverrides environmentMcpOverrides
-      runTestSuiteToolEnabled =
-        toolEnabled mcpConfig "runTestSuite"
-      customRunTestSuiteConfig =
-        findRunTestSuiteOverride mcpConfig.customCommandTools
-      builtInRunTestSuiteEnabled =
-        runTestSuiteToolEnabled && isNothing customRunTestSuiteConfig
       definitionKnowledgeCacheEnabled =
         mcpConfig.definitionKnowledgeCacheEnabled
       notifyKnowledgeResetToolEnabled =
         toolEnabled mcpConfig "notifyKnowledgeReset"
-  let sessionConfig =
-        startupConfig.startupSessionConfig
-          { isTestSuiteFunctionalityRequired = builtInRunTestSuiteEnabled
-          }
   mcpContext <- newLoreMcpContext definitionKnowledgeCacheEnabled
   let tools =
         getTools
@@ -102,7 +91,7 @@ runLoreMcpServer = do
                   else Nothing
               ]
           )
-  runLoreMcp sessionConfig mcpContext do
+  runLoreMcp startupConfig.startupSessionConfig mcpContext do
     runMcpServer
       McpServer
         { name = "lore",
