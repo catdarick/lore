@@ -178,3 +178,72 @@ executable lore-cli
     , text
     , transformers
   default-language: Haskell2010
+
+test-suite lore-tools-cli-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      ShellWordsSpec
+      Paths_lore_tools_cli
+  autogen-modules:
+      Paths_lore_tools_cli
+  hs-source-dirs:
+      test
+  default-extensions:
+      RecordWildCards
+      NamedFieldPuns
+      DuplicateRecordFields
+      OverloadedLabels
+      OverloadedStrings
+      FlexibleContexts
+      FlexibleInstances
+      StandaloneDeriving
+      ScopedTypeVariables
+      ExplicitForAll
+      TypeOperators
+      TypeApplications
+      DeriveGeneric
+      MonoLocalBinds
+      DerivingStrategies
+      BlockArguments
+      PostfixOperators
+      TupleSections
+      LambdaCase
+      NumericUnderscores
+      MultiWayIf
+      BangPatterns
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingVia
+      EmptyDataDecls
+      ExistentialQuantification
+      FunctionalDependencies
+      GADTs
+      KindSignatures
+      MultiParamTypeClasses
+      NumDecimals
+      PatternSynonyms
+      RankNTypes
+      TypeFamilies
+      ViewPatterns
+      PartialTypeSignatures
+      OverloadedRecordDot
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , exceptions
+    , filepath
+    , haskeline
+    , hspec
+    , lore
+    , lore-tools
+    , lore-tools-cli
+    , mtl
+    , optparse-applicative
+    , text
+    , transformers
+  default-language: Haskell2010

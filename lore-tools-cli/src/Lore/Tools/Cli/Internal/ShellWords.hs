@@ -59,13 +59,13 @@ parseLineContext raw =
               flushCurrentArg parserState
                 { endsWithSpace = True
                 }
-          | c == '"' ->
+          | c == '"' && canStartQuotedToken parserState ->
               parserState
                 { mode = InDoubleQuote,
                   currentTokenStarted = True,
                   endsWithSpace = False
                 }
-          | c == '\'' ->
+          | c == '\'' && canStartQuotedToken parserState ->
               parserState
                 { mode = InSingleQuote,
                   currentTokenStarted = True,
@@ -112,6 +112,9 @@ parseLineContext raw =
           currentTokenStarted = True,
           endsWithSpace = False
         }
+
+    canStartQuotedToken ParserState {currentTokenStarted} =
+      not currentTokenStarted
 
 parserModeToQuoteMode :: ParserMode -> QuoteMode
 parserModeToQuoteMode = \case
