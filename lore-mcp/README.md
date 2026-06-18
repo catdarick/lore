@@ -144,6 +144,7 @@ session:
 dead-code:
   alive-modules:
     - Blog.Public
+    - Blog.Plugin.*
   alive-symbols:
     - runBlog
 
@@ -324,11 +325,12 @@ dead-code:
   alive-modules:
     - MyLibrary
     - MyLibrary.Public
+    - MyLibrary.Plugin.*
   alive-symbols:
     - MyLibrary.startServer
 ```
 
-Configured `alive-modules` and `alive-symbols` are added as roots to the non-test reachability graph. They are useful for public APIs, plugin entry points, GHCi helpers, framework callbacks, and other code invoked outside the statically visible call graph.
+Configured `alive-modules` and `alive-symbols` are added as roots to the non-test reachability graph. `alive-modules` entries use the same case-sensitive `*` module-pattern syntax as `searchSymbols.modulePatterns`; exact module names still work. They are useful for public APIs, plugin entry points, GHCi helpers, framework callbacks, and other code invoked outside the statically visible call graph.
 
 ## Symbol-search synonyms
 

@@ -21,6 +21,7 @@ module Lore.Lookup
     ModulePattern,
     ModulePatternError (..),
     compileModulePattern,
+    matchesModulePattern,
     FindSimilarSymbolsOptions (..),
     classifySymbolCategory,
     findMatchingSymbols,
@@ -56,7 +57,7 @@ import Lore.Internal.Lookup.InstanceResolution
     ChosenInstanceResolution (..),
     resolveChosenClassInstanceFromTypeText,
   )
-import Lore.Internal.Lookup.ModulePattern (ModulePattern, ModulePatternError (..), compileModulePattern)
+import Lore.Internal.Lookup.ModulePattern (ModulePattern, ModulePatternError (..), compileModulePattern, matchesModulePattern)
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedName (..), NormalizedOccName (..), mkNormalizedModuleName, normalizeModuleName, normalizeName, parseAndNormalizeName)
 import Lore.Internal.Lookup.NameToInstances (getCachedNameToInstancesIndex)
 import Lore.Internal.Lookup.SymbolSearch.Synonyms (builtInSynonymLexicon, mergeSynonymLexicons)

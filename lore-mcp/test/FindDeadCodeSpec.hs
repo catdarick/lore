@@ -59,6 +59,17 @@ spec = do
       result `shouldNotContainText` "deadRoot"
       result `shouldNotContainText` "deadDependency"
 
+    it "supports aliveModules module patterns" do
+      result <-
+        runFindDeadCodeFixtureWithConfig "dead-code:\n  alive-modules:\n    - DeadCode.*\n" (J.object [])
+      result `shouldNotContainText` "deadRoot"
+      result `shouldNotContainText` "deadDependency"
+
+    it "returns a clear error for invalid aliveModules module patterns" do
+      result <-
+        runFindDeadCodeFixtureWithConfig "dead-code:\n  alive-modules:\n    - \"\"\n" (J.object [])
+      result `shouldContainText` "module patterns must be nonempty strings"
+
     it "supports aliveSymbols roots" do
       result <-
         runFindDeadCodeFixtureWithConfig "dead-code:\n  alive-symbols:\n    - DeadCode.Lib.deadRoot\n" (J.object [])

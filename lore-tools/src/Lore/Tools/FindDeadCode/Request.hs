@@ -18,7 +18,10 @@ import Lore
     LoreConfigError,
     MonadLore,
     Symbol (..),
+    compileModulePattern,
     loadLoreConfig,
+    matchesModulePattern,
+    mkNormalizedModuleName,
     renderLoreConfigError,
     resolveDefinitionSourceNamed,
   )
@@ -80,7 +83,7 @@ resolveFindDeadCodeRequest FindDeadCodeOptions {findDeadCodeModules} = do
         Left configError ->
           pure (Left (FindDeadCodeInvalidConfig configError))
         Right config -> do
-          eiAliveModules <- resolveLoadedHomeModulesByName config.loreConfigDeadCode.deadCodeConfigAliveModules
+          eiAliveModules <- resolveLoadedHomeModulesByPattern config.loreConfigDeadCode.deadCodeConfigAliveModules
           case eiAliveModules of
             Left unresolvedAliveModules ->
               pure (Left (FindDeadCodeUnresolvedAliveModules unresolvedAliveModules))
@@ -117,38 +120,79 @@ resolveLoadedHomeModulesByName ::
   [Text] ->
   m (Either [Text] (Set.Set GHC.Module))
 resolveLoadedHomeModulesByName requestedModuleNames = do
-  moduleGraph <- GHC.getModuleGraph
-  let loadedModules =
-        map GHC.ms_mod (GHC.mgModSummaries moduleGraph)
-      loadedModulesByName =
+  loadedModules <- loadedHomeModules
+  let loadedModulesByName =
         Map.fromListWith
           (++)
-          [ (renderModuleName module_, [module_])
-          | module_ <- loadedModules
+          [ (moduleName, [module_])
+          | (moduleName, module_) <- loadedModules
           ]
-  pure $
-    let resolutions =
-          map (resolveOne loadedModulesByName) requestedModuleNames
-        unresolvedMessages =
-          [ message
-          | Left message <- resolutions
-          ]
-        resolvedModules =
-          [ module_
-          | Right module_ <- resolutions
-          ]
-     in if null unresolvedMessages
-          then Right (Set.fromList resolvedModules)
-          else Left unresolvedMessages
+  pure $ collectLoadedHomeModuleResolutions (map (resolveOne loadedModulesByName) requestedModuleNames)
   where
     resolveOne loadedModulesByName requestedModuleName =
       case Map.lookup requestedModuleName loadedModulesByName of
         Nothing ->
           Left ("Module " <> quoteText requestedModuleName <> " is not present in the loaded home module graph.")
         Just [module_] ->
-          Right module_
+          Right [module_]
         Just _ ->
           Left ("Module " <> quoteText requestedModuleName <> " is ambiguous in the loaded home module graph.")
+
+resolveLoadedHomeModulesByPattern ::
+  (MonadLore m) =>
+  [Text] ->
+  m (Either [Text] (Set.Set GHC.Module))
+resolveLoadedHomeModulesByPattern requestedModulePatterns = do
+  loadedModules <- loadedHomeModules
+  pure $ collectLoadedHomeModuleResolutions (map (resolveOne loadedModules) requestedModulePatterns)
+  where
+    resolveOne loadedModules requestedModulePattern =
+      case compileModulePattern requestedModulePattern of
+        Left _ ->
+          Left $
+            "Module pattern "
+              <> quoteText requestedModulePattern
+              <> " is invalid: module patterns must be nonempty strings."
+        Right compiledPattern ->
+          case [ module_
+                 | (moduleName, module_) <- loadedModules,
+                   compiledPattern `matchesModulePattern` mkNormalizedModuleName moduleName
+               ] of
+            [] ->
+              Left ("Module pattern " <> quoteText requestedModulePattern <> " does not match any loaded home modules.")
+            matchedModules ->
+              Right matchedModules
+
+collectLoadedHomeModuleResolutions ::
+  [Either Text [GHC.Module]] ->
+  Either [Text] (Set.Set GHC.Module)
+collectLoadedHomeModuleResolutions resolutions =
+  if null unresolvedMessages
+    then Right (Set.fromList resolvedModules)
+    else Left unresolvedMessages
+  where
+    unresolvedMessages =
+      [ message
+      | Left message <- resolutions
+      ]
+    resolvedModules =
+      concat
+        [ modules
+        | Right modules <- resolutions
+        ]
+
+loadedHomeModules ::
+  (MonadLore m) =>
+  m [(Text, GHC.Module)]
+loadedHomeModules = do
+  moduleGraph <- GHC.getModuleGraph
+  let loadedModules =
+        map GHC.ms_mod (GHC.mgModSummaries moduleGraph)
+      loadedModulePairs =
+        [ (renderModuleName module_, module_)
+        | module_ <- loadedModules
+        ]
+  pure loadedModulePairs
 
 resolveAliveRootNames ::
   (MonadLore m) =>

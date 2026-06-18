@@ -64,6 +64,7 @@ module Lore
     ModulePattern,
     ModulePatternError (..),
     compileModulePattern,
+    matchesModulePattern,
     FindSimilarSymbolsOptions (..),
     findMatchingSymbols,
     findMatchingSymbolLookupNamesByPrefix,

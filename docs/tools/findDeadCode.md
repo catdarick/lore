@@ -15,6 +15,8 @@ Find loaded top-level declarations that are not reachable from executable entry 
 
 Omit `modules` to inspect all loaded home modules. The filter changes what Lore reports, not the reachability graph.
 
+In `lore.yaml`, `dead-code.alive-modules` accepts exact module names and `*` module patterns, for example `Blog.Plugin.*`. Matching modules are treated as non-test reachability roots.
+
 ## What the agent receives
 
 The result reports scanned, alive, and dead counts, then groups dead names by module. Lore analyzes test and non-test components separately, so test-only usage does not keep library code alive in the non-test graph.

@@ -182,6 +182,7 @@ session:
 dead-code:
   alive-modules:
     - Blog.Public
+    - Blog.Plugin.*
   alive-symbols:
     - runBlog
 
