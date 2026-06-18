@@ -1,252 +1,310 @@
-# lore
+# Lore
 
-`lore` is a powerful monorepo providing programmable project analysis, structural navigation, and Haskell tooling through the Model Context Protocol (MCP). It lets agents read, navigate, evaluate, and test Haskell projects interactively using `GHC` APIs.
+Compiler-aware tools that help coding agents understand and modify Haskell projects.
 
-The repository is split into four packages:
+Lore loads a project through the GHC API and exposes structured operations for compilation, project discovery, symbol navigation, source definitions, references, typeclass instances, type inference, code evaluation, tests, and dead-code analysis.
 
-- **`lore`**: The core GHC session and analysis library.
-- **`lore-tools`**: The intermediate tooling and logical layer wrapping `lore`.
-- **`lore-mcp`**: The MCP server executable. Adapts the core capabilities into the Model Context Protocol.
-- **`lore-tools-cli`**: The CLI executable. Exposes the tools directly via a terminal interface.
+Choose the frontend that matches the intended workflow:
 
-*Note: The system has been tested primarily with GHC 9.6.5 and GHC 9.6.7. It is not guaranteed to compile or run correctly on lower or higher versions of GHC.*
+- **[`pi-lore`](pi-lore/README.md)** — the easiest way to use Lore in Pi, with automatic server setup and context-management features.
+- **[`lore-mcp`](lore-mcp/README.md)** — a stdio Model Context Protocol server for Pi, IDEs, and other MCP clients.
+- **`lore-cli`** — an interactive and single-command terminal frontend, useful for exploration and CI.
 
-## Installation
+## What Lore provides
 
-Build or install the workspace using standard Haskell tooling (`stack` or `cabal`).
+Lore helps coding agents work with Haskell through compiler facts instead of raw text. This matters for teams that want an agent to edit real projects without filling the context with text-search output, full file dumps, or long build logs.
+
+With Lore, an agent can:
+
+- learn the Cabal or Stack workspace shape before reading files;
+- discover symbols by names, modules, and type signatures;
+- inspect a module's public API without reading its implementation;
+- fetch exact source definitions, with controlled dependency expansion;
+- find resolved references instead of same-text matches;
+- ask GHC which instance applies to a concrete type;
+- compile and test changes with structured diagnostics;
+- run small type or runtime checks in the loaded project context.
+
+Terminal tools are still useful for arbitrary text search and project-specific commands. Lore adds the Haskell-specific layer that terminal tools do not have: GHC name resolution, type information, module exports, instance selection, and compact diagnostic rendering.
+
+See the [tool guide](docs/Tools.md) for the full tool list and the benefits over raw terminal commands.
+
+## Choose how to use Lore
+
+### Pi integration
+
+Use `pi-lore` for the most complete experience. It starts `lore-mcp`, registers its tools in Pi, and adds:
+
+- automatic matching-binary setup;
+- branch-aware definition memory;
+- suppression of duplicate source definitions;
+- recovery summaries for compilation and test-fixing sessions;
+- interactive settings, status, restart, and usage-statistics commands.
+
+Install it for the current user:
 
 ```bash
-# To compile the packages locally:
-stack build
-# or
-cabal build
-
-# To install the executables globally into your PATH:
-stack install
-# or
-cabal install
+pi install npm:pi-lore
 ```
 
-When installed, two main executables become available on your system: `lore-mcp` and `lore-cli`.
-## Usage (CLI Mode)
-
-For direct human interaction from the terminal, use the `lore-cli` executable. It opens an interactive REPL by default, but can also be run non-interactively to execute specific tools—making it ideal for CI/CD pipelines (for example, to automatically check for dead code).
+Or install it only for the current project:
 
 ```bash
-# Interactive REPL:
-lore-cli
+pi install npm:pi-lore -l
+```
 
-# Non-interactive execution in CI (example):
-lore-cli find-dead-code
+Then start Pi from the Haskell project root. See the [pi-lore README](pi-lore/README.md) for requirements, managed binary support, configuration, and troubleshooting.
 
-# If running from the project root:
-stack run lore-cli
-# or
+### Direct MCP integration
+
+Use `lore-mcp` when your client supports local stdio MCP servers.
+
+Build it with the exact GHC version used by the target project:
+
+```bash
+git clone https://github.com/catdarick/lore.git
+cd lore
+
+cabal build exe:lore-mcp -w ghc-9.6.5
+cabal list-bin exe:lore-mcp -w ghc-9.6.5
+```
+
+Replace `9.6.5` with the project's full compiler version. Start the resulting executable with the target project as its working directory.
+
+A typical client configuration looks like this:
+
+```json
+{
+  "mcpServers": {
+    "lore": {
+      "command": "/absolute/path/to/lore-mcp",
+      "args": [],
+      "cwd": "/absolute/path/to/haskell-project"
+    }
+  }
+}
+```
+
+See the [tool guide](docs/Tools.md) for tool behavior and the [lore-mcp README](lore-mcp/README.md) for `lore.yaml`, environment variables, and security considerations.
+
+### Command-line interface
+
+Build the CLI:
+
+```bash
+cabal build exe:lore-cli
+cabal list-bin exe:lore-cli
+```
+
+Run it without a subcommand to open the interactive prompt:
+
+```bash
 cabal run lore-cli
 ```
 
-## Usage (MCP Mode)
-
-The primary way for agents and IDEs to use this project is running the `lore-mcp` server. It implements the Model Context Protocol, communicating over `stdio` by default.
+Or execute one operation directly:
 
 ```bash
-# If installed globally:
-lore-mcp
-
-# If running from the project root:
-stack run lore-mcp
-# or
-cabal run lore-mcp
+cabal run lore-cli -- discover-project
+cabal run lore-cli -- reload
+cabal run lore-cli -- search-symbols publishArticle
+cabal run lore-cli -- get-definition Blog.Article.publishArticle --recursive
+cabal run lore-cli -- find-dead-code --limit 20
 ```
 
-Clients that support MCP can connect to this standard input/output stream and automatically discover and execute the tools below.
+Markdown is the default output format. Use JSON for scripts and CI:
 
-### Available MCP Tools
-
-The `lore-mcp` server exposes a rich suite of tools for deep codebase analysis and interaction:
-
-*   **`reloadHomeModules`**: Reloads all home modules in the active session, checking for errors and applying safe auto-fixes. Returns diagnostic information and the updated compilation status.
-*   **`discoverProject`**: Scans the workspace for Haskell package manifests (`package.yaml` or `.cabal`). Returns a structured tree of available packages and their respective components (libraries, executables, test suites).
-*   **`discoverDirectory`**: Recursively scans a directory path up to a specified depth. Returns a structured directory tree.
-*   **`listExportedSymbols`**: Queries a specific module for its API surface. Returns a list of all direct and re-exported symbols, with optional filtering by type.
-*   **`searchSymbols`**: Performs a fuzzy or semantic search for Haskell symbols (functions, types, classes, etc.) across the project. Returns matching symbols alongside their signatures and defining modules.
-*   **`lookupSymbolInfo`**: Retrieves detailed metadata for a given Haskell symbol. Returns its type signature, defining module, and structural metadata.
-*   **`getDefinition`**: Retrieves the exact source code block for one or more symbols. Can optionally resolve and return definitions of their dependencies recursively.
-*   **`findDeadCode`**: Analyzes project-wide reachability based on configured entry points. Returns a list of potentially unused top-level declarations.
-*   **`resolveInstance`**: Resolves a specific typeclass application (e.g., `Render (Maybe Foo)`). Returns the exact instance declaration that GHC selects.
-*   **`findReferences`**: Finds usage sites of a given symbol. Returns the file locations and surrounding source code context for each reference.
-*   **`lookupInstances`**: Searches for loaded typeclass or family instance declarations mentioning specific names. Returns the matching instance heads.
-*   **`getTypeOfExpression`**: Infers the type of an arbitrary Haskell expression within the active project environment. Returns the computed type signature.
-*   **`executeCode`**: Evaluates a single-line Haskell expression or IO action. Returns both the `stdout` stream and the final evaluated result.
-*   **`createTemporalModule`**: Creates a temporary Haskell file integrated into the current project session. Returns the file path, allowing developers to author multi-line definitions or complex blocks for quick active evaluation.
-*   **`runTestSuite`**: Executes the project's test suite, forwarding any provided arguments. Returns the standard test execution output.
-*   **`notifyKnowledgeReset`**: Clears the server's internal definition cache (used to suppress duplicate code blocks across multiple `getDefinition` calls).
-*   **`feedback`**: Records structured user feedback (such as bug reports or feature requests) to a configured log file.
-
-## Configuration
-
-`lore-cli` and `lore-mcp` both read startup configuration from `lore.yaml` and environment variables. Precedence is:
-
-```text
-code defaults < lore.yaml < environment variables < frontend runtime requirements
+```bash
+cabal run lore-cli -- --format json discover-project
 ```
 
-Frontend runtime requirements are imposed by the executable. For example, interactive CLI sessions require test-suite support, and MCP requires test-suite support when the `runTestSuite` tool is enabled.
+Inside the interactive prompt, use `:help`, `:help COMMAND`, `:write`, and `:tee` for command help and output forwarding.
 
-Startup settings are read once when the process starts. Changing `session` or `mcp` settings requires restarting the process. Operational project settings under `dead-code` and `symbol-search` are reloaded from disk by the relevant operations, so edits there can take effect without restarting.
+## Requirements
 
-### `lore.yaml`
+### Building Lore
 
-Place `lore.yaml` in the launch directory, or in `LORE_PROJECT_ROOT` when that environment variable is set.
+- GHC 9.6 or newer within the package's supported bounds.
+- Cabal.
+- `hpack` when regenerating Cabal files from `package.yaml` or when a target project requires its generated Cabal file to be refreshed.
+- Node.js 24 or newer only when developing or packaging `pi-lore`.
+
+### Inspecting a project
+
+The target project's build tool and compiler must be available in the environment where Lore runs.
+
+Lore detects project providers in this order:
+
+1. `stack.yaml` → Stack
+2. `cabal.project` → Cabal
+3. `package.yaml` → Cabal
+4. exactly one root-level `*.cabal` file → Cabal
+
+A directory containing multiple root-level Cabal files should provide a `cabal.project`.
+
+## GHC compatibility
+
+Lore links against the GHC API, so a `lore-mcp` or `lore-cli` binary must be built with the **same full GHC version** as the project it inspects.
+
+For example, a binary built with GHC 9.6.5 must not be used for a project running GHC 9.6.7.
+
+Check the project compiler with:
+
+```bash
+# Cabal project
+cabal exec --write-ghc-environment-files=never -- ghc --numeric-version
+
+# Stack project
+stack exec -- ghc --numeric-version
+```
+
+Check a Lore server binary with:
+
+```bash
+lore-mcp --version-json
+```
+
+`pi-lore` performs this validation automatically before starting a downloaded or manually configured server.
+
+## Configuration overview
+
+`lore-mcp` and `lore-cli` read optional project configuration from `lore.yaml`.
+
+A minimal example:
 
 ```yaml
 session:
   project-root: .
   ghc-work-dir: .lore-work
-  custom-prelude: CustomPrelude
   parallel-workers-limit: auto
   log-level: info
-  default-test-args:
-    - --match
-    - some test name
 
 dead-code:
   alive-modules:
-    - Main
+    - Blog.Public
   alive-symbols:
-    - runApplication
+    - runBlog
 
 symbol-search:
   synonym-groups:
-    - [customer, client]
-    - [BillPay, Spot]
+    - [article, post]
+    - [author, writer]
 
 mcp:
-  enable-definition-knowledge-cache: true
-  feedback-file: .lore-work/mcp-feedback.md
-  custom-tools:
-    - name: stackTestMatch
-      description: Run one Hspec matcher through stack test
-      command: stack test @{package} --cabal-verbosity 0 --ta "--format=failed-examples --no-color @{test-args}"
-      args:
-        - name: package
-          description: Optional Stack package target
-          nullable: true
-          quote-mode: none
-        - name: test-args
-          description: Hspec test arguments, for example --match "some test"
-          nullable: true
-          escape-quotes: true
-          quote-mode: none
-  tools:
-    runTestSuite: true
-    notifyKnowledgeReset: false
-    stackTestMatch: true
-```
-
-YAML values use native YAML types. Booleans are booleans, `session.default-test-args` is a list of arguments, and `session.parallel-workers-limit` is either `auto` or a positive integer. `mcp.feedback-file: null` or a missing value leaves the `feedback` tool unavailable.
-
-#### MCP custom command tools
-
-`mcp.custom-tools` declares extra MCP tools backed by shell commands. This is intentionally configuration-level MCP behavior, not core Lore analysis logic.
-
-```yaml
-mcp:
-  custom-tools:
-    - name: toolName
-      description: Tool description shown to MCP clients
-      command: somecommand @{arg1} @{arg2}
-      args:
-        - name: arg1
-          description: Description for arg1
-          nullable: false
-          escape-quotes: false
-          quote-mode: single
-        - name: arg2
-          description: Optional raw CLI fragment
-          nullable: true
-          quote-mode: none
-```
-
-Rules and defaults:
-
-*   `name` must not duplicate another custom tool. Built-in tool names are reserved, except `runTestSuite`.
-*   A custom tool named `runTestSuite` replaces the built-in test runner, including its input schema. Exit code `0` is reported as structured success; every non-zero exit code is reported as structured failure. The tool remains disabled by default, so enable it with `mcp.tools.runTestSuite: true`.
-*   `command` is executed through the shell. Placeholders use `@{argName}` syntax.
-*   Every placeholder in `command` must be declared in `args`.
-*   Argument values are strings. `nullable: true` also allows `null`, which is substituted as an empty string.
-*   `description`, `nullable`, `escape-quotes`, and `quote-mode` are optional for args.
-*   `escape-quotes` defaults to `false`; when `true`, double quotes in the argument value are converted to `\"` before insertion.
-*   `quote-mode` defaults to `single` and controls shell wrapping after any quote escaping:
-    *   `single`: shell-safe single-quote wrapping. This is the safest default for normal single arguments.
-    *   `double`: double-quote wrapping with shell-sensitive characters escaped.
-    *   `none`: no wrapping; use only when the value intentionally contains multiple CLI arguments or must be inserted into an already quoted command fragment.
-
-To replace Lore's built-in test runner with a project-specific command:
-
-```yaml
-mcp:
-  custom-tools:
-    - name: runTestSuite
-      description: Run the project test command
-      command: ./scripts/test @{testArgs}
-      args:
-        - name: testArgs
-          description: Optional arguments forwarded to the test command
-          nullable: true
-          quote-mode: none
   tools:
     runTestSuite: true
 ```
 
-The public output still contains the command exit code, stdout, and stderr. Private structured calls additionally return `success`, `status`, `exitCode`, and the original invocation arguments.
+For `lore-mcp` and `lore-cli`, configuration precedence is:
 
-For simple required string arguments, a short form is accepted:
-
-```yaml
-args:
-  - arg1
-  - arg2
+```text
+built-in defaults < lore.yaml < environment variables
 ```
 
-The short form means no description, `nullable: false`, `escape-quotes: false`, and `quote-mode: single`.
+A frontend such as `pi-lore` may provide environment overrides when it starts the server.
 
-### Environment Equivalents
+The major sections are:
 
-Environment variables keep their existing string syntax and override matching YAML values.
+| Section | Purpose |
+| --- | --- |
+| `session` | Project root, working directory, custom prelude, parallelism, logging, and default test arguments. |
+| `dead-code` | Modules and symbols that should be treated as reachable roots. |
+| `symbol-search` | Project-specific synonym groups added to Lore's built-in search vocabulary. |
+| `mcp` | MCP tool enablement, definition caching, feedback output, and custom shell-command tools. |
 
-| YAML | Environment |
-| :--- | :--- |
-| `session.project-root` | `LORE_PROJECT_ROOT` |
-| `session.ghc-work-dir` | `LORE_GHC_WORK_DIR` |
-| `session.custom-prelude` | `LORE_CUSTOM_PRELUDE` |
-| `session.parallel-workers-limit` | `LORE_PARALLEL_WORKERS_LIMIT` |
-| `session.log-level` | `LORE_LOG_LEVEL` |
-| `session.default-test-args` | `LORE_DEFAULT_TEST_ARGS` |
-| `mcp.enable-definition-knowledge-cache` | `LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE` |
-| `mcp.feedback-file` | `LORE_MCP_FEEDBACK_FILE` |
-| `mcp.tools.<toolName>` | `LORE_MCP_TOOL_ENABLED_<TOOL_NAME>` |
+For the full configuration reference, including environment variables and path resolution, see [lore-mcp configuration](lore-mcp/README.md#configuration).
 
-`LORE_DEFAULT_TEST_ARGS` is parsed as shell-style text because it is one string, for example `--match "some test"`. YAML `session.default-test-args` should use a list and does not use shell parsing.
+`pi-lore` has a separate `.pi/lore.config.json` file for Pi-specific startup, timeout, tool-selection, and recovery settings. See [pi-lore configuration](pi-lore/README.md#configuration).
 
-MCP tool environment suffixes are generated from tool names. For example, `mcp.tools.runTestSuite` maps to `LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE`. By default, all MCP tools are enabled except `runTestSuite`.
+## Build the repository
 
-### Path Semantics
+Clone the repository and build all Cabal packages:
 
-`LORE_PROJECT_ROOT` has a bootstrap role. If it is set, Lore loads `<LORE_PROJECT_ROOT>/lore.yaml` and also uses it as the environment override for `session.project-root`. If it is not set, Lore loads `./lore.yaml` from the launch directory, and that file may set `session.project-root` to another directory. Lore does not then load a second config file from the YAML-selected project root.
+```bash
+git clone https://github.com/catdarick/lore.git
+cd lore
 
-Relative paths are resolved as follows:
+cabal build all
+```
 
-*   The config file path is resolved from the startup working directory or `LORE_PROJECT_ROOT`, then converted to an absolute path before Lore changes directories.
-*   `session.project-root` in YAML is relative to the directory containing `lore.yaml`.
-*   `session.ghc-work-dir` is relative to the resolved project root.
-*   `mcp.feedback-file` is relative to the resolved project root.
-*   Absolute paths remain unchanged.
+Build only the end-user executables:
 
-### Project Settings
+```bash
+cabal build exe:lore-mcp exe:lore-cli
+```
 
-*   **`dead-code`**: Defines explicit "alive roots" for the `findDeadCode` tool. By default, `main` functions in executables and test suites are considered alive. **Note on library code:** If a library symbol is only used within test suites, it will intentionally be reported as dead code. If you are developing a library, you must add its public API modules or entry-point symbols to `alive-modules` or `alive-symbols` to keep them from being marked as dead.
-*   **`symbol-search`**: Customizes synonym expansion for the symbol search tool. This helps natural language queries find symbols that use different but equivalent project vocabulary. Lore ships with a built-in synonym base for common programming terms, abbreviations, and phrases (`db`/`database`, `get`/`fetch`/`retrieve`, `pr`/`pull request`, and similar). Project `synonym-groups` are added on top of those defaults so project-specific vocabulary can match local naming conventions.
-*   **`symbol-search.synonym-groups`**: Each entry is a group of equivalent terms. A term may be a single word, abbreviation, operator, or phrase. Phrases must be written as one YAML string, for example `"credit line"` or `"pull request"`. Each group must contain at least two distinct normalized terms.
+Find the resulting executable paths:
 
-*Note: Edits to `dead-code` and `symbol-search` in `lore.yaml` take effect dynamically without requiring index rebuilds.*
+```bash
+cabal list-bin exe:lore-mcp
+cabal list-bin exe:lore-cli
+```
+
+Run the Haskell test suites:
+
+```bash
+cabal test all
+```
+
+Build an optimized server binary:
+
+```bash
+cabal build exe:lore-mcp --enable-optimization=2
+```
+
+The repository also contains Stack configuration for supported development workflows, but Cabal is the primary build path documented here.
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| [`lore/`](lore/) | Core GHC session, loading, analysis, interpreter, configuration, and project support. |
+| [`lore-tools/`](lore-tools/) | Shared tool operations, structured results, and rendering used by frontends. |
+| [`lore-mcp/`](lore-mcp/) | MCP protocol server, tool schemas, MCP configuration, and custom command tools. |
+| [`lore-tools-cli/`](lore-tools-cli/) | Interactive and single-command terminal frontend exposed as `lore-cli`. |
+| [`pi-lore/`](pi-lore/) | Pi package that manages `lore-mcp` and adds Pi-specific context and recovery behavior. |
+| [`scripts/`](scripts/) | Repository maintenance and release scripts. |
+| [`.github/workflows/`](.github/workflows/) | Build, release, binary packaging, and npm publication workflows. |
+
+The dependency direction is approximately:
+
+```text
+lore
+  ↓
+lore-tools
+  ├─→ lore-mcp
+  └─→ lore-tools-cli
+
+lore-mcp ← managed by → pi-lore
+```
+
+## Development workflow
+
+After changing Haskell code:
+
+```bash
+cabal build all
+cabal test all
+```
+
+After changing the Pi package:
+
+```bash
+cd pi-lore
+npm test
+npm run validate:package
+```
+
+When modifying `package.yaml`, regenerate the corresponding Cabal file with the repository's supported `hpack` version before committing both source-of-truth and generated manifest changes.
+
+Useful repository tasks are also available through `Taskfile.yml`, including formatting, building, release version updates, and MCP Inspector startup.
+
+## Security
+
+Lore can compile project code, evaluate expressions, run test suites, and execute configured shell-command tools. Use these capabilities only with projects and configuration you trust.
+
+For direct MCP integrations, review which tools are enabled before exposing the server to an agent. `runTestSuite` is disabled by default; custom tools and evaluation features can also be disabled in `lore.yaml`.
+
+## License
+
+BSD-3-Clause.
