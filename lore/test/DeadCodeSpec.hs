@@ -79,6 +79,16 @@ spec = withFixtureSpec do
         let deadNames = deadDefinitionOccNames result
         deadNames `shouldNotContain` ["deadRoot", "deadDependency"]
 
+    it "reports a dead parent declaration without listing dead child constructors or selectors" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
+
+        let deadNames = deadDefinitionOccNames result
+        deadNames `shouldContain` ["DeadRecord"]
+        deadNames `shouldContain` ["DeadSum"]
+        deadNames `shouldNotContain` ["deadRecordField", "DeadCtorA", "DeadCtorB"]
+
     it "separates definitions only reachable from tests" \fixture -> do
       withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
@@ -396,6 +406,12 @@ deadCodeLibSource =
       "",
       "deadDependency :: Int",
       "deadDependency = 2",
+      "",
+      "data DeadRecord = DeadRecord",
+      "  { deadRecordField :: Int",
+      "  }",
+      "",
+      "data DeadSum = DeadCtorA | DeadCtorB",
       "",
       "testOnly :: Int",
       "testOnly = 3"

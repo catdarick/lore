@@ -8,13 +8,16 @@ module Lore.Internal.DeadCode
 where
 
 import Control.DeepSeq (NFData (..))
+import Control.Monad (filterM)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GHC
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
+import qualified GHC.Types.TyThing as GHC
 import Lore.Internal.Definition.ProjectIndex
   ( ProjectDefinitionIndex (..),
     dependenciesForDeclaration,
@@ -110,13 +113,13 @@ findDeadCode options = do
           <> aliveInstanceDefinitionIds
       allDefinitionIds =
         Map.keysSet definitionSourcesById
-      deadDefinitions =
-        collectDeadDefinitions
-          options
-          projectIndex
-          aliveDefinitionIds
-          reachableFromNonTestRoots
-          reachableFromTestRoots
+  deadDefinitions <-
+    collectDeadDefinitions
+      options
+      projectIndex
+      aliveDefinitionIds
+      reachableFromNonTestRoots
+      reachableFromTestRoots
   let result =
         DeadCodeResult
           { deadCodeTotalDefinitions = Set.size allDefinitionIds,
@@ -217,15 +220,19 @@ aliveNameRoots options projectIndex =
     ]
 
 collectDeadDefinitions ::
+  (MonadLore m) =>
   DeadCodeOptions ->
   ProjectDefinitionIndex ->
   Set.Set DefinitionId ->
   Set.Set DefinitionId ->
   Set.Set DefinitionId ->
-  [DeadDefinition]
-collectDeadDefinitions options projectIndex aliveDefinitionIds reachableFromNonTestRoots reachableFromTestRoots =
-  orderedDeadDefinitions SafeDeleteDeadDefinition safeDeleteDeadDefinitionIds
-    <> orderedDeadDefinitions TestOnlyDeadDefinition testOnlyDeadDefinitionIds
+  m [DeadDefinition]
+collectDeadDefinitions options projectIndex aliveDefinitionIds reachableFromNonTestRoots reachableFromTestRoots = do
+  safeDeleteDeadDefinitions <-
+    orderedDeadDefinitions SafeDeleteDeadDefinition safeDeleteDeadDefinitionIds
+  testOnlyDeadDefinitions <-
+    orderedDeadDefinitions TestOnlyDeadDefinition testOnlyDeadDefinitionIds
+  pure (safeDeleteDeadDefinitions <> testOnlyDeadDefinitions)
   where
     (safeDeleteDeadDefinitionIds, testOnlyDeadDefinitionIds) =
       Map.foldlWithKey' collectDefinition (Set.empty, Set.empty) projectIndex.projectDefinitionCatalog.definitionSourcesById
@@ -252,14 +259,59 @@ collectDeadDefinitions options projectIndex aliveDefinitionIds reachableFromNonT
         && Set.notMember definitionId reachableFromNonTestRoots
 
     orderedDeadDefinitions kind definitionIds =
-      [ DeadDefinition
+      mapM
+        (mkDeadDefinition kind)
+        [ source
+        | definitionId <- safeDeleteOrderedDefinitionIds projectIndex definitionIds,
+          Just source <- [Map.lookup definitionId projectIndex.projectDefinitionCatalog.definitionSourcesById]
+        ]
+
+    mkDeadDefinition kind source = do
+      deadDefinitionNames <- definitionRootNames source
+      pure
+        DeadDefinition
           { deadDefinitionKind = kind,
             deadDefinitionSource = source,
-            deadDefinitionNames = source.definitionSourceNames
+            deadDefinitionNames
           }
-      | definitionId <- safeDeleteOrderedDefinitionIds projectIndex definitionIds,
-        Just source <- [Map.lookup definitionId projectIndex.projectDefinitionCatalog.definitionSourcesById]
-      ]
+
+definitionRootNames ::
+  (MonadLore m) =>
+  DefinitionSource ->
+  m (Set.Set GHC.Name)
+definitionRootNames source
+  | Set.size source.definitionSourceNames <= 1 =
+      pure source.definitionSourceNames
+  | otherwise = do
+      rootNames <- filterM isRootName (Set.toList source.definitionSourceNames)
+      pure (Set.fromList rootNames)
+  where
+    definitionNames =
+      source.definitionSourceNames
+
+    isRootName name = do
+      parentNames <- definitionNameParentNames name
+      pure (Set.null (Set.intersection definitionNames parentNames))
+
+definitionNameParentNames ::
+  (MonadLore m) =>
+  GHC.Name ->
+  m (Set.Set GHC.Name)
+definitionNameParentNames name = do
+  maybeTyThing <- GHC.lookupName name
+  pure $
+    case maybeTyThing of
+      Nothing ->
+        Set.empty
+      Just tyThing ->
+        Set.fromList (map GHC.getName (tyThingParentChain tyThing))
+  where
+    tyThingParentChain tyThing =
+      case GHC.tyThingParent_maybe tyThing of
+        Nothing ->
+          []
+        Just parentTyThing ->
+          parentTyThing : tyThingParentChain parentTyThing
 
 safeDeleteOrderedDefinitionIds ::
   ProjectDefinitionIndex ->
