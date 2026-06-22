@@ -37,7 +37,7 @@ After source changes, [`reloadHomeModules`](tools/reloadHomeModules.md) refreshe
 | Tool | Availability | Capability | Why enable it instead of relying on terminal commands |
 | --- | --- | --- | --- |
 | [`reloadHomeModules`](tools/reloadHomeModules.md) | Enabled by default | Compile home modules and refresh Lore's indexes. | It returns structured status, grouped diagnostics, snippets, pagination, and safe import fixes instead of a long build log. |
-| [`runTestSuite`](tools/runTestSuite.md) | Disabled by default | Compile first, then run Cabal or Stack test components. | It returns component-level status and focused diagnostics so recovery workflows do not need raw test logs in context. |
+| [`runTestSuite`](tools/runTestSuite.md) | Enabled by default | Compile first, then run Cabal or Stack test components. | It returns component-level status and focused diagnostics so recovery workflows do not need raw test logs in context. |
 | [`notifyKnowledgeReset`](tools/notifyKnowledgeReset.md) | Definition cache enabled | Reset definition duplicate-suppression memory. | It keeps definition caching correct after a client-side context reset. Terminal commands have no matching state. |
 | [`feedback`](tools/feedback.md) | Feedback file configured | Save a concise issue report for maintainers. | It captures structured feedback in the project instead of leaving it in chat history. |
 | [Custom command tools](tools/custom-command-tools.md) | Project configured | Run a trusted project command through MCP. | The project can expose a stable, documented command surface instead of relying on ad hoc command invention. |

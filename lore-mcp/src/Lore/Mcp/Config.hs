@@ -131,8 +131,8 @@ toolEnabled config toolName =
   fromMaybe (defaultToolEnabledByName toolName) (Map.lookup toolName config.toolEnabledOverrides)
 
 defaultToolEnabledByName :: Text -> Bool
-defaultToolEnabledByName toolName =
-  toolName /= "runTestSuite"
+defaultToolEnabledByName _toolName =
+  True
 
 toolEnabledEnvVarName :: Text -> String
 toolEnabledEnvVarName toolName =

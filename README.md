@@ -155,7 +155,7 @@ Useful repository tasks are also available through `Taskfile.yml`, including for
 
 Lore can compile project code, evaluate expressions, run test suites, and execute configured shell-command tools. These capabilities are appropriate only for projects and configuration that the developer trusts.
 
-For direct MCP integrations, review which tools are enabled before exposing the server to an agent. `runTestSuite` is disabled by default; custom tools and evaluation features can also be disabled in `lore.yaml`.
+For direct MCP integrations, review which tools are enabled before exposing the server to an agent. `runTestSuite`, custom tools, and evaluation features can be disabled in `lore.yaml`.
 
 ## License
 

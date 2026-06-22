@@ -55,11 +55,10 @@ spec = withFixtureSpec do
                   && not ("$" `List.isPrefixOf` occName)
               ]
         relevantPairs
-          `shouldBe` [
-            ("DeadCode.Grouping", "deadGroupedUser"),
-            ("DeadCode.Grouping", "GroupedType"),
-            ("DeadCode.AGroupingDependency", "GroupingDependency")
-          ]
+          `shouldBe` [ ("DeadCode.Grouping", "deadGroupedUser"),
+                       ("DeadCode.Grouping", "GroupedType"),
+                       ("DeadCode.AGroupingDependency", "GroupingDependency")
+                     ]
 
     it "filters reported dead definitions by target module without changing global reachability" \fixture -> do
       withFixtureDeadCodeProject fixture \fixtureRoot -> do

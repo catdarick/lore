@@ -12,7 +12,7 @@ For Pi users who want managed binary setup, branch-aware definition memory, reco
 
 The [tool guide](../docs/Tools.md) is the canonical index. It explains why each tool is useful for reducing context pressure and links to exact input/output examples.
 
-All built-in tools except `runTestSuite` are enabled by default. `notifyKnowledgeReset`, `feedback`, and project-defined command tools appear only when their backing features are configured.
+All built-in tools are enabled by default. `notifyKnowledgeReset`, `feedback`, and project-defined command tools appear only when their backing features are configured.
 
 ## Requirements
 
@@ -114,10 +114,6 @@ built-in defaults < lore.yaml < environment variables
 session:
   project-root: .
   ghc-work-dir: .lore-work
-
-mcp:
-  tools:
-    runTestSuite: true
 ```
 
 ### Expanded example
@@ -148,7 +144,6 @@ mcp:
   enable-definition-knowledge-cache: false
   feedback-file: .lore-work/mcp-feedback.md
   tools:
-    runTestSuite: true
     executeCode: false
 ```
 
@@ -178,15 +173,15 @@ When multiple root Cabal files exist, add a `cabal.project` to define package se
 | --- | --- | --- |
 | `mcp.enable-definition-knowledge-cache` | `false` | Suppress unchanged definitions already returned by `getDefinitions`. Intended for clients that synchronize cache state, such as `pi-lore`. |
 | `mcp.feedback-file` | unset | Enables the `feedback` tool and writes entries to this project-relative or absolute file. |
-| `mcp.tools.<toolName>` | enabled, except `runTestSuite` | Enable or disable an individual built-in or configured custom tool. |
+| `mcp.tools.<toolName>` | enabled | Enable or disable an individual built-in or configured custom tool. |
 | `mcp.custom-tools` | `[]` | Define additional MCP tools backed by trusted shell commands. |
 
-Enable the built-in test runner explicitly:
+Disable the built-in test runner explicitly:
 
 ```yaml
 mcp:
   tools:
-    runTestSuite: true
+    runTestSuite: false
 ```
 
 Arguments passed by the MCP caller are added after `session.default-test-args`.
@@ -274,7 +269,7 @@ Run `reloadHomeModules`. It refreshes loaded modules and indexes, and it clears 
 
 ### `runTestSuite` is missing
 
-It is disabled by default. Enable it under `mcp.tools`, or set:
+It may have been disabled in configuration. Remove a `mcp.tools.runTestSuite: false` override, or set:
 
 ```bash
 export LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE=true

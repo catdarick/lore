@@ -2,9 +2,6 @@
 
 Compile the project, then run its Cabal or Stack test components. It provides structured validation status and focused output instead of raw test logs in context.
 
-`runTestSuite` is disabled by default because it executes project tests and can be expensive. Enable it with `mcp.tools.runTestSuite: true` in `lore.yaml` or the matching environment override documented in the `lore-mcp` configuration guide.
-
-Because it executes project code, enable this tool only for trusted projects and trusted test commands.
 
 ## Typical MCP input
 
