@@ -23,7 +23,7 @@ import Lore.Internal.Definition.ProjectIndex
     loadProjectDefinitionIndex,
   )
 import Lore.Internal.Definition.Reachability (reachableDeclarationIds)
-import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionCatalog (..), DefinitionId, DefinitionSource (..), definitionSourceModule)
+import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionCatalog (..), DefinitionId (..), DefinitionSource (..), definitionSourceModule)
 import Lore.Internal.Ghc.TyThing (tyThingParentNames)
 import Lore.Internal.HomeModules.EntryModules
   ( ComponentEntryModule (..),
@@ -311,73 +311,143 @@ safeDeleteOrderedDefinitionIds ::
   Set.Set DefinitionId ->
   [DefinitionId]
 safeDeleteOrderedDefinitionIds projectIndex definitionIds =
-  go initialRemaining initialReady initialDependentCounts []
+  concatMap orderedDefinitionIdsInModule orderedModules
   where
     sourceOrderedDefinitionIds =
       sortOn (definitionIdSortKey projectIndex) (Set.toList definitionIds)
-    rankByDefinitionId =
-      Map.fromList (zip sourceOrderedDefinitionIds [0 :: Int ..])
-    rankedDefinitionId definitionId =
-      (Map.findWithDefault maxBound definitionId rankByDefinitionId, definitionId)
-    dependenciesById =
-      Map.fromSet dependenciesWithinDeadDefinitions definitionIds
+
+    sourceOrderedModules =
+      dedupeOrdered (map definitionIdModule sourceOrderedDefinitionIds)
+
+    orderedModules =
+      safeDeleteOrderedItems sourceOrderedModules dependenciesWithinDeadModules
+
+    definitionIdsByModule =
+      Map.fromListWith
+        Set.union
+        [ (definitionIdModule definitionId, Set.singleton definitionId)
+        | definitionId <- Set.toList definitionIds
+        ]
+
+    dependenciesWithinDeadModules module_ =
+      Set.fromList
+        [ dependencyModule
+        | definitionId <- Set.toList (Map.findWithDefault Set.empty module_ definitionIdsByModule),
+          dependencyId <- Set.toList (dependenciesWithinDeadDefinitions definitionId),
+          let dependencyModule = definitionIdModule dependencyId,
+          dependencyModule /= module_
+        ]
+
+    orderedDefinitionIdsInModule module_ =
+      safeDeleteOrderedItems
+        [ definitionId
+        | definitionId <- sourceOrderedDefinitionIds,
+          definitionIdModule definitionId == module_
+        ]
+        dependenciesWithinDeadDefinitions
+
     dependenciesWithinDeadDefinitions definitionId =
       dependenciesForDeclaration projectIndex definitionId `Set.intersection` definitionIds
+
+safeDeleteOrderedItems ::
+  (Ord item) =>
+  [item] ->
+  (item -> Set.Set item) ->
+  [item]
+safeDeleteOrderedItems sourceOrderedItems dependenciesWithinItems =
+  go initialRemaining initialReady initialDependentCounts []
+  where
+    items =
+      Set.fromList sourceOrderedItems
+
+    rankByItem =
+      Map.fromList (zip sourceOrderedItems [0 :: Int ..])
+
+    rankedItem item =
+      (Map.findWithDefault maxBound item rankByItem, item)
+
+    dependenciesByItem =
+      Map.fromSet dependenciesWithinItems items
+
     initialDependentCounts =
-      Map.foldl' countDependents (Map.fromSet (const (0 :: Int)) definitionIds) dependenciesById
+      Map.foldl' countDependents (Map.fromSet (const (0 :: Int)) items) dependenciesByItem
+
     countDependents dependentCounts dependencies =
       Set.foldl'
-        (\counts dependencyId -> Map.adjust (+ 1) dependencyId counts)
+        (\counts dependency -> Map.adjust (+ 1) dependency counts)
         dependentCounts
         dependencies
+
     initialRemaining =
-      Set.fromList (map rankedDefinitionId sourceOrderedDefinitionIds)
+      Set.fromList (map rankedItem sourceOrderedItems)
+
     initialReady =
       Set.filter
-        (\(_, definitionId) -> Map.findWithDefault 0 definitionId initialDependentCounts == 0)
+        (\(_, item) -> Map.findWithDefault 0 item initialDependentCounts == 0)
         initialRemaining
 
     go remaining ready dependentCounts ordered
       | Set.null remaining =
           reverse ordered
       | otherwise =
-          let selected@(_, selectedDefinitionId) =
-                case Set.minView ready of
-                  Just (readyDefinitionId, _) ->
-                    readyDefinitionId
-                  Nothing ->
-                    case Set.minView remaining of
-                      Just (cycleDefinitionId, _) ->
-                        cycleDefinitionId
-                      Nothing ->
-                        error "safeDeleteOrderedDefinitionIds: impossible empty remaining set"
+          let selected@(_, selectedItem) =
+                selectNextItem ready remaining
               remainingWithoutSelected =
                 Set.delete selected remaining
               readyWithoutSelected =
                 Set.delete selected ready
               (dependentCounts', ready') =
                 unblockDependencies
-                  selectedDefinitionId
+                  selectedItem
                   remainingWithoutSelected
                   dependentCounts
                   readyWithoutSelected
-           in go remainingWithoutSelected ready' dependentCounts' (selectedDefinitionId : ordered)
+           in go remainingWithoutSelected ready' dependentCounts' (selectedItem : ordered)
 
-    unblockDependencies selectedDefinitionId remaining dependentCounts ready =
-      Set.foldl' unblockOne (dependentCounts, ready) (Map.findWithDefault Set.empty selectedDefinitionId dependenciesById)
+    selectNextItem ready remaining =
+      firstAvailableDefinition
+        [ firstDefinition ready,
+          firstDefinition remaining
+        ]
+
+    firstAvailableDefinition = \case
+      Just definitionId : _ ->
+        definitionId
+      Nothing : rest ->
+        firstAvailableDefinition rest
+      [] ->
+        error "safeDeleteOrderedDefinitionIds: impossible empty remaining set"
+
+    firstDefinition definitions =
+      fst <$> Set.minView definitions
+
+    unblockDependencies selectedItem remaining dependentCounts ready =
+      Set.foldl' unblockOne (dependentCounts, ready) (Map.findWithDefault Set.empty selectedItem dependenciesByItem)
       where
-        unblockOne (counts, readyDefinitions) dependencyId =
+        unblockOne (counts, readyDefinitions) dependency =
           let nextCount =
-                max (0 :: Int) (Map.findWithDefault 0 dependencyId counts - 1)
+                max (0 :: Int) (Map.findWithDefault 0 dependency counts - 1)
               counts' =
-                Map.insert dependencyId nextCount counts
-              rankedDependencyId =
-                rankedDefinitionId dependencyId
+                Map.insert dependency nextCount counts
+              rankedDependency =
+                rankedItem dependency
               readyDefinitions' =
-                if nextCount == 0 && Set.member rankedDependencyId remaining
-                  then Set.insert rankedDependencyId readyDefinitions
+                if nextCount == 0 && Set.member rankedDependency remaining
+                  then Set.insert rankedDependency readyDefinitions
                   else readyDefinitions
            in (counts', readyDefinitions')
+
+dedupeOrdered :: (Ord item) => [item] -> [item]
+dedupeOrdered =
+  go Set.empty
+  where
+    go _ [] =
+      []
+    go seen (item : rest)
+      | Set.member item seen =
+          go seen rest
+      | otherwise =
+          item : go (Set.insert item seen) rest
 
 definitionIdSortKey ::
   ProjectDefinitionIndex ->

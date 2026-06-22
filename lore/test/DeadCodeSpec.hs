@@ -44,6 +44,23 @@ spec = withFixtureSpec do
           runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
         safeDeadDefinitionOccNames result `shouldPlaceBefore` ("deadBranch", "deadLeaf")
 
+    it "keeps same-module safe-delete definitions adjacent when dependency constraints allow" \fixture -> do
+      withFixtureDeadCodeProject fixture \fixtureRoot -> do
+        result <-
+          runFindDeadCode fixture fixtureRoot defaultDeadCodeOptions
+        let relevantPairs =
+              [ pair
+              | pair@(moduleName, occName) <- safeDeadDefinitionModuleOccNames result,
+                moduleName `elem` ["DeadCode.AGroupingDependency", "DeadCode.Grouping"]
+                  && not ("$" `List.isPrefixOf` occName)
+              ]
+        relevantPairs
+          `shouldBe` [
+            ("DeadCode.Grouping", "deadGroupedUser"),
+            ("DeadCode.Grouping", "GroupedType"),
+            ("DeadCode.AGroupingDependency", "GroupingDependency")
+          ]
+
     it "filters reported dead definitions by target module without changing global reachability" \fixture -> do
       withFixtureDeadCodeProject fixture \fixtureRoot -> do
         result <-
@@ -292,6 +309,16 @@ safeDeadDefinitionOccNames :: DeadCodeResult -> [String]
 safeDeadDefinitionOccNames result =
   deadDefinitionOccNamesFromDefinitions (deadDefinitionsByKind SafeDeleteDeadDefinition result)
 
+safeDeadDefinitionModuleOccNames :: DeadCodeResult -> [(String, String)]
+safeDeadDefinitionModuleOccNames result =
+  [ ( GHC.moduleNameString
+        (GHC.moduleName (definitionSourceModule deadDefinition.deadDefinitionSource)),
+      GHC.getOccString name
+    )
+  | deadDefinition <- deadDefinitionsByKind SafeDeleteDeadDefinition result,
+    name <- Set.toList deadDefinition.deadDefinitionNames
+  ]
+
 testOnlyDeadDefinitionOccNames :: DeadCodeResult -> [String]
 testOnlyDeadDefinitionOccNames result =
   deadDefinitionOccNamesFromDefinitions (deadDefinitionsByKind TestOnlyDeadDefinition result)
@@ -355,6 +382,8 @@ writeFixtureDeadCodeModules fixtureRoot = do
   createDirectoryIfMissing True testDir
   createDirectoryIfMissing True testSupportDir
   TIO.writeFile (srcDir </> "Lib.hs") deadCodeLibSource
+  TIO.writeFile (srcDir </> "AGroupingDependency.hs") deadCodeAGroupingDependencySource
+  TIO.writeFile (srcDir </> "Grouping.hs") deadCodeGroupingSource
   TIO.writeFile (srcDir </> "TypeclassMetadata.hs") deadCodeTypeclassMetadataSource
   TIO.writeFile (srcDir </> "TypeFamily.hs") deadCodeTypeFamilySource
   TIO.writeFile (srcDir </> "UnusedTypeFamily.hs") deadCodeUnusedTypeFamilySource
@@ -415,6 +444,35 @@ deadCodeLibSource =
       "",
       "testOnly :: Int",
       "testOnly = 3"
+    ]
+
+deadCodeAGroupingDependencySource :: Text
+deadCodeAGroupingDependencySource =
+  T.unlines
+    [ "{-# LANGUAGE DerivingStrategies #-}",
+      "",
+      "module DeadCode.AGroupingDependency where",
+      "",
+      "data GroupingDependency = GroupingDependency deriving stock (Show, Eq)"
+    ]
+
+deadCodeGroupingSource :: Text
+deadCodeGroupingSource =
+  T.unlines
+    [ "{-# LANGUAGE DerivingStrategies #-}",
+      "",
+      "module DeadCode.Grouping",
+      "  ( GroupedType (..),",
+      "    deadGroupedUser,",
+      "  )",
+      "where",
+      "",
+      "import DeadCode.AGroupingDependency (GroupingDependency (..))",
+      "",
+      "data GroupedType = GroupedType GroupingDependency deriving stock (Show, Eq)",
+      "",
+      "deadGroupedUser :: GroupedType",
+      "deadGroupedUser = GroupedType GroupingDependency"
     ]
 
 deadCodeTypeclassMetadataSource :: Text
