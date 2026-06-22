@@ -8,7 +8,6 @@ import { ensureParent, sha256Bytes } from "./util.ts";
 
 const execFileAsync = promisify(execFile);
 const maxStoredFileBytes = 2_000_000;
-const maxStoredBaselineBytes = 20_000_000;
 const safeRecoveryIdPattern = /^lore-recovery-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class DiffCaptureError extends Error {
@@ -39,7 +38,6 @@ export async function captureRecoveryBaseline(config: LoreConfig, recoveryId: st
   await mkdir(baselineDir, { recursive: true });
   const files = await listProjectFiles(projectDir, config.stateDir);
   const baselineFiles: BaselineFile[] = [];
-  let storedBytes = 0;
   for (const file of files) {
     const absolute = join(projectDir, file);
     const fileStat = await lstat(absolute).catch(() => undefined);
@@ -59,9 +57,8 @@ export async function captureRecoveryBaseline(config: LoreConfig, recoveryId: st
       path: file,
       hash: sha256Bytes(content),
     };
-    if (content.byteLength <= maxStoredFileBytes && storedBytes + content.byteLength <= maxStoredBaselineBytes) {
+    if (content.byteLength <= maxStoredFileBytes) {
       baselineFile.contentBase64 = content.toString("base64");
-      storedBytes += content.byteLength;
     } else {
       baselineFile.tooLarge = true;
     }

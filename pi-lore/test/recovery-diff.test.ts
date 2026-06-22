@@ -60,6 +60,23 @@ test("unchanged oversized file does not make changed text diff unreliable", asyn
   assert.deepEqual(diff.changedPaths, ["small.txt"]);
 });
 
+test("changed small text remains diffable after many baseline files", async () => {
+  const { config, projectDir } = await makeDiffFixture("many-small-files");
+  for (let index = 0; index < 11; index += 1) {
+    await writeFile(join(projectDir, `bulk-${index.toString().padStart(2, "0")}.txt`), "x".repeat(2_000_000), "utf8");
+  }
+  await writeFile(join(projectDir, "small.txt"), "before\n", "utf8");
+  const recoveryId = "lore-recovery-00000000-0000-4000-8000-000000000025";
+  await captureRecoveryBaseline(config, recoveryId);
+  await writeFile(join(projectDir, "small.txt"), "after\n", "utf8");
+
+  const diff = await captureRecoveryDiff(config, recoveryId);
+
+  assert.equal(diff.reliable, true);
+  assert.deepEqual(diff.changedPaths, ["small.txt"]);
+  assert.match(diff.inlinePatch ?? "", /after/);
+});
+
 test("unchanged symlink does not make changed text diff unreliable", async () => {
   const { config, projectDir } = await makeDiffFixture("unchanged-symlink");
   await writeFile(join(projectDir, "target.txt"), "target\n", "utf8");
