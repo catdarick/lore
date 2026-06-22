@@ -14,6 +14,62 @@ The [tool guide](docs/Tools.md) is the canonical tool reference. It lists every 
 | `lore-mcp` | MCP clients that can launch a local stdio server directly. | [`lore-mcp/README.md`](lore-mcp/README.md) |
 | `lore-cli` | Shell, scripting, CI, or interactive terminal exploration. | [`lore-tools-cli/README.md`](lore-tools-cli/README.md) |
 
+## Quick start for a target project
+
+After choosing a frontend, add a small `lore.yaml` at the root of the Haskell project being inspected. This keeps Lore's output focused from the first run and avoids spending context on noisy test output or repeated definitions.
+
+```yaml
+session:
+  project-root: .
+  ghc-work-dir: .lore-work
+
+  # Keep test-tool output focused. These defaults are useful for Hspec.
+  default-test-args:
+    - --format=failed-examples
+    - --no-color
+
+# Add public modules, plugin entry points, framework callbacks, or other
+# externally-called code that should not be reported as dead.
+dead-code:
+  alive-modules:
+    - MyLibrary.Public
+  alive-symbols:
+    - MyLibrary.runServer
+
+# Add project vocabulary so symbol search matches local naming conventions.
+symbol-search:
+  synonym-groups:
+    - [account, profile]
+    - [author, writer]
+
+mcp:
+  # Raw lore-mcp users: recommended, because it avoids repeating unchanged
+  # definitions in later getDefinitions responses. pi-lore users do not need
+  # to set this here because pi-lore enables and manages it automatically.
+  enable-definition-knowledge-cache: true
+
+  tools:
+    # Raw lore-mcp users only: enable this if the MCP client summarizes or
+    # compacts chats, then instruct the agent to call it only after such a
+    # summarization/reset. Otherwise restart lore-mcp after summarization.
+    # pi-lore users should leave this disabled; pi-lore tracks resets itself.
+    notifyKnowledgeReset: true
+
+    # Disable tools that should not be exposed in this project.
+    executeCode: false
+```
+
+Recommended first checks:
+
+1. Verify the `lore-mcp` or `lore-cli` binary was built with the exact GHC version used by the target project.
+2. Run `discoverProject` to confirm Lore sees the expected packages and components.
+3. Run `reloadHomeModules` to load the project and surface focused GHC diagnostics.
+4. Run a narrow `runTestSuite` call only after test defaults are configured to keep output concise.
+
+For `pi-lore` users, definition-knowledge caching and reset tracking are automatic; no extra `lore.yaml` cache settings are needed. For raw `lore-mcp` users, enabling `enable-definition-knowledge-cache` is recommended. If the MCP client summarizes or compacts chats, also enable `notifyKnowledgeReset` and instruct the agent to call it only after that summarization/reset; otherwise restart `lore-mcp` after summarization.
+
+Use the [`lore-mcp` configuration guide](lore-mcp/README.md#configuration) for configuration precedence, environment variables, and path behavior. Use the [tool guide](docs/Tools.md) for per-tool inputs, outputs, and tool-owned configuration semantics.
+
 ## Requirements
 
 ### Building Lore

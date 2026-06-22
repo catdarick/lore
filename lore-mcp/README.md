@@ -12,7 +12,7 @@ For Pi users who want managed binary setup, branch-aware definition memory, reco
 
 The [tool guide](../docs/Tools.md) is the canonical index. It explains why each tool is useful for reducing context pressure and links to exact input/output examples.
 
-All built-in tools are enabled by default. `notifyKnowledgeReset`, `feedback`, and project-defined command tools appear only when their backing features are configured.
+Most built-in tools are enabled by default. `notifyKnowledgeReset` is disabled by default; raw `lore-mcp` users should enable it only when their client summarizes or compacts chats and the agent is instructed to call it after that reset. `feedback` and project-defined command tools appear only when their backing features are configured.
 
 ## Requirements
 
@@ -96,6 +96,8 @@ Example output:
 
 ## Configuration
 
+For a practical first `lore.yaml`, start with the root [quick start](../README.md#quick-start-for-a-target-project). This section documents the exact configuration mechanics for direct MCP use.
+
 Configuration is optional. Without `lore.yaml`, Lore uses defaults and treats the current working directory as the project root.
 
 Place `lore.yaml` in the directory where `lore-mcp` starts. When `LORE_PROJECT_ROOT` is set, Lore instead loads `<LORE_PROJECT_ROOT>/lore.yaml`.
@@ -124,8 +126,10 @@ session:
   ghc-work-dir: .lore-work
   parallel-workers-limit: auto
   log-level: info
+  # Keep test-tool output focused. These are good defaults for Hspec.
   default-test-args:
-    - --test-show-details=direct
+    - --format=failed-examples
+    - --no-color
 
 # Tool-owned settings. See the linked tool docs before changing semantics.
 dead-code:
@@ -141,9 +145,12 @@ symbol-search:
     - [author, writer]
 
 mcp:
-  enable-definition-knowledge-cache: false
+  enable-definition-knowledge-cache: true
   feedback-file: .lore-work/mcp-feedback.md
   tools:
+    # Raw lore-mcp users only: enable this when the client summarizes or
+    # compacts chats and the agent is instructed to call it after that reset.
+    notifyKnowledgeReset: true
     executeCode: false
 ```
 
@@ -156,7 +163,7 @@ mcp:
 | `session.custom-prelude` | unset | Module loaded as a custom interpreter prelude. |
 | `session.parallel-workers-limit` | `auto` | Number of workers used for parallel module loading, or `auto` to use the processor count. |
 | `session.log-level` | normal logging disabled | One of `debug`, `info`, `warning`, or `error`. |
-| `session.default-test-args` | `[]` | Arguments appended to built-in test-suite runs. A YAML list preserves arguments exactly. |
+| `session.default-test-args` | `[]` | Arguments appended to built-in test-suite runs. Use this to reduce noisy framework output; a YAML list preserves arguments exactly. |
 
 Project provider detection uses this order:
 
@@ -171,9 +178,9 @@ When multiple root Cabal files exist, add a `cabal.project` to define package se
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `mcp.enable-definition-knowledge-cache` | `false` | Suppress unchanged definitions already returned by `getDefinitions`. Intended for clients that synchronize cache state, such as `pi-lore`. |
+| `mcp.enable-definition-knowledge-cache` | `false` | Suppress unchanged definitions already returned by `getDefinitions`. Recommended for raw `lore-mcp` users; `pi-lore` enables and manages it automatically. |
 | `mcp.feedback-file` | unset | Enables the `feedback` tool and writes entries to this project-relative or absolute file. |
-| `mcp.tools.<toolName>` | enabled | Enable or disable an individual built-in or configured custom tool. |
+| `mcp.tools.<toolName>` | enabled for most built-ins; `notifyKnowledgeReset` disabled by default | Enable or disable an individual built-in or configured custom tool. Raw `lore-mcp` users may enable `notifyKnowledgeReset` for summarized/compacted chat workflows. |
 | `mcp.custom-tools` | `[]` | Define additional MCP tools backed by trusted shell commands. |
 
 Disable the built-in test runner explicitly:
@@ -185,6 +192,19 @@ mcp:
 ```
 
 Arguments passed by the MCP caller are added after `session.default-test-args`.
+
+### Definition knowledge cache
+
+This section matters for raw `lore-mcp` clients. `pi-lore` enables the definition cache and tracks reset points automatically, so Pi users should not configure `notifyKnowledgeReset` for normal workflows.
+
+For raw `lore-mcp`, `mcp.enable-definition-knowledge-cache: true` is recommended because it prevents repeated unchanged definitions from being sent back to the client during repeated `getDefinitions` calls.
+
+If the raw MCP client never summarizes or compacts chat context, no extra reset tool is needed. If the workflow does summarize or compact chats, choose one reset strategy:
+
+- restart `lore-mcp` after summarization; or
+- enable `notifyKnowledgeReset` and instruct the agent to call it only after the chat has been summarized, compacted, or otherwise reset.
+
+`notifyKnowledgeReset` is disabled by default so agents do not clear duplicate-suppression memory accidentally during normal source edits.
 
 ### Tool-owned configuration
 
@@ -277,4 +297,4 @@ export LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE=true
 
 ### Definitions are unexpectedly omitted
 
-Definition knowledge caching may suppress unchanged definitions that were already returned to the client. Compatible clients such as `pi-lore` synchronize or reset this state. Disable the feature for a plain MCP integration that does not manage it.
+Definition knowledge caching may suppress unchanged definitions that were already returned to the client. For `pi-lore`, this is managed automatically. For raw `lore-mcp`, restart the server after chat summarization, or enable `notifyKnowledgeReset` and instruct the agent to call it only after the chat has been summarized, compacted, or otherwise reset.

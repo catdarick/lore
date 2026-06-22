@@ -28,7 +28,7 @@ Lore returns at most 30 definition results per page. Source is available only fo
 
 The result groups declarations by source file and includes signatures. When definition caching is enabled, unchanged definitions already sent to the client may be listed as omitted instead of repeated. That keeps source retrieval aligned with the client's current context.
 
-After client-side compaction or context reset, [`notifyKnowledgeReset`](notifyKnowledgeReset.md) clears duplicate-suppression memory so previously omitted definitions can be returned again.
+Definition caching is recommended for raw `lore-mcp` long sessions because it prevents unchanged definitions from being returned repeatedly. `pi-lore` enables and manages this automatically. Raw `lore-mcp` users whose client summarizes or compacts chats should either restart the server after summarization, or enable [`notifyKnowledgeReset`](notifyKnowledgeReset.md) and instruct the agent to call it only after that summarization/reset.
 
 ## Example
 

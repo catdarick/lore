@@ -61,7 +61,7 @@ There are two configuration files with different responsibilities:
 - **`.pi/lore.config.json`** configures the Pi extension: server startup, timeouts, proxied Lore tools, recovery behavior, and Pi-side state paths.
 - **`lore.yaml`** configures the Haskell session and `lore-mcp`: project root, GHC loading, MCP tool enablement, and tool-owned settings.
 
-The interactive `/lore-settings` menu writes `.pi/lore.config.json`. See the [`lore-mcp` configuration guide](https://github.com/catdarick/lore/blob/main/lore-mcp/README.md#configuration) for `lore.yaml`.
+The interactive `/lore-settings` menu writes `.pi/lore.config.json`. Use the root [quick start](../README.md#quick-start-for-a-target-project) for a practical first `lore.yaml`, and see the [`lore-mcp` configuration guide](https://github.com/catdarick/lore/blob/main/lore-mcp/README.md#configuration) for configuration mechanics.
 
 ### Common project settings
 
@@ -91,7 +91,7 @@ A typical `.pi/lore.config.json` is small:
 | `recovery.compilation` | `true` | Starts recovery after a failed `reloadHomeModules` result. |
 | `recovery.tests` | `true` | Starts or extends recovery after a failed `runTestSuite` result. |
 
-By default, the extension starts the server with definition caching enabled and hides the public reset tool from the model:
+By default, the extension starts the server with definition caching enabled and hides the public reset tool from the model. `pi-lore` tracks summarization and branch changes itself, so agents do not need to call `notifyKnowledgeReset` in normal Pi workflows:
 
 ```json
 {
