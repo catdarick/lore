@@ -2,6 +2,11 @@ version: "3"
 
 dotenv: ['.env']
 
+includes:
+  local:
+    taskfile: Taskfile.local.yml
+    optional: true
+
 tasks:
   release:set-version:
     desc: Set the Lore release version (for example, VERSION=0.2.0.0)
@@ -20,48 +25,9 @@ tasks:
     cmds:
       - stack clean lore lore-mcp lore-tools-cli && stack install lore-mcp lore-tools-cli --ghc-options="-O2"
 
-  mcp-inspector:
-    desc: Run MCP Inspector for lore-mcp; set MCP_HOST_IP for remote browser access
-    cmds:
-      - stack build lore-mcp
-      - |
-        HOST=0.0.0.0 \
-        LORE_LOG_LEVEL=debug \
-        LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE=true \
-        ALLOWED_ORIGINS="http://localhost:6274,http://127.0.0.1:6274${MCP_HOST_IP:+,http://$MCP_HOST_IP:6274}" \
-        npx @modelcontextprotocol/inspector \
-          --config "$PWD/mcp.json" \
-          --server lore-mcp
-
   format:
     desc: Format Haskell sources with ormolu
     cmds:
       - |
         ormolu --mode inplace \
           $(find lore lore-mcp -type f \( -name '*.hs' -o -name '*.hs-boot' \) | sort)
-  
-  zip-lore-code:
-    desc: Zip lore and lore-mcp source files for sharing
-    cmds:
-      - |
-        zip -r lore-code.zip \
-          lore/src \
-          lore/test \
-          lore/package.yaml \
-          lore/README.md \
-          lore-mcp/app \
-          lore-mcp/src \
-          lore-mcp/test \
-          lore-mcp/package.yaml \
-          lore-mcp/README.md
-  
-  run-lore-tunnel:
-    desc: Run tunnel-client for lore-mcp; 
-    cmds:
-      - |
-        LORE_LOG_LEVEL=debug \
-        LORE_MCP_FEEDBACK_FILE=./lore-tunnel-feedback.txt \
-        LORE_MCP_ENABLE_DEFINITION_KNOWLEDGE_CACHE=false \
-        LORE_MCP_TOOL_ENABLED_NOTIFY_KNOWLEDGE_RESET=false \
-        LORE_MCP_TOOL_ENABLED_RUN_TEST_SUITE=false \
-        tunnel-client run --profile lore-mcp-to-lore
