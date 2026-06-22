@@ -1,8 +1,6 @@
 # `lookupSymbolInfo`
 
-`lookupSymbolInfo` resolves a known symbol and returns interface information. The agent can inspect metadata before deciding whether source code is needed.
-
-**Benefit over text search:** Text search may find calls, definitions, comments, and tests together. Lore returns the actual resolved symbol, its type or declaration header, where it is defined, and where it is exported.
+`lookupSymbolInfo` resolves a known symbol and returns interface information. It provides metadata before implementation source is retrieved. This is analogous to `:info` in GHCi, but it can search all loaded top-level symbols rather than only symbols exported from currently scoped modules.
 
 ## Typical MCP input
 
@@ -15,9 +13,11 @@
 
 The module qualifier is optional. Add it only when an unqualified name is ambiguous.
 
-## What the agent receives
+## What the tool returns
 
 The result can include a function type, a type or class declaration header, constructors, the defining location, export modules, and direct class instances. If no exact symbol exists, Lore suggests similar names.
+
+This tool is sufficient when interface metadata answers the question. [`getDefinitions`](getDefinitions.md) is the source-retrieval tool for cases where implementation details matter.
 
 ## Example
 

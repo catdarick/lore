@@ -1,8 +1,8 @@
 # `reloadHomeModules`
 
-`reloadHomeModules` reloads project home modules into GHC. The agent can call it after source changes, before symbol lookup, reference lookup, type inference, or evaluation.
+`reloadHomeModules` reloads project home modules into GHC. After source changes, it is the validation and refresh point for symbol lookup, reference lookup, type inference, evaluation, and test execution.
 
-**Benefit over build commands:** Build output can be long and noisy. Lore returns a structured status, module counts, grouped diagnostics, focused snippets, and safe automatic import fixes.
+The tool refreshes Lore's loaded-module state and indexes, applies safe import fixes when available, and returns paginated GHC diagnostics instead of raw build output.
 
 ## Typical MCP input
 
@@ -12,11 +12,11 @@
 
 `skip` asks for the next diagnostic page. The default page contains up to five diagnostics.
 
-## What the agent receives
+## What the tool returns
 
-The text result contains the load summary, safe fixes, and focused diagnostics. The structured result reports `success`, `compilation-failure`, `environment-failure`, or `restart-required`.
+The text result contains the load summary, safe fixes applied, and focused diagnostics. Diagnostics include source locations and snippets when available, and pagination keeps repeated repair attempts from filling context with the same full build log.
 
-The reload may remove redundant imports. It also clears interactive bindings created by `executeCode`.
+The reload may remove redundant imports. It also clears interactive bindings created by `executeCode` while preserving the project modules and configured temporal modules.
 
 ## Example
 

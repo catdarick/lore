@@ -2,11 +2,11 @@
 
 Terminal frontend for Lore tools.
 
-Use `lore-cli` when you want compiler-aware project inspection from a shell, script, or CI job. It can run one command and exit, or start an interactive prompt.
+`lore-cli` is the shell, script, and CI frontend for compiler-aware project inspection. It can run one command and exit, or start an interactive prompt. The shared command set is documented in the [tool guide](../docs/Tools.md); this README covers CLI-specific operation and compilation bottleneck analysis.
 
 ## Build and run
 
-Build the CLI with the same full GHC version as the project being inspected:
+Build the CLI with the same full GHC version as the project being inspected. The root [GHC compatibility](../README.md#ghc-compatibility) section explains why exact matching is required.
 
 ```bash
 cabal build exe:lore-cli

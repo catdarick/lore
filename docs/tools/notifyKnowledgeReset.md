@@ -2,7 +2,7 @@
 
 Clear Lore's memory of definitions already sent to the client.
 
-This tool exists only when definition caching is enabled.
+This tool exists only when definition caching is enabled. It keeps targeted source retrieval aligned with the client's actual conversation context.
 
 ## Typical MCP input
 
@@ -10,7 +10,7 @@ This tool exists only when definition caching is enabled.
 {}
 ```
 
-## What the agent receives
+## What the tool returns
 
 The result reports how many cached definition fingerprints were cleared. Later `getDefinitions` calls can return those definitions again.
 
@@ -20,4 +20,6 @@ The result reports how many cached definition fingerprints were cleared. Later `
 Knowledge reset acknowledged. Cleared 18 cached definition fingerprints.
 ```
 
-Call this only after the client loses its earlier conversation context. Normal source edits do not require it because changed definitions receive new fingerprints.
+This tool is relevant after compaction, summarization, branch-context loss, or any other client-side context reset that removes previously returned definitions from the model's usable context.
+
+Normal source edits do not require it because changed definitions receive new fingerprints. If the workflow does not use client-side context reset, consider disabling this tool through `lore.yaml` or `LORE_MCP_TOOL_ENABLED_NOTIFY_KNOWLEDGE_RESET`.

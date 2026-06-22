@@ -2,7 +2,6 @@
 
 Infer the type of a Haskell expression in the current interpreter context without evaluating it.
 
-**Benefit over plain command output:** The agent can answer a type question without retrieving source or running code.
 
 ## Typical MCP input
 
@@ -14,7 +13,7 @@ Infer the type of a Haskell expression in the current interpreter context withou
 
 The input must be an expression, not an import, declaration, or statement.
 
-## What the agent receives
+## What the tool returns
 
 The result contains the inferred type or focused GHC diagnostics.
 

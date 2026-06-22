@@ -1,33 +1,29 @@
 # pi-lore
 
-Use Lore's GHC-aware Haskell development tools directly from [Pi](https://github.com/badlogic/pi-mono).
+`pi-lore` is the Pi package for Lore's GHC-aware Haskell development tools. It starts a compatible `lore-mcp` server for the current project, exposes the shared Lore tools to the model, and adds Pi-specific context management for long debugging sessions.
 
-`pi-lore` starts a compatible `lore-mcp` server for the current project, exposes its tools to the model, and adds Pi-specific context management for long debugging sessions.
+The shared tool behavior is documented in the [tool guide](../docs/Tools.md). This README covers only the Pi integration layer: installation, managed server setup, Pi commands, Pi configuration, recovery behavior, and troubleshooting.
 
 ## What it provides
 
-`pi-lore` gives Pi agents access to Lore's compiler-aware Haskell tools. The [complete tool guide](../docs/Tools.md) explains what the agent can do with each tool and why those results are more reliable than plain text search or raw build logs for Haskell-specific questions.
+- **Managed server setup:** selects, downloads, validates, or prompts for a compatible `lore-mcp` binary.
+- **Definition memory:** lets unchanged definitions already returned on the current branch be omitted from later `getDefinitions` responses.
+- **Branch-aware restoration:** restores definition-memory state when Pi forks or resumes a branch.
+- **Compact repair sessions:** keeps failed compile/test repair work in a recovery section, then replaces it with a summary after validation succeeds.
+- **Interactive controls:** adds Pi commands for settings, status, restart, recovery, and usage statistics.
 
-The main value is smaller, more precise context:
-
-- **Focused source retrieval:** The agent can request `publishArticle` alone, or add one or two dependency layers. Lore returns declarations, not whole files.
-- **Resolved navigation:** The agent can find references and instances through GHC names, not text matches.
-- **Structured validation:** Compilation and test results have machine-readable status, so Pi can track repair progress.
-- **Definition memory:** Lore omits unchanged definitions that the current branch already knows.
-- **Branch-aware restoration:** Pi forks restore the definition knowledge recorded for that branch.
-- **Compact repair sessions:** Failed compilation and test work stays in a recovery section. After validation succeeds, Pi replaces that section with a concise summary.
-
-Plain command output remains useful for project-specific tasks. `pi-lore` adds the compiler-aware layer that lets an agent use fewer tokens and make fewer guesses.
+Plain command output is still useful for project-specific tasks. `pi-lore` adds the compiler-aware and branch-aware context-management layer that keeps large-codebase sessions smaller.
 
 ## Requirements
 
-- Pi with pi-package support.
+- Pi with package support.
 - Node.js 24 or newer.
 - A Cabal or Stack project whose compiler can be detected locally.
+- A `lore-mcp` binary built for the exact full GHC version used by the project.
 
-Automatic binary downloads currently require Linux x86-64 with GNU libc and a GHC version listed in the package's `binaries.json`. On other platforms, or when the exact GHC version is not listed, a source-built `lore-mcp` can be configured when that platform and compiler are supported by Lore.
+Automatic downloads currently require Linux x86-64 with GNU libc and a GHC version listed in the package's `binaries.json`. Other platforms, or unlisted GHC versions, need a manually configured `lore-mcp` binary when supported by Lore.
 
-Lore uses the GHC API, so the server must be built with the **exact** GHC version used by the project. A binary built with GHC 9.6.5 cannot be used with a project on GHC 9.6.7.
+The root [GHC compatibility](../README.md#ghc-compatibility) section explains why exact compiler matching is required.
 
 ## Install
 
@@ -43,7 +39,7 @@ Or install it only for the current project:
 pi install npm:pi-lore -l
 ```
 
-Then start Pi from the root of a Haskell project. On first use, `pi-lore` will either start an already cached server or open a setup menu.
+Start Pi from the root of a Haskell project. On first use, `pi-lore` either starts an already cached server or opens the setup menu.
 
 ## Pi commands
 
@@ -56,14 +52,14 @@ Then start Pi from the root of a Haskell project. On first use, `pi-lore` will e
 | `/lore-stats` | Show estimated tool-context and recovery statistics. |
 | `/lore-recovery-abandon` | Stop the active recovery and retain the original conversation entries. |
 
-Changes that affect server startup or tool registration should be followed by `/reload` or a Pi restart.
+Changes that affect server startup or MCP tool registration should be followed by `/reload` or a Pi restart.
 
 ## Configuration
 
 There are two configuration files with different responsibilities:
 
-- **`.pi/lore.config.json`** configures the Pi extension: server startup, timeouts, proxied Lore tools, and recovery behavior.
-- **`lore.yaml`** configures the Haskell session and `lore-mcp`: project roots, compiler loading, dead-code roots, symbol-search synonyms, MCP tools, and custom command tools.
+- **`.pi/lore.config.json`** configures the Pi extension: server startup, timeouts, proxied Lore tools, recovery behavior, and Pi-side state paths.
+- **`lore.yaml`** configures the Haskell session and `lore-mcp`: project root, GHC loading, MCP tool enablement, and tool-owned settings.
 
 The interactive `/lore-settings` menu writes `.pi/lore.config.json`. See the [`lore-mcp` configuration guide](https://github.com/catdarick/lore/blob/main/lore-mcp/README.md#configuration) for `lore.yaml`.
 
@@ -95,7 +91,7 @@ A typical `.pi/lore.config.json` is small:
 | `recovery.compilation` | `true` | Starts recovery after a failed `reloadHomeModules` result. |
 | `recovery.tests` | `true` | Starts or extends recovery after a failed `runTestSuite` result. |
 
-By default, the extension starts the server with definition caching enabled and the public `notifyKnowledgeReset` tool disabled:
+By default, the extension starts the server with definition caching enabled and hides the public reset tool from the model:
 
 ```json
 {
@@ -130,19 +126,7 @@ Other advanced values should be edited directly in `.pi/lore.config.json`.
 
 ## Managed server selection
 
-When `command` is not configured, provider detection uses this order:
-
-1. `stack.yaml` → Stack
-2. `cabal.project` → Cabal
-3. `package.yaml` → Cabal
-4. exactly one root-level `*.cabal` file → Cabal
-
-The GHC version is read with one of these commands:
-
-```bash
-stack exec -- ghc --numeric-version
-cabal exec --write-ghc-environment-files=never -- ghc --numeric-version
-```
+When `command` is not configured, `pi-lore` detects the project provider, reads the project GHC version, and selects a server binary with the exact same GHC version when one is available.
 
 Downloaded binaries are shared by all projects and stored under:
 
@@ -151,13 +135,15 @@ Downloaded binaries are shared by all projects and stored under:
 
 There is no nearest-version fallback. When the project changes compiler or resolver, reload Pi so the extension can select the corresponding server.
 
-## Use a custom server build
+Provider detection, project-root behavior, and the commands used to read the compiler version are documented in the [`lore-mcp` configuration guide](https://github.com/catdarick/lore/blob/main/lore-mcp/README.md#configuration).
+
+## Custom server command
 
 A custom command is useful for local Lore development, unsupported platforms, or a GHC version without a published binary.
 
-Open `/lore-settings`, choose **Set command to run Lore**, and enter either a command on `PATH` or an executable path. Before saving it, `pi-lore` verifies that the binary reports the expected Lore version, exact GHC version, and target platform.
+Open `/lore-settings`, choose **Set command to run Lore**, and enter either a command on `PATH` or an executable path. Before saving it, `pi-lore` verifies the binary identity against the expected Lore version, exact GHC version, and target platform.
 
-You can also configure it directly:
+The same setting can be configured directly:
 
 ```json
 {
@@ -166,39 +152,23 @@ You can also configure it directly:
 }
 ```
 
-### Build `lore-mcp` with Cabal
-
-Install the same GHC version used by the target project, then run from the Lore repository root:
-
-```bash
-git clone https://github.com/catdarick/lore.git
-cd lore
-
-cabal build exe:lore-mcp -w ghc-9.6.5
-cabal list-bin exe:lore-mcp -w ghc-9.6.5
-```
-
-Replace `9.6.5` with the project's exact compiler version. Use the path printed by `cabal list-bin` in `/lore-settings`.
-
-To verify the build identity:
-
-```bash
-"$(cabal list-bin exe:lore-mcp -w ghc-9.6.5)" --version-json
-```
+Build instructions for `lore-mcp`, including exact-GHC Cabal commands and `--version-json` verification, are maintained in the [`lore-mcp` README](https://github.com/catdarick/lore/blob/main/lore-mcp/README.md#build-with-cabal).
 
 ## Recovery behavior
 
-Recovery is started by a failed structured result from `reloadHomeModules` or `runTestSuite`. The extension records a project baseline, keeps the repair work as a distinct section, and tracks which validation steps still need to pass.
+Recovery is a Pi-side context-management feature. It starts when `reloadHomeModules` or `runTestSuite` returns a failed structured result. The extension records a project baseline, keeps the repair work in a distinct section, and tracks which validation steps still need to pass.
 
-After the required compilation and test checks succeed, `pi-lore` captures the resulting diff and asks Pi to summarize the failed approaches, useful findings, and applied fixes. Future model context uses that summary instead of the full repair transcript. This is especially helpful for long-running sessions to avoid context bloat.
+After the required compilation and test checks succeed, `pi-lore` captures the resulting diff and asks Pi to summarize failed approaches, useful findings, and applied fixes. Future model context uses that summary instead of the full repair transcript.
 
-Disable compilation and test recovery independently under `/lore-settings` → **Recovery**. Use `/lore-recovery-abandon` when you need to stop recovery without replacing the original entries.
+Compilation and test recovery can be disabled independently under `/lore-settings` -> **Recovery**. `/lore-recovery-abandon` stops recovery without replacing the original entries.
+
+Tool-level behavior for `reloadHomeModules` and `runTestSuite` remains documented in their shared tool pages.
 
 ## Troubleshooting
 
 ### Lore cannot detect the project
 
-Start Pi at the project root and ensure one of `stack.yaml`, `cabal.project`, `package.yaml`, or a single root `*.cabal` file exists. A directory with multiple root Cabal files needs a `cabal.project`.
+Start Pi at the project root. Provider detection and supported manifest order are documented in the [`lore-mcp` configuration guide](https://github.com/catdarick/lore/blob/main/lore-mcp/README.md#session-settings).
 
 ### No binary is available for this GHC version
 
@@ -227,4 +197,4 @@ npm test
 npm run validate:package
 ```
 
-The Haskell server it launches is built separately with Cabal as described above.
+The Haskell server it launches is built separately with Cabal as described in the [`lore-mcp` README](https://github.com/catdarick/lore/blob/main/lore-mcp/README.md#build-with-cabal).

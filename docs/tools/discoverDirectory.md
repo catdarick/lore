@@ -1,8 +1,7 @@
 # `discoverDirectory`
 
-`discoverDirectory` returns a bounded tree for one project directory. The agent can understand layout before choosing files or modules.
+`discoverDirectory` returns a bounded tree for one project directory. It provides layout context before any file, module, or symbol-specific inspection.
 
-**Benefit over file listing:** A plain file tree can dump thousands of paths. Lore stays inside the project, skips ignored directories, collapses simple paths, and trims noisy folders.
 
 ## Typical MCP input
 
@@ -15,7 +14,7 @@
 
 `depth: 0` shows the requested directory and its immediate entries. Larger values open more levels.
 
-## What the agent receives
+## What the tool returns
 
 The result is a compact tree. Closed directories show a file count, and trimmed sections show how many entries were omitted.
 

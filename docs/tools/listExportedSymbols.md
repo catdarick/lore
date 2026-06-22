@@ -1,8 +1,7 @@
 # `listExportedSymbols`
 
-`listExportedSymbols` lists symbols exported by one loaded module, including re-exports. The agent can inspect an API without reading the implementation.
+`listExportedSymbols` lists symbols exported by one loaded module, including re-exports. It provides the public API before implementation source is retrieved.
 
-**Benefit over text search:** Text search can find an export list, but it cannot reliably include re-exports or show constructor and method structure. Lore asks the loaded GHC session.
 
 ## Typical MCP input
 
@@ -17,7 +16,7 @@
 
 `packageName` disambiguates duplicate module names. `typeHint` keeps symbols whose own type directly mentions that name.
 
-## What the agent receives
+## What the tool returns
 
 The result lists symbol names and categories. Types can include their constructors, and classes can include methods. Results are paginated.
 

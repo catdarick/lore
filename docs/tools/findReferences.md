@@ -1,8 +1,6 @@
 # `findReferences`
 
-Find resolved uses of a known symbol across loaded project modules.
-
-**Benefit over plain command output:** Lore returns focused snippets around real GHC-resolved references. This avoids broad text-search matches for unrelated names.
+Find resolved uses of a known symbol across loaded project modules. Lore returns focused snippets around real GHC-resolved references, giving usage context without broad grep output or unrelated same-text matches.
 
 ## Typical MCP input
 
@@ -17,7 +15,7 @@ Find resolved uses of a known symbol across loaded project modules.
 
 `Low` shows the usage itself. `Medium` adds its enclosing top-level definition. `High` adds broader control-flow context.
 
-## What the agent receives
+## What the tool returns
 
 The result groups references by file and enclosing definition. Each entry includes a source location and a snippet. Results are paginated.
 

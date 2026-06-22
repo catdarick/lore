@@ -2,7 +2,6 @@
 
 Create a temporary Haskell module for multi-line debugging code.
 
-**Benefit over plain command output:** Put larger helpers in one temporary file, then call only the final expressions through `executeCode`. This keeps repeated tool output small.
 
 ## Typical MCP input
 
@@ -10,7 +9,7 @@ Create a temporary Haskell module for multi-line debugging code.
 {}
 ```
 
-## What the agent receives
+## What the tool returns
 
 The tool returns the new module path and the required workflow:
 

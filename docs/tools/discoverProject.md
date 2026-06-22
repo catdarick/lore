@@ -1,8 +1,7 @@
 # `discoverProject`
 
-`discoverProject` reads the workspace manifests and describes packages and components. The agent can learn the project shape before reading source files, and it does not need home modules to compile.
+`discoverProject` reads workspace manifests and describes packages and components. It provides the Cabal/Stack shape before source-file reads, and it does not require home modules to compile.
 
-**Benefit over file listing:** File listing shows paths. It does not explain which directories belong to each library, program, test suite, or benchmark. Lore reads the build configuration and shows the shape that GHC uses.
 
 ## Typical MCP input
 
@@ -10,17 +9,41 @@
 {}
 ```
 
-## What the agent receives
+## What the tool returns
 
 The result lists package roots and manifests, then libraries, programs, tests, and benchmarks. Shared dependencies, extensions, and GHC options appear once instead of repeating in every component.
 
 ## Example
 
 ```text
-Package: blog
-  package root: blog/
-  package manifest: blog/blog.cabal
+# Workspace
 
-Component: library
-  source dirs: blog/src/
+- shared dependencies: aeson, base, containers
+- shared GHC options: -Wall, -Wcompat, -Werror, -Widentities
+- shared extensions: BangPatterns, BlockArguments
+
+## Package: lore-mcp
+
+- package root: lore-mcp/
+- package manifest: lore-mcp/lore-mcp.cabal
+- package shared dependencies: bytestring, directory, ghc
+
+### Component: executable:lore-mcp
+
+- source dirs: lore-mcp/app/
+- main module: lore-mcp/app/Main.hs
+- component specific dependencies: lore-mcp
+- component specific GHC options: -rtsopts, -threaded, -with-rtsopts=-N
+
+### Component: library
+
+- source dirs: lore-mcp/src/
+- main module: (none)
+
+### Component: test:lore-mcp-test
+
+- source dirs: lore-mcp/test/
+- main module: lore-mcp/test/Spec.hs
+- component specific dependencies: hspec, lore-mcp
+- component specific GHC options: -Wno-incomplete-patterns, -rtsopts, -threaded, -with-rtsopts=-N
 ```

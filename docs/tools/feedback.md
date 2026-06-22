@@ -13,7 +13,7 @@ This tool exists only when `mcp.feedback-file` is set.
 }
 ```
 
-## What the agent receives
+## What the tool returns
 
 Lore appends a Markdown entry with the title and body, then returns the destination path.
 

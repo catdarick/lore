@@ -1,8 +1,7 @@
 # `executeCode`
 
-`executeCode` evaluates a small one-line Haskell expression or IO action in the current project context. The agent can run a focused runtime check without creating project files.
+`executeCode` evaluates a small one-line Haskell expression or IO action in the current project context. It provides a focused runtime check without adding source files or running a full test suite.
 
-**Benefit over a temporary script or full test run:** The agent can check one expression without creating source files or running the whole suite. Failures return GHC diagnostics and common-fix hints.
 
 ## Typical MCP input
 
@@ -14,7 +13,7 @@
 
 The result must have a `Show` instance, unless the expression performs its own IO output. Imports and multi-line declarations are not supported.
 
-## What the agent receives
+## What the tool returns
 
 The result contains captured output and the shown value. Failures include GHC diagnostics and short hints for common interpreter mistakes.
 
