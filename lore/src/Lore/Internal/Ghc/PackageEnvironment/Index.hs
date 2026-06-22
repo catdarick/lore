@@ -8,7 +8,7 @@ import Data.Char (isSpace, toLower)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
-import Lore.Internal.BuildTool.Environment (runProcessInWorkingDir)
+import Lore.Internal.BuildTool.Command (runProcessInWorkingDir)
 import Lore.Internal.Ghc.PackageEnvironment.Types
   ( PackageDbFlagTarget (PackageDbFlagsForGhcPkg),
     PackageDbStack (..),

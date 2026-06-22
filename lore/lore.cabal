@@ -55,8 +55,7 @@ library
       Lore.Internal.Lookup.TypeQuery
       Lore.Internal.Lookup.Types
   other-modules:
-      Lore.Internal.BuildTool.Dependencies
-      Lore.Internal.BuildTool.Environment
+      Lore.Internal.BuildTool.Command
       Lore.Internal.Config.Document
       Lore.Internal.DeadCode
       Lore.Internal.Definition.Analysis
@@ -139,12 +138,16 @@ library
       Lore.Internal.Package.Path
       Lore.Internal.Package.Root
       Lore.Internal.Package.Types
+      Lore.Internal.ProjectEnvironment.Access
       Lore.Internal.ProjectEnvironment.Prepare
       Lore.Internal.ProjectEnvironment.Refresh
       Lore.Internal.ProjectEnvironment.Types
       Lore.Internal.ProjectProvider
+      Lore.Internal.ProjectProvider.Ops
+      Lore.Internal.ProjectPath
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
+      Lore.Internal.Session.Cache.Registry
       Lore.Internal.Session.CacheInvalidation
       Lore.Internal.Session.Environment
       Lore.Internal.SourceEdit
@@ -268,8 +271,6 @@ test-suite lore-test
       Lore.HomeModules
       Lore.HomeModules.CompilationGraph
       Lore.HomeModules.Plan
-      Lore.Internal.BuildTool.Dependencies
-      Lore.Internal.BuildTool.Environment
       Lore.Internal.Config.Document
       Lore.Internal.DeadCode
       Lore.Internal.Definition.Analysis
@@ -363,6 +364,7 @@ test-suite lore-test
       Lore.Internal.ProjectProvider
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
+      Lore.Internal.Session.Cache.Registry
       Lore.Internal.Session.CacheInvalidation
       Lore.Internal.Session.Environment
       Lore.Internal.SourceEdit

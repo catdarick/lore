@@ -9,11 +9,12 @@ module Lore.Internal.Package.Path
 where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.List (isPrefixOf, nub)
+import Data.List (nub)
 import qualified Data.Set as Set
 import Lore.Internal.Package.Types (ComponentData (..), PackageData (..))
+import Lore.Internal.ProjectPath (isAncestorPath, normalProjectPath)
 import System.Directory (doesFileExist)
-import System.FilePath (dropTrailingPathSeparator, normalise, splitDirectories, (</>))
+import System.FilePath ((</>))
 
 componentMainModulePathCandidates :: FilePath -> ComponentData -> [FilePath]
 componentMainModulePathCandidates packageRoot component =
@@ -42,15 +43,8 @@ componentMainModulePathCandidates packageRoot component =
               packageRoot </> normalizeRelativePath (sourceDir </> normalizedMainPath)
 
 normalizeRelativePath :: FilePath -> FilePath
-normalizeRelativePath path =
-  case dropTrailingPathSeparator (normalise path) of
-    "" -> "."
-    normalized -> normalized
-
-isAncestorPath :: FilePath -> FilePath -> Bool
-isAncestorPath ancestor path =
-  splitDirectories (normalizeRelativePath ancestor)
-    `isPrefixOf` splitDirectories (normalizeRelativePath path)
+normalizeRelativePath =
+  normalProjectPath
 
 firstExistingPath :: (MonadIO m) => [FilePath] -> m (Maybe FilePath)
 firstExistingPath [] = pure Nothing

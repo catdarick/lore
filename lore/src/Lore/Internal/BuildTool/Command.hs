@@ -1,27 +1,13 @@
-module Lore.Internal.BuildTool.Environment
-  ( runInBuildToolEnvironment,
-    runProcessInWorkingDir,
+module Lore.Internal.BuildTool.Command
+  ( runProcessInWorkingDir,
+    showCommand,
+    boundedExcerpt,
   )
 where
 
 import Control.Exception (IOException, handle)
-import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import System.Exit (ExitCode (..))
-import System.Process (CreateProcess (cwd), proc, readCreateProcessWithExitCode)
-
-runInBuildToolEnvironment :: ProjectProvider -> FilePath -> String -> IO (Either String String)
-runInBuildToolEnvironment provider projectRoot script =
-  case provider of
-    CabalProject ->
-      runProcessInWorkingDir
-        projectRoot
-        "cabal"
-        ["exec", "--write-ghc-environment-files=never", "--", "sh", "-lc", script]
-    StackProject ->
-      runProcessInWorkingDir
-        projectRoot
-        "stack"
-        ["exec", "--", "sh", "-lc", script]
+import System.Process (cwd, proc, readCreateProcessWithExitCode)
 
 runProcessInWorkingDir :: FilePath -> FilePath -> [String] -> IO (Either String String)
 runProcessInWorkingDir workingDir command arguments =
@@ -46,3 +32,13 @@ runProcessInWorkingDir workingDir command arguments =
   where
     showAsIoException :: IOException -> String
     showAsIoException = show
+
+showCommand :: FilePath -> [String] -> String
+showCommand exe args = unwords (map show (exe : args))
+
+boundedExcerpt :: String -> String
+boundedExcerpt text =
+  let limit = 4000
+   in if length text <= limit
+        then text
+        else take limit text <> "\n... <truncated>"

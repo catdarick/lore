@@ -49,8 +49,8 @@ import qualified GHC.Core.FamInstEnv as FamInstEnv
 import qualified GHC.Core.InstEnv as InstEnv
 import qualified GHC.Core.RoughMap as RoughMap
 import qualified GHC.Plugins as GHC
-import qualified GHC.Types.TyThing as GHC
 import Lore.Config (LoreConfigError, loadLoreConfig, projectSynonymLexicon)
+import Lore.Internal.Ghc.TyThing (tyThingPathToRoot)
 import Lore.Internal.Lookup.InstanceResolution
   ( ChosenInstanceContextStatus (..),
     ChosenInstanceError (..),
@@ -64,7 +64,8 @@ import Lore.Internal.Lookup.SymbolSearch.Synonyms (builtInSynonymLexicon, mergeS
 import Lore.Internal.Lookup.SymbolsMap (findMatchingSymbolsInMap, findSimilarSymbolsInMap)
 import qualified Lore.Internal.Lookup.SymbolsMap as SymbolsMap
 import Lore.Internal.Lookup.Types (NameToInstancesIndex (..), Symbol (..), SymbolSuggestion (..), SymbolVisibility (..), SymbolsIndex (..), SymbolsMap (..))
-import qualified Lore.Internal.Package as Package
+import Lore.Internal.Package.Types (ComponentData (..), PackageData (..))
+import Lore.Internal.ProjectEnvironment.Access (getProjectPackages)
 import Lore.Monad (MonadLore)
 
 data SymbolInfo = SymbolInfo
@@ -106,7 +107,7 @@ findMatchingSymbolLookupNamesByPrefix rawPrefix = do
 
 findProjectModuleNamesByPrefix :: (MonadLore m) => T.Text -> m [T.Text]
 findProjectModuleNamesByPrefix rawPrefix = do
-  packages <- Package.discoverProject
+  packages <- getProjectPackages
   let allProjectModuleNames =
         Set.fromList
           [ T.pack (GHC.moduleNameString ghcModuleName)
@@ -337,7 +338,4 @@ resolvePathToRoot name = do
       Nothing ->
         PathToRoot (NE.singleton name)
       Just tyThing ->
-        PathToRoot (NE.fromList (map GHC.getName (collectRootTyThingChain tyThing)))
-  where
-    collectRootTyThingChain tyThing =
-      tyThing : maybe [] collectRootTyThingChain (GHC.tyThingParent_maybe tyThing)
+        PathToRoot (tyThingPathToRoot tyThing)

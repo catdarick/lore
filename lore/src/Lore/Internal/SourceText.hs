@@ -14,9 +14,9 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified GHC.Plugins as GHC
+import Lore.Internal.ProjectPath (displayProjectPath)
 import Lore.Internal.SourceSpan (realSrcSpanFromSrcSpan)
 import Lore.Internal.SourceSpan.Types (Span (..))
-import System.FilePath (isRelative, makeRelative, normalise)
 
 positionToOffset :: Text -> (Int, Int) -> Maybe Int
 positionToOffset contents (targetLine, targetCol)
@@ -96,8 +96,5 @@ sliceRealSpan realSpan fileLines =
         width = endCol - startCol
 
 relativeSourcePath :: FilePath -> FilePath -> FilePath
-relativeSourcePath currentDirectory sourcePath =
-  normalise $
-    if isRelative sourcePath
-      then sourcePath
-      else makeRelative currentDirectory sourcePath
+relativeSourcePath =
+  displayProjectPath

@@ -2,7 +2,6 @@ module Lore.Internal.Package.Materialize
   ( PackageMaterializeRunner (..),
     PackageRoot (..),
     defaultPackageMaterializeRunner,
-    defaultPackageMaterializeRunnerFor,
     materializeCabalPackageFilesIO,
     materializeCabalPackageFileIO,
     findSingleTopLevelCabalFile,
@@ -12,9 +11,8 @@ where
 import Control.Exception (IOException, try)
 import Control.Monad (when)
 import Data.List (sort)
-import Lore.Internal.BuildTool.Environment (runProcessInWorkingDir)
+import Lore.Internal.BuildTool.Command (runProcessInWorkingDir)
 import Lore.Internal.Package.Root (PackageRoot (..))
-import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import System.Directory (doesFileExist, listDirectory)
 import System.FilePath (takeExtension, (</>))
 
@@ -29,18 +27,6 @@ defaultPackageMaterializeRunner =
         hpackResult <- runProcessInWorkingDir packageRoot "hpack" []
         pure (() <$ hpackResult)
     }
-
-defaultPackageMaterializeRunnerFor :: ProjectProvider -> PackageMaterializeRunner
-defaultPackageMaterializeRunnerFor projectProvider =
-  case projectProvider of
-    StackProject ->
-      PackageMaterializeRunner
-        { runHpackGenerator = \packageRoot -> do
-            hpackResult <- runProcessInWorkingDir packageRoot "stack" ["exec", "--", "hpack"]
-            pure (() <$ hpackResult)
-        }
-    CabalProject ->
-      defaultPackageMaterializeRunner
 
 materializeCabalPackageFilesIO ::
   PackageMaterializeRunner ->

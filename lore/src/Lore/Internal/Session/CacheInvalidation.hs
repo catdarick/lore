@@ -1,5 +1,7 @@
 module Lore.Internal.Session.CacheInvalidation
-  ( invalidateCachesForHomeModuleConfigurationChange,
+  ( CacheInvalidationCause (..),
+    invalidateSessionCaches,
+    invalidateCachesForHomeModuleConfigurationChange,
     invalidateCachesAfterSourceEdits,
     retainCachesForLoadedModules,
     invalidateDefinitionDerivedCaches,
@@ -20,22 +22,39 @@ import Lore.Internal.Lookup.NameToInstances (invalidateNameToInstancesIndexCache
 import Lore.Internal.Lookup.SymbolsMap (invalidateHomeSymbolsIndexCache)
 import Lore.Monad (MonadLore)
 
+data CacheInvalidationCause
+  = HomeModuleConfigurationChanged
+  | SourceEdited
+  | LoadedModulesRetained (Set.Set GHC.Module)
+
+invalidateSessionCaches :: (MonadLore m) => CacheInvalidationCause -> m ()
+invalidateSessionCaches = \case
+  HomeModuleConfigurationChanged -> do
+    invalidateInterpreterContextCache
+    invalidateModSummariesCache
+    invalidateHomeSymbolsIndexCache
+    invalidateNameToInstancesIndexCache
+    invalidateInstanceEnvironmentInputsCache
+    invalidateDefinitionDerivedCaches
+  SourceEdited -> do
+    invalidateHomeSymbolsIndexCache
+    invalidateModSummariesCache
+    invalidateNameToInstancesIndexCache
+    invalidateInstanceEnvironmentInputsCache
+    invalidateDefinitionDerivedCaches
+  LoadedModulesRetained loadedModules -> do
+    invalidateDefinitionDerivedCaches
+    retainParsedModuleFactsCacheForLoadedModules loadedModules
+    retainTypedModuleFactsCacheForLoadedModules loadedModules
+    retainCoreModuleFactsCacheForLoadedModules loadedModules
+
 invalidateCachesForHomeModuleConfigurationChange :: (MonadLore m) => m ()
-invalidateCachesForHomeModuleConfigurationChange = do
-  invalidateInterpreterContextCache
-  invalidateModSummariesCache
-  invalidateHomeSymbolsIndexCache
-  invalidateNameToInstancesIndexCache
-  invalidateInstanceEnvironmentInputsCache
-  invalidateDefinitionDerivedCaches
+invalidateCachesForHomeModuleConfigurationChange =
+  invalidateSessionCaches HomeModuleConfigurationChanged
 
 invalidateCachesAfterSourceEdits :: (MonadLore m) => m ()
-invalidateCachesAfterSourceEdits = do
-  invalidateHomeSymbolsIndexCache
-  invalidateModSummariesCache
-  invalidateNameToInstancesIndexCache
-  invalidateInstanceEnvironmentInputsCache
-  invalidateDefinitionDerivedCaches
+invalidateCachesAfterSourceEdits =
+  invalidateSessionCaches SourceEdited
 
 invalidateDefinitionDerivedCaches :: (MonadLore m) => m ()
 invalidateDefinitionDerivedCaches = do
@@ -43,8 +62,5 @@ invalidateDefinitionDerivedCaches = do
   invalidateDefinitionModuleIndexCache
 
 retainCachesForLoadedModules :: (MonadLore m) => Set.Set GHC.Module -> m ()
-retainCachesForLoadedModules loadedModules = do
-  invalidateDefinitionDerivedCaches
-  retainParsedModuleFactsCacheForLoadedModules loadedModules
-  retainTypedModuleFactsCacheForLoadedModules loadedModules
-  retainCoreModuleFactsCacheForLoadedModules loadedModules
+retainCachesForLoadedModules =
+  invalidateSessionCaches . LoadedModulesRetained

@@ -18,6 +18,11 @@ import Lore.Internal.Package
     PackageData (..),
     commonSetIntersection,
     componentMainModulePathCandidates,
-    discoverProject,
     normalizeRelativePath,
   )
+import Lore.Internal.ProjectEnvironment.Access (getProjectPackages)
+import Lore.Monad (MonadLore)
+
+discoverProject :: (MonadLore m) => m [PackageData]
+discoverProject =
+  getProjectPackages

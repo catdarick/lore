@@ -17,7 +17,8 @@ import GHC.Utils.Monad (mapMaybeM)
 import Lore.Internal.Ghc.AvailInfo (availInfoForName, availInfoSubordinateNames)
 import qualified Lore.Internal.Ghc.TyThing as TyThing
 import Lore.Internal.Lookup.Name (NormalizedModuleName, NormalizedOccName, mkGhcModuleName)
-import Lore.Internal.Package (PackageData (packageName), discoverProject)
+import Lore.Internal.Package.Types (PackageData (packageName))
+import Lore.Internal.ProjectEnvironment.Access (getProjectPackages)
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
 import UnliftIO (SomeException, handle)
@@ -49,7 +50,7 @@ resolveModule moduleName maybePackageName =
     resolvePackageQualifier Nothing =
       pure Nothing
     resolvePackageQualifier (Just requestedPackageName) = do
-      projectPackages <- discoverProject
+      projectPackages <- getProjectPackages
       let projectPackageNames =
             map (T.pack . packageName) projectPackages
       pure $

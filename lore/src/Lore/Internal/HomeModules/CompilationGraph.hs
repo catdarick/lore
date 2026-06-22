@@ -18,7 +18,8 @@ import Control.Monad.State.Strict (execState, get, modify')
 import Data.Char (isAlphaNum, isDigit, isSpace)
 import Data.Function (on)
 import Data.Graph (SCC (..), stronglyConnComp)
-import Data.List (foldl', isSuffixOf, maximumBy, sortOn)
+import Data.List (isSuffixOf, maximumBy, sortOn)
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import qualified Data.Set as Set
@@ -312,7 +313,7 @@ moduleGraphNodeSummaryAndDeps :: ModuleGraph.ModuleGraphNode -> Maybe ([ModuleGr
 moduleGraphNodeSummaryAndDeps graphNode =
   case graphNode of
 #if MIN_VERSION_ghc(9,14,0)
-    ModuleGraph.ModuleNode deps (ModuleGraph.ModuleNodeCompile summary) -> Just (deps, summary)
+    ModuleGraph.ModuleNode deps (ModuleGraph.ModuleNodeCompile summary) -> Just (map ModuleGraph.edgeTargetKey deps, summary)
 #else
     ModuleGraph.ModuleNode deps summary -> Just (deps, summary)
 #endif
@@ -406,11 +407,11 @@ bottleneckScore metrics transitiveDependents importedBy =
 
 buildReverseGraph :: Set.Set Text -> Map.Map Text [Text] -> Map.Map Text [Text]
 buildReverseGraph homeModules graph =
-  foldl' addModule emptyReverse (Map.toList graph)
+  List.foldl' addModule emptyReverse (Map.toList graph)
   where
     emptyReverse = Map.fromSet (const []) homeModules
     addModule reverseMap (name, imports) =
-      foldl' (\acc imported -> Map.adjust (name :) imported acc) reverseMap imports
+      List.foldl' (\acc imported -> Map.adjust (name :) imported acc) reverseMap imports
 
 reachable :: Map.Map Text [Text] -> Text -> Set.Set Text
 reachable graph start =
@@ -465,11 +466,11 @@ componentDependencyGraph componentOf graph =
 
 reverseComponentDependencyGraph :: Map.Map Int [Text] -> Map.Map Int (Set.Set Int) -> Map.Map Int (Set.Set Int)
 reverseComponentDependencyGraph componentMembersById componentDeps =
-  foldl' addDeps emptyReverse (Map.toList componentDeps)
+  List.foldl' addDeps emptyReverse (Map.toList componentDeps)
   where
     emptyReverse = Map.fromSet (const Set.empty) (Map.keysSet componentMembersById)
     addDeps reverseMap (componentId, deps) =
-      foldl' (\acc dep -> Map.adjust (Set.insert componentId) dep acc) reverseMap (Set.toList deps)
+      List.foldl' (\acc dep -> Map.adjust (Set.insert componentId) dep acc) reverseMap (Set.toList deps)
 
 componentDepths :: Map.Map Int [Text] -> Map.Map Int (Set.Set Int) -> Map.Map Int Int
 componentDepths componentMembersById graph =

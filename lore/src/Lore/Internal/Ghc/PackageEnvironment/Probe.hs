@@ -10,7 +10,6 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Distribution.Version as CabalVersion
-import Lore.Internal.BuildTool.Environment (runInBuildToolEnvironment)
 import Lore.Internal.Ghc.PackageEnvironment.Index (buildPackageIndex)
 import Lore.Internal.Ghc.PackageEnvironment.Parse
   ( defaultPackageDbStack,
@@ -29,6 +28,7 @@ import Lore.Internal.Ghc.PackageEnvironment.Types
     UnitIdText (..),
   )
 import Lore.Internal.ProjectProvider (ProjectProvider)
+import Lore.Internal.ProjectProvider.Ops (providerRunInEnvironment)
 import System.Directory (doesFileExist)
 import System.FilePath (isRelative, normalise, (</>))
 import Text.Read (readMaybe)
@@ -41,7 +41,7 @@ data GhcEnvironmentProbeRunner = GhcEnvironmentProbeRunner
 defaultGhcEnvironmentProbeRunner :: GhcEnvironmentProbeRunner
 defaultGhcEnvironmentProbeRunner =
   GhcEnvironmentProbeRunner
-    { runBuildToolProbe = runInBuildToolEnvironment,
+    { runBuildToolProbe = providerRunInEnvironment,
       runBuildPackageIndex = buildPackageIndex
     }
 

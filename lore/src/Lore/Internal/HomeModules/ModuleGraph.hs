@@ -11,7 +11,7 @@ import Control.Monad (unless)
 import Data.List (intercalate)
 import qualified Data.Map as Map
 import qualified GHC
-#if MIN_VERSION_ghc(9,8,0)
+#if MIN_VERSION_ghc(9,14,0)
 import qualified GHC.Types.Error as GHC.Error
 #endif
 import GHC.Utils.Monad (mapMaybeM)

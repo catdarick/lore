@@ -10,7 +10,8 @@ import Lore.Diagnostics (Diagnostic (..))
 import Lore.HomeModules (HomeModulesLoadSummary (..), LoadHomeModulesOptions (..), LoadHomeModulesResult (..), defaultLoadHomeModulesOptions)
 import qualified Lore.HomeModules as HomeModules
 import Lore.HomeModules.Plan
-  ( HomeModuleKey (..),
+  ( ComponentSpecificOptions (..),
+    HomeModuleKey (..),
     HomeModulesComponentPlan (..),
     HomeModulesLoadConfig (..),
     HomeModulesLoadInputs (..),
@@ -27,6 +28,7 @@ import Lore.Internal.ProjectEnvironment.Prepare (prepareProjectDescription)
 import Lore.Internal.ProjectEnvironment.Refresh (refreshProjectEnvironment)
 import Lore.Internal.ProjectEnvironment.Types (PreparedProjectDescription (..), ProjectEnvironmentRefresh (..))
 import Lore.Monad (MonadLore)
+import Lore.Project (ComponentData (..), ComponentKind (..), Extension (..), GhcOption (..), PackageData (..))
 import Lore.Session (ParallelWorkersCount (..), SessionConfig (..), defaultSessionConfig)
 import Lore.TemporalModules (TemporalModule (..))
 import System.Directory (createDirectoryIfMissing, doesFileExist, makeAbsolute, removeFile)
@@ -99,6 +101,21 @@ spec =
           Set.isSubsetOf plannedFileTargets selection.fileHomeModuleSources `shouldBe` True
           homeModulesSelectionTotal selection
             `shouldBe` Set.size selection.namedHomeModules + Set.size selection.fileHomeModuleSources
+
+      it "prepareHomeModulesComponentPlan prefers library options over duplicate test options" \fixture -> do
+        withFixtureCopy fixture \fixtureRoot -> do
+          maybeOptions <-
+            fixtureLoreAt fixture fixtureRoot do
+              componentPlan <- prepareHomeModulesComponentPlan [libraryAndTestPackage fixtureRoot]
+              pure (Map.lookup (HomeModuleName (GHC.mkModuleName "Demo.Shared")) componentPlan.homeModulesWithComponentOptions)
+
+          case maybeOptions of
+            Nothing ->
+              expectationFailure "Expected Demo.Shared to have component-specific options"
+            Just ComponentSpecificOptions {language = selectedLanguage, extensions = selectedExtensions, ghcOptions = selectedGhcOptions} -> do
+              selectedLanguage `shouldBe` Nothing
+              selectedExtensions `shouldBe` Set.singleton (Extension "OverloadedStrings")
+              selectedGhcOptions `shouldBe` Set.singleton (GhcOption "-Wwarn")
 
       it "prepareHomeModulesComponentPlan synthesizes executable Main modules into generated file targets" \fixture -> do
         withFixtureCopy fixture \fixtureRoot -> do
@@ -527,6 +544,33 @@ prepareLoadInputsForTest = do
     Right refresh ->
       prepareHomeModulesLoadInputsFromProjectEnvironment
         refresh.refreshedProjectEnvironment
+
+libraryAndTestPackage :: FilePath -> PackageData
+libraryAndTestPackage packageRoot =
+  PackageData
+    { packageManifestPath = packageRoot </> "demo.cabal",
+      packageRoot,
+      packageName = "demo",
+      components =
+        [ sharedComponent ComponentKindLibrary "library" (Set.singleton (Extension "OverloadedStrings")) (Set.singleton (GhcOption "-Wwarn")),
+          sharedComponent ComponentKindTest "test:demo-test" (Set.singleton (Extension "LambdaCase")) (Set.singleton (GhcOption "-Werror"))
+        ]
+    }
+
+sharedComponent :: ComponentKind -> String -> Set.Set Extension -> Set.Set GhcOption -> ComponentData
+sharedComponent componentKind componentName defaultExtensions ghcOptions =
+  ComponentData
+    { componentKind,
+      componentName,
+      mainModulePath = Nothing,
+      language = Nothing,
+      ghcOptions,
+      defaultExtensions,
+      dependencies = Set.empty,
+      dependencyRequirements = Set.empty,
+      sourceDirs = Set.singleton "src",
+      modules = Set.singleton (GHC.mkModuleName "Demo.Shared")
+    }
 
 preparedRequiredExternalDependenciesForTest :: (MonadLore m) => m (Set.Set String)
 preparedRequiredExternalDependenciesForTest = do

@@ -12,7 +12,6 @@ import Control.DeepSeq (NFData (..))
 import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
-import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC
@@ -24,13 +23,14 @@ import Lore.Internal.Package
     PackageData (..),
     componentMainModulePathCandidates,
     firstExistingPath,
-    prepareComponentsData,
   )
+import Lore.Internal.ProjectEnvironment.Access (getProjectPackages)
+import Lore.Internal.ProjectPath (isAncestorPath)
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.Session.Cache.Types (GeneratedMainModule (..), GeneratedMainModuleKey (..), GeneratedMainModulesRegistry (..))
 import Lore.Internal.SourcePath (normalizeSourceFilePathM)
 import Lore.Monad (MonadLore)
-import System.FilePath (normalise, splitDirectories, (</>))
+import System.FilePath (normalise, (</>))
 
 data ComponentEntryModule = ComponentEntryModule
   { entryPackageName :: String,
@@ -53,7 +53,7 @@ collectLoadedComponentModuleInfoWithDiagnostics ::
   (MonadLore m) =>
   m (Map.Map GHC.Module (Set.Set ComponentKind), [ComponentEntryModule], [String])
 collectLoadedComponentModuleInfoWithDiagnostics = do
-  packages <- prepareComponentsData
+  packages <- getProjectPackages
   generatedMainModulesByKey <- lookupGeneratedMainModulesByKey
   modSummariesByFile <- getCachedModSummariesByFile
   ModSummaries modSummariesByModule <- getCachedModSummaries
@@ -232,7 +232,3 @@ summaryBelongsToAnySourceDir modSummary sourceDirs =
   let sourcePath =
         normalise modSummary.ms_hspp_file
    in any (`isAncestorPath` sourcePath) sourceDirs
-
-isAncestorPath :: FilePath -> FilePath -> Bool
-isAncestorPath sourceDir sourcePath =
-  splitDirectories sourceDir `List.isPrefixOf` splitDirectories sourcePath

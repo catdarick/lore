@@ -21,7 +21,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Plugins as Plugins
-import qualified GHC.Types.TyThing as TyThing
+import Lore.Internal.Ghc.TyThing (tyThingRootName)
 import Lore.Internal.Lookup.ModulePreference
   ( ModulePreferenceContext,
     PreferredModuleChoice (..),
@@ -52,14 +52,7 @@ resolveRootNameFromName name = do
       Nothing ->
         name
       Just tyThing ->
-        GHC.getName (resolveRootTyThing tyThing)
-  where
-    resolveRootTyThing tyThing =
-      case TyThing.tyThingParent_maybe tyThing of
-        Nothing ->
-          tyThing
-        Just parent ->
-          resolveRootTyThing parent
+        tyThingRootName tyThing
 
 groupSymbolsByResolvedRoot :: [(Symbol, Plugins.Name)] -> [ResolvedRootGroup]
 groupSymbolsByResolvedRoot symbolsWithRoots =

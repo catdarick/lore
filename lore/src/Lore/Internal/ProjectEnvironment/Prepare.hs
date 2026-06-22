@@ -15,10 +15,10 @@ import qualified Data.Set as Set
 import Distribution.Version (Version)
 import Lore.Internal.Ghc.PackageEnvironment.Types (GhcToolchain (..))
 import Lore.Internal.Package (preparePackagesIO)
-import Lore.Internal.Package.Materialize (defaultPackageMaterializeRunnerFor)
 import Lore.Internal.Package.Types (ComponentData (..), ComponentIdentity (..), DependencyFingerprint, PackageData (..))
 import Lore.Internal.ProjectEnvironment.Types (PreparedProjectDescription (..), ProjectConfigurationSnapshot (..), ProjectEnvironmentFailure (..))
 import Lore.Internal.ProjectProvider (ProjectProvider (..))
+import Lore.Internal.ProjectProvider.Ops (providerDependencyInputPaths, providerMaterializeRunner)
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.SourceText (relativeSourcePath)
 import Lore.Monad (MonadLore)
@@ -40,7 +40,7 @@ prepareProjectDescriptionIO ::
 prepareProjectDescriptionIO provider root ghcVersion = do
   packagesResult <-
     preparePackagesIO
-      (defaultPackageMaterializeRunnerFor provider)
+      (providerMaterializeRunner provider)
       (const (pure ()))
       (relativeSourcePath root)
       provider
@@ -84,10 +84,7 @@ dependencySnapshotForPackages packages =
 
 loadProviderDependencyInputs :: ProjectProvider -> FilePath -> IO (Either ProjectEnvironmentFailure [(FilePath, BS.ByteString)])
 loadProviderDependencyInputs provider root = do
-  let candidateFiles =
-        case provider of
-          StackProject -> ["stack.yaml", "stack.yaml.lock"]
-          CabalProject -> ["cabal.project", "cabal.project.local", "cabal.project.freeze"]
+  let candidateFiles = providerDependencyInputPaths provider
   existing <- filterM (doesFileExist . (root </>)) candidateFiles
   fmap sequence $ forM existing \relativePath -> do
     let path = normalise (root </> relativePath)

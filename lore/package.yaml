@@ -130,8 +130,6 @@ tests:
     - Lore.HomeModules
     - Lore.HomeModules.CompilationGraph
     - Lore.HomeModules.Plan
-    - Lore.Internal.BuildTool.Dependencies
-    - Lore.Internal.BuildTool.Environment
     - Lore.Internal.Config.Document
     - Lore.Internal.DeadCode
     - Lore.Internal.Definition.Analysis
@@ -223,8 +221,10 @@ tests:
     - Lore.Internal.ProjectEnvironment.Prepare
     - Lore.Internal.ProjectEnvironment.Refresh
     - Lore.Internal.ProjectProvider
+    - Lore.Internal.ProjectPath
     - Lore.Internal.Session
     - Lore.Internal.Session.Cache.Types
+    - Lore.Internal.Session.Cache.Registry
     - Lore.Internal.Session.CacheInvalidation
     - Lore.Internal.Session.Environment
     - Lore.Internal.SourceEdit

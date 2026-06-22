@@ -4,10 +4,14 @@
 module Lore.Internal.Ghc.TyThing
   ( isMentionedInTypeOfThing,
     isMentionedByOccName,
+    tyThingParentNames,
+    tyThingPathToRoot,
+    tyThingRootName,
   )
 where
 
 import Control.Monad.State.Strict (State, evalState, gets, modify')
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as Set
 import GHC.Core.Class
 import GHC.Core.Coercion
@@ -17,12 +21,28 @@ import GHC.Core.DataCon (DataCon, EqSpec, dataConFullSig, dataConName, eqSpecPre
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
 import GHC.Core.Type
-import GHC.Types.Name (Name)
+import GHC.Types.Name (Name, getName)
 import GHC.Types.TyThing
 import GHC.Types.Var
 import Lore.Internal.Lookup.Name (NormalizedName (..), NormalizedOccName, normalizeName)
 
 type VisitedNames = Set.Set Name
+
+tyThingPathToRoot :: TyThing -> NE.NonEmpty Name
+tyThingPathToRoot tyThing =
+  NE.fromList (map getName (collectTyThingPathToRoot tyThing))
+
+tyThingRootName :: TyThing -> Name
+tyThingRootName =
+  NE.last . tyThingPathToRoot
+
+tyThingParentNames :: TyThing -> Set.Set Name
+tyThingParentNames tyThing =
+  Set.fromList (drop 1 (NE.toList (tyThingPathToRoot tyThing)))
+
+collectTyThingPathToRoot :: TyThing -> [TyThing]
+collectTyThingPathToRoot tyThing =
+  tyThing : maybe [] collectTyThingPathToRoot (tyThingParent_maybe tyThing)
 
 isMentionedInTypeOfThing :: (Name -> Bool) -> TyThing -> Bool
 isMentionedInTypeOfThing predicate tyThing =

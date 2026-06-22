@@ -17,8 +17,7 @@ module Lore.Session
   )
 where
 
-import Control.Concurrent (MVar, modifyMVar_, readMVar, threadDelay)
-import Control.Exception (evaluate)
+import Control.Concurrent (threadDelay)
 import Control.Monad ((<=<))
 import Control.Monad.Catch (bracket)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -44,24 +43,9 @@ import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import Lore.Internal.Session
   ( SessionConfig (..),
     SessionContext (..),
-    emptyCoreModuleFactsCache,
-    emptyDefinitionModuleIndexCache,
-    emptyExternalSymbolsEnvironmentKeyCache,
-    emptyExternalSymbolsIndexCache,
-    emptyGeneratedMainModulesRegistry,
-    emptyHomeSymbolsIndexCache,
-    emptyInstanceEnvironmentInputsCache,
-    emptyInterpreterContextCache,
-    emptyLastLoadHomeModulesResultCache,
-    emptyModSummariesCache,
-    emptyNameToInstancesIndexCache,
-    emptyParsedModuleFactsCache,
-    emptyParsedOccurrenceModuleIndexCache,
-    emptySymbolSearchIndexCache,
-    emptyTemporalModulesRegistry,
-    emptyTypedModuleFactsCache,
     prepareSessionContext,
   )
+import Lore.Internal.Session.Cache.Registry (SessionCacheResetAction (..), sessionCacheResetActions)
 import Lore.Internal.Session.Environment
   ( SessionConfigError,
     SessionConfigOverrides (..),
@@ -238,95 +222,6 @@ debugSessionCachesMemory = do
             cacheMemoryDebugSamples = samples
           }
 
-data SessionCacheResetAction = SessionCacheResetAction
-  { sessionCacheResetActionName :: T.Text,
-    sessionCacheResetActionRun :: SessionContext -> IO ()
-  }
-
-sessionCacheResetActions :: [SessionCacheResetAction]
-sessionCacheResetActions =
-  [ SessionCacheResetAction
-      { sessionCacheResetActionName = "homeSymbolsIndexCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.homeSymbolsIndexCacheVar emptyHomeSymbolsIndexCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "externalSymbolsIndexCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.externalSymbolsIndexCacheVar emptyExternalSymbolsIndexCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "symbolSearchIndexCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.symbolSearchIndexCacheVar emptySymbolSearchIndexCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "externalSymbolsEnvironmentKeyCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.externalSymbolsEnvironmentKeyCacheVar emptyExternalSymbolsEnvironmentKeyCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "modSummariesCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.modSummariesCacheVar emptyModSummariesCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "nameToInstancesIndexCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.nameToInstancesIndexCacheVar emptyNameToInstancesIndexCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "instanceEnvironmentInputsCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.instanceEnvironmentInputsCacheVar emptyInstanceEnvironmentInputsCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "parsedOccurrenceModuleIndexCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.parsedOccurrenceModuleIndexCacheVar emptyParsedOccurrenceModuleIndexCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "definitionModuleIndexCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.definitionModuleIndexCacheVar emptyDefinitionModuleIndexCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "typedModuleFactsCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.typedModuleFactsCacheVar emptyTypedModuleFactsCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "coreModuleFactsCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.coreModuleFactsCacheVar emptyCoreModuleFactsCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "parsedModuleFactsCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.parsedModuleFactsCacheVar emptyParsedModuleFactsCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "interpreterContextCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.interpreterContextCacheVar emptyInterpreterContextCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "lastLoadHomeModulesResultCacheVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.lastLoadHomeModulesResultCacheVar emptyLastLoadHomeModulesResultCache
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "generatedMainModulesRegistryVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.generatedMainModulesRegistryVar emptyGeneratedMainModulesRegistry
-      },
-    SessionCacheResetAction
-      { sessionCacheResetActionName = "temporalModulesRegistryVar",
-        sessionCacheResetActionRun = \sessionContext ->
-          setCacheVarStrict sessionContext.temporalModulesRegistryVar emptyTemporalModulesRegistry
-      }
-  ]
-
 cacheMemoryDebugMajorGcRounds :: Int
 cacheMemoryDebugMajorGcRounds = 10
 
@@ -348,7 +243,7 @@ measureCacheMemoryImpact sessionContext resetAction = do
 
 measureCacheMemoryImpactFrom :: SessionContext -> CacheMemorySnapshot -> SessionCacheResetAction -> IO CacheMemoryStats
 measureCacheMemoryImpactFrom sessionContext before resetAction = do
-  sessionCacheResetActionRun resetAction sessionContext
+  sessionCacheResetActionRun resetAction sessionContext.sessionCacheVars
   runMajorGcCycles
   after <- readCacheMemorySnapshot
   pure
@@ -363,14 +258,6 @@ measureCacheMemoryImpactFrom sessionContext before resetAction = do
         cacheMemoryStatsBeforeMajorGcs = before.cacheMemorySnapshotMajorGcs,
         cacheMemoryStatsAfterMajorGcs = after.cacheMemorySnapshotMajorGcs
       }
-
-setCacheVarStrict :: MVar a -> a -> IO ()
-setCacheVarStrict cacheVar value = do
-  let !forcedValue = value
-  modifyMVar_ cacheVar (\_ -> pure forcedValue)
-  cachedValue <- readMVar cacheVar
-  _ <- evaluate cachedValue
-  pure ()
 
 runMajorGcCycles :: IO ()
 runMajorGcCycles =

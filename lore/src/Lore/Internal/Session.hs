@@ -31,7 +31,13 @@ import Data.Text (Text)
 import Data.Time (getCurrentTime)
 import qualified GHC.Driver.Make as GHC
 import GHC.MVar (MVar)
-import Lore.Internal.Definition.Cache.Types (CoreModuleFactsCache, DefinitionModuleIndexCache (..), ModuleCache (..), ParsedModuleFactsCache, ParsedOccurrenceModuleIndexCache (..), TypedModuleFactsCache)
+import Lore.Internal.Definition.Cache.Types
+  ( CoreModuleFactsCache,
+    DefinitionModuleIndexCache,
+    ParsedModuleFactsCache,
+    ParsedOccurrenceModuleIndexCache,
+    TypedModuleFactsCache,
+  )
 import Lore.Internal.Ghc.DynFlags (ParallelWorkersCount (..))
 import Lore.Internal.Ghc.PackageEnvironment.Probe (captureGhcEnvironment)
 import Lore.Internal.Ghc.PackageEnvironment.Types
@@ -41,18 +47,16 @@ import Lore.Internal.Ghc.PackageEnvironment.Types
     ResolvedPackageEnvironment (..),
   )
 import Lore.Internal.Lookup.Cache.Types
-  ( ExternalSymbolsEnvironmentKeyCache (..),
-    ExternalSymbolsIndexCache (..),
-    HomeSymbolsIndexCache (..),
-    InstanceEnvironmentInputsCache (..),
-    ModSummariesCache (..),
-    NameToInstancesIndexCache (..),
-    SymbolSearchIndexCache (..),
+  ( ExternalSymbolsEnvironmentKeyCache,
+    ExternalSymbolsIndexCache,
+    HomeSymbolsIndexCache,
+    InstanceEnvironmentInputsCache,
+    ModSummariesCache,
+    NameToInstancesIndexCache,
+    SymbolSearchIndexCache,
   )
-import Lore.Internal.Package.Discovery (discoverPackageRoots)
 import Lore.Internal.Package.Materialize
   ( PackageMaterializeRunner,
-    defaultPackageMaterializeRunnerFor,
     materializeCabalPackageFilesIO,
   )
 import Lore.Internal.Package.Root (PackageRoot)
@@ -61,7 +65,33 @@ import Lore.Internal.ProjectProvider
   ( ProjectProvider,
     detectProjectProvider,
   )
-import Lore.Internal.Session.Cache.Types (GeneratedMainModulesRegistry (..), InterpreterContextCache (..), LastLoadHomeModulesResultCache (..), TemporalModulesRegistry (..))
+import Lore.Internal.ProjectProvider.Ops (providerMaterializeRunner, providerPackageRoots)
+import Lore.Internal.Session.Cache.Registry
+  ( SessionCacheVars (..),
+    emptyCoreModuleFactsCache,
+    emptyDefinitionModuleIndexCache,
+    emptyExternalSymbolsEnvironmentKeyCache,
+    emptyExternalSymbolsIndexCache,
+    emptyGeneratedMainModulesRegistry,
+    emptyHomeSymbolsIndexCache,
+    emptyInstanceEnvironmentInputsCache,
+    emptyInterpreterContextCache,
+    emptyLastLoadHomeModulesResultCache,
+    emptyModSummariesCache,
+    emptyNameToInstancesIndexCache,
+    emptyParsedModuleFactsCache,
+    emptyParsedOccurrenceModuleIndexCache,
+    emptySymbolSearchIndexCache,
+    emptyTemporalModulesRegistry,
+    emptyTypedModuleFactsCache,
+    newSessionCacheVars,
+  )
+import Lore.Internal.Session.Cache.Types
+  ( GeneratedMainModulesRegistry,
+    InterpreterContextCache,
+    LastLoadHomeModulesResultCache,
+    TemporalModulesRegistry,
+  )
 import Lore.Internal.SourceText (relativeSourcePath)
 import Lore.Logger (LogLevel (..), LogMessage (..), LoggerHandle (..))
 
@@ -75,6 +105,7 @@ data SessionContext = SessionContext
     testSuiteDefaultArguments :: [String],
     ghcToolchain :: GhcToolchain,
     startupPackageEnvironment :: ResolvedPackageEnvironment,
+    sessionCacheVars :: SessionCacheVars,
     projectEnvironmentStateVar :: MVar (Maybe ProjectEnvironmentState),
     ifaceCacheVar :: MVar GHC.ModIfaceCache,
     homeSymbolsIndexCacheVar :: MVar HomeSymbolsIndexCache,
@@ -106,70 +137,6 @@ data SessionConfig = SessionConfig
     testSuiteDefaultArguments :: [String]
   }
 
-emptyHomeSymbolsIndexCache :: HomeSymbolsIndexCache
-emptyHomeSymbolsIndexCache =
-  HomeSymbolsIndexCache Nothing
-
-emptyExternalSymbolsIndexCache :: ExternalSymbolsIndexCache
-emptyExternalSymbolsIndexCache =
-  ExternalSymbolsIndexCache Nothing
-
-emptySymbolSearchIndexCache :: SymbolSearchIndexCache
-emptySymbolSearchIndexCache =
-  SymbolSearchIndexCache Nothing
-
-emptyExternalSymbolsEnvironmentKeyCache :: ExternalSymbolsEnvironmentKeyCache
-emptyExternalSymbolsEnvironmentKeyCache =
-  ExternalSymbolsEnvironmentKeyCache Set.empty
-
-emptyModSummariesCache :: ModSummariesCache
-emptyModSummariesCache =
-  ModSummariesCache Nothing
-
-emptyNameToInstancesIndexCache :: NameToInstancesIndexCache
-emptyNameToInstancesIndexCache =
-  NameToInstancesIndexCache Nothing
-
-emptyInstanceEnvironmentInputsCache :: InstanceEnvironmentInputsCache
-emptyInstanceEnvironmentInputsCache =
-  InstanceEnvironmentInputsCache Nothing
-
-emptyParsedOccurrenceModuleIndexCache :: ParsedOccurrenceModuleIndexCache
-emptyParsedOccurrenceModuleIndexCache =
-  ParsedOccurrenceModuleIndexCache Nothing
-
-emptyDefinitionModuleIndexCache :: DefinitionModuleIndexCache
-emptyDefinitionModuleIndexCache =
-  DefinitionModuleIndexCache Map.empty
-
-emptyTypedModuleFactsCache :: TypedModuleFactsCache
-emptyTypedModuleFactsCache =
-  ModuleCache Map.empty
-
-emptyCoreModuleFactsCache :: CoreModuleFactsCache
-emptyCoreModuleFactsCache =
-  ModuleCache Map.empty
-
-emptyParsedModuleFactsCache :: ParsedModuleFactsCache
-emptyParsedModuleFactsCache =
-  ModuleCache Map.empty
-
-emptyInterpreterContextCache :: InterpreterContextCache
-emptyInterpreterContextCache =
-  InterpreterContextCache Nothing
-
-emptyLastLoadHomeModulesResultCache :: LastLoadHomeModulesResultCache
-emptyLastLoadHomeModulesResultCache =
-  LastLoadHomeModulesResultCache Nothing
-
-emptyGeneratedMainModulesRegistry :: GeneratedMainModulesRegistry
-emptyGeneratedMainModulesRegistry =
-  GeneratedMainModulesRegistry Map.empty
-
-emptyTemporalModulesRegistry :: TemporalModulesRegistry
-emptyTemporalModulesRegistry =
-  TemporalModulesRegistry Nothing []
-
 prepareSessionContext :: SessionConfig -> IO (Either String SessionContext)
 prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, configFilePath, projectProviderOverride, loggerHandle, customPrelude, testSuiteDefaultArguments} = do
   eiProvider <-
@@ -192,22 +159,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, conf
               projectEnvironmentStateVar <- GHC.newMVar Nothing
               ifaceCache <- GHC.newIfaceCache
               ifaceCacheVar <- GHC.newMVar ifaceCache
-              homeSymbolsIndexCacheVar <- GHC.newMVar emptyHomeSymbolsIndexCache
-              externalSymbolsIndexCacheVar <- GHC.newMVar emptyExternalSymbolsIndexCache
-              symbolSearchIndexCacheVar <- GHC.newMVar emptySymbolSearchIndexCache
-              externalSymbolsEnvironmentKeyCacheVar <- GHC.newMVar emptyExternalSymbolsEnvironmentKeyCache
-              modSummariesCacheVar <- GHC.newMVar emptyModSummariesCache
-              nameToInstancesIndexCacheVar <- GHC.newMVar emptyNameToInstancesIndexCache
-              instanceEnvironmentInputsCacheVar <- GHC.newMVar emptyInstanceEnvironmentInputsCache
-              parsedOccurrenceModuleIndexCacheVar <- GHC.newMVar emptyParsedOccurrenceModuleIndexCache
-              definitionModuleIndexCacheVar <- GHC.newMVar emptyDefinitionModuleIndexCache
-              typedModuleFactsCacheVar <- GHC.newMVar emptyTypedModuleFactsCache
-              coreModuleFactsCacheVar <- GHC.newMVar emptyCoreModuleFactsCache
-              parsedModuleFactsCacheVar <- GHC.newMVar emptyParsedModuleFactsCache
-              interpreterContextCacheVar <- GHC.newMVar emptyInterpreterContextCache
-              lastLoadHomeModulesResultCacheVar <- GHC.newMVar emptyLastLoadHomeModulesResultCache
-              generatedMainModulesRegistryVar <- GHC.newMVar emptyGeneratedMainModulesRegistry
-              temporalModulesRegistryVar <- GHC.newMVar emptyTemporalModulesRegistry
+              cacheVars@SessionCacheVars {..} <- newSessionCacheVars
               pure $
                 Right
                   SessionContext
@@ -220,6 +172,7 @@ prepareSessionContext SessionConfig {projectRoot, ghcWorkDir = _ghcWorkDir, conf
                       testSuiteDefaultArguments,
                       ghcToolchain = capturedEnvironment.capturedGhcToolchain,
                       startupPackageEnvironment,
+                      sessionCacheVars = cacheVars,
                       projectEnvironmentStateVar,
                       ifaceCacheVar,
                       homeSymbolsIndexCacheVar,
@@ -247,7 +200,7 @@ preparePackageMaterializationBeforeEnvironmentProbe ::
   IO (Either String ([PackageRoot], [FilePath]))
 preparePackageMaterializationBeforeEnvironmentProbe loggerHandle projectProvider =
   preparePackageMaterializationBeforeEnvironmentProbeWithRunner
-    (defaultPackageMaterializeRunnerFor projectProvider)
+    (providerMaterializeRunner projectProvider)
     loggerHandle
     projectProvider
 
@@ -258,7 +211,7 @@ preparePackageMaterializationBeforeEnvironmentProbeWithRunner ::
   FilePath ->
   IO (Either String ([PackageRoot], [FilePath]))
 preparePackageMaterializationBeforeEnvironmentProbeWithRunner runner loggerHandle projectProvider projectRoot = do
-  eiPackageRoots <- discoverPackageRoots projectProvider projectRoot
+  eiPackageRoots <- providerPackageRoots projectProvider projectRoot
   case eiPackageRoots of
     Left err ->
       pure (Left err)

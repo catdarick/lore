@@ -33,7 +33,7 @@ import Lore.Internal.Ghc.PackageEnvironment.Types
 import Lore.Internal.HomeModules.SyntheticMain (entryHomeModuleSource)
 import Lore.Internal.Package
   ( ComponentData (..),
-    ComponentKind,
+    ComponentKind (..),
     PackageData (..),
     commonSetIntersection,
     componentMainModulePathCandidates,
@@ -232,10 +232,7 @@ prepareHomeModulesComponentPlan packages = do
         }
 
   homeModulesWithComponentOptions <-
-    mergeHomeModuleComponentOptions
-      [ Map.fromSet (const component.componentHomeModulesOptions) component.componentHomeModulesKeys
-      | component <- componentHomeModules
-      ]
+    mergeHomeModuleComponentOptions componentHomeModules
   let homeModulesWithComponents =
         Map.unionsWith
           Set.union
@@ -286,37 +283,94 @@ mkGhcFileTarget unitId sourceFile =
       GHC.targetContents = Nothing
     }
 
+data SelectedComponentOptions = SelectedComponentOptions
+  { selectedComponent :: HomeModuleComponent,
+    selectedOptions :: ComponentSpecificOptions
+  }
+
 mergeHomeModuleComponentOptions ::
   (MonadLore m) =>
-  [Map.Map HomeModuleKey ComponentSpecificOptions] ->
+  [ComponentHomeModules] ->
   m (Map.Map HomeModuleKey ComponentSpecificOptions)
-mergeHomeModuleComponentOptions =
-  foldM mergeComponentMap Map.empty
+mergeHomeModuleComponentOptions componentHomeModules =
+  Map.map selectedOptions <$> foldM mergeComponent Map.empty componentHomeModules
   where
-    mergeComponentMap merged componentMap =
-      foldM mergeHomeModuleOptions merged (Map.toList componentMap)
+    mergeComponent merged component =
+      foldM mergeHomeModuleOptions merged (Set.toList component.componentHomeModulesKeys)
+      where
+        candidate =
+          SelectedComponentOptions
+            { selectedComponent = component.componentHomeModulesIdentity,
+              selectedOptions = component.componentHomeModulesOptions
+            }
 
-    mergeHomeModuleOptions merged (homeModuleKey, newOptions) =
-      case Map.lookup homeModuleKey merged of
-        Nothing ->
-          pure (Map.insert homeModuleKey newOptions merged)
-        Just existingOptions
-          | componentOptionsEquivalent existingOptions newOptions ->
-              pure merged
-          | otherwise -> do
-              Log.warn $
-                "Home-module planning conflict for "
-                  <> renderHomeModuleKey homeModuleKey
-                  <> ": component-specific options differ across components; keeping the first mapping."
-              pure merged
+        mergeHomeModuleOptions mergedOptions homeModuleKey =
+          case Map.lookup homeModuleKey mergedOptions of
+            Nothing ->
+              pure (Map.insert homeModuleKey candidate mergedOptions)
+            Just existing
+              | componentOptionsEquivalent existing.selectedOptions candidate.selectedOptions ->
+                  pure mergedOptions
+              | isTestDuplicate existing candidate ->
+                  pure (Map.insert homeModuleKey (preferNonTest existing candidate) mergedOptions)
+              | otherwise -> do
+                  let preferred = preferByComponentKind existing candidate
+                  Log.warn $
+                    "Conflicting component-specific options for "
+                      <> renderHomeModuleKey homeModuleKey
+                      <> " between "
+                      <> renderComponent existing.selectedComponent
+                      <> " and "
+                      <> renderComponent candidate.selectedComponent
+                      <> "; keeping "
+                      <> renderComponent preferred.selectedComponent
+                      <> "."
+                  pure (Map.insert homeModuleKey preferred mergedOptions)
+
+isTestDuplicate :: SelectedComponentOptions -> SelectedComponentOptions -> Bool
+isTestDuplicate left right =
+  isTestComponent left.selectedComponent.homeModuleComponentKind
+    || isTestComponent right.selectedComponent.homeModuleComponentKind
+
+preferNonTest :: SelectedComponentOptions -> SelectedComponentOptions -> SelectedComponentOptions
+preferNonTest left right
+  | isTestComponent left.selectedComponent.homeModuleComponentKind
+      && not (isTestComponent right.selectedComponent.homeModuleComponentKind) =
+      right
+  | otherwise = left
+
+preferByComponentKind :: SelectedComponentOptions -> SelectedComponentOptions -> SelectedComponentOptions
+preferByComponentKind left right
+  | componentKindPreference right.selectedComponent.homeModuleComponentKind
+      < componentKindPreference left.selectedComponent.homeModuleComponentKind =
+      right
+  | otherwise = left
+
+componentKindPreference :: ComponentKind -> Int
+componentKindPreference = \case
+  ComponentKindLibrary -> 0
+  ComponentKindInternalLibrary -> 0
+  ComponentKindExecutable -> 1
+  ComponentKindBenchmark -> 1
+  ComponentKindTest -> 2
+
+isTestComponent :: ComponentKind -> Bool
+isTestComponent = \case
+  ComponentKindTest -> True
+  _ -> False
 
 renderHomeModuleKey :: HomeModuleKey -> String
-renderHomeModuleKey homeModuleKey =
-  case homeModuleKey of
-    HomeModuleName moduleName ->
-      "module " <> GHC.moduleNameString moduleName
-    HomeModuleSourceFile sourcePath ->
-      "source file " <> sourcePath
+renderHomeModuleKey = \case
+  HomeModuleName moduleName ->
+    GHC.moduleNameString moduleName
+  HomeModuleSourceFile sourceFile ->
+    sourceFile
+
+renderComponent :: HomeModuleComponent -> String
+renderComponent component =
+  component.homeModuleComponentPackageName
+    <> "/"
+    <> component.homeModuleComponentName
 
 componentOptionsEquivalent :: ComponentSpecificOptions -> ComponentSpecificOptions -> Bool
 componentOptionsEquivalent left right =

@@ -9,13 +9,13 @@ where
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (asks)
 import qualified Data.Map.Strict as Map
-import Lore.Internal.BuildTool.Dependencies (prepareProjectDependencies)
 import Lore.Internal.Ghc.PackageEnvironment.Probe (captureGhcEnvironment)
 import Lore.Internal.Ghc.PackageEnvironment.Resolve (renderPackageResolutionError, resolveDependencyPackageEnvironment)
 import Lore.Internal.Ghc.PackageEnvironment.Types (CapturedGhcEnvironment (..), PackageEnvironmentSnapshot)
 import Lore.Internal.ProjectEnvironment.Prepare (prepareProjectDescription)
 import Lore.Internal.ProjectEnvironment.Types (PreparedProjectDescription (..), ProjectConfigurationSnapshot (..), ProjectEnvironmentFailure (..), ProjectEnvironmentRefresh (..), ProjectEnvironmentState (..))
 import Lore.Internal.ProjectProvider (ProjectProvider)
+import Lore.Internal.ProjectProvider.Ops (providerPrepareDependencies)
 import Lore.Internal.Session (SessionContext (..))
 import qualified Lore.Logger as Log
 import Lore.Monad (MonadLore)
@@ -31,7 +31,7 @@ defaultProjectEnvironmentRefreshRunners :: (MonadLore m) => ProjectEnvironmentRe
 defaultProjectEnvironmentRefreshRunners =
   ProjectEnvironmentRefreshRunners
     { refreshRunnerPrepareDescription = prepareProjectDescription,
-      refreshRunnerPrepareDependencies = prepareProjectDependencies,
+      refreshRunnerPrepareDependencies = providerPrepareDependencies,
       refreshRunnerCaptureEnvironment = captureGhcEnvironment
     }
 

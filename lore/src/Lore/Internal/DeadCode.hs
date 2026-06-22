@@ -17,7 +17,6 @@ import qualified Data.Text as T
 import qualified GHC
 import GHC.Generics (Generic)
 import qualified GHC.Plugins as GHC
-import qualified GHC.Types.TyThing as GHC
 import Lore.Internal.Definition.ProjectIndex
   ( ProjectDefinitionIndex (..),
     dependenciesForDeclaration,
@@ -25,6 +24,7 @@ import Lore.Internal.Definition.ProjectIndex
   )
 import Lore.Internal.Definition.Reachability (reachableDeclarationIds)
 import Lore.Internal.Definition.Types (DeclarationSpans (..), DefinitionCatalog (..), DefinitionId, DefinitionSource (..), definitionSourceModule)
+import Lore.Internal.Ghc.TyThing (tyThingParentNames)
 import Lore.Internal.HomeModules.EntryModules
   ( ComponentEntryModule (..),
     collectLoadedComponentModuleInfoWithDiagnostics,
@@ -304,14 +304,7 @@ definitionNameParentNames name = do
       Nothing ->
         Set.empty
       Just tyThing ->
-        Set.fromList (map GHC.getName (tyThingParentChain tyThing))
-  where
-    tyThingParentChain tyThing =
-      case GHC.tyThingParent_maybe tyThing of
-        Nothing ->
-          []
-        Just parentTyThing ->
-          parentTyThing : tyThingParentChain parentTyThing
+        tyThingParentNames tyThing
 
 safeDeleteOrderedDefinitionIds ::
   ProjectDefinitionIndex ->
