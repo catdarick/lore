@@ -1,6 +1,5 @@
 module Lore.Internal.Package.Discovery
-  ( discoverPackageRoots,
-    discoverStackPackageRoots,
+  ( discoverStackPackageRoots,
     discoverCabalPackageRoots,
     extractCabalProjectPackageEntries,
   )
@@ -16,7 +15,6 @@ import qualified Data.Yaml as Yaml
 import Lore.Internal.File (findFilesByExtensionRecursively)
 import Lore.Internal.Package.Path (normalizeRelativePath)
 import Lore.Internal.Package.Root (PackageRoot (..), normalizePackageRoots)
-import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (makeRelative, splitDirectories, takeDirectory, takeExtension, takeFileName, (</>))
 
@@ -53,14 +51,6 @@ instance Yaml.FromJSON StackPackageEntry where
             { packagePath = T.unpack locationText,
               extraDep = isExtraDep
             }
-
-discoverPackageRoots :: ProjectProvider -> FilePath -> IO (Either String [PackageRoot])
-discoverPackageRoots provider projectRoot =
-  case provider of
-    StackProject ->
-      discoverStackPackageRoots projectRoot
-    CabalProject ->
-      discoverCabalPackageRoots projectRoot
 
 discoverStackPackageRoots :: FilePath -> IO (Either String [PackageRoot])
 discoverStackPackageRoots projectRoot = do
