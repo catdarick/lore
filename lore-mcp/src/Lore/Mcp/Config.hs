@@ -79,6 +79,9 @@ data McpConfigError
 overridableToolNames :: Set.Set Text
 overridableToolNames = Set.singleton "runTestSuite"
 
+defaultDisabledToolNames :: Set.Set Text
+defaultDisabledToolNames = Set.singleton "notifyKnowledgeReset"
+
 defaultMcpConfig :: McpConfig
 defaultMcpConfig =
   McpConfig
@@ -131,8 +134,8 @@ toolEnabled config toolName =
   fromMaybe (defaultToolEnabledByName toolName) (Map.lookup toolName config.toolEnabledOverrides)
 
 defaultToolEnabledByName :: Text -> Bool
-defaultToolEnabledByName _toolName =
-  True
+defaultToolEnabledByName toolName =
+  toolName `Set.notMember` defaultDisabledToolNames
 
 toolEnabledEnvVarName :: Text -> String
 toolEnabledEnvVarName toolName =

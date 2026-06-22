@@ -33,17 +33,17 @@ spec =
       defaultMcpConfig.definitionKnowledgeCacheEnabled `shouldBe` False
       defaultMcpConfig.feedbackFilePath `shouldBe` Nothing
       toolEnabled defaultMcpConfig "runTestSuite" `shouldBe` True
-      toolEnabled defaultMcpConfig "notifyKnowledgeReset" `shouldBe` True
+      toolEnabled defaultMcpConfig "notifyKnowledgeReset" `shouldBe` False
 
     it "parses YAML MCP settings" do
       overrides <-
         shouldParseMcpYaml
-          "mcp:\n  enable-definition-knowledge-cache: true\n  feedback-file: .lore-work/mcp-feedback.md\n  tools:\n    runTestSuite: false\n    notifyKnowledgeReset: false\n"
+          "mcp:\n  enable-definition-knowledge-cache: true\n  feedback-file: .lore-work/mcp-feedback.md\n  tools:\n    runTestSuite: false\n    notifyKnowledgeReset: true\n"
       let config = resolveMcpConfig defaultMcpConfig overrides emptyOverrides
       config.definitionKnowledgeCacheEnabled `shouldBe` True
       config.feedbackFilePath `shouldBe` Just ".lore-work/mcp-feedback.md"
       toolEnabled config "runTestSuite" `shouldBe` False
-      toolEnabled config "notifyKnowledgeReset" `shouldBe` False
+      toolEnabled config "notifyKnowledgeReset" `shouldBe` True
 
     it "parses custom command tools" do
       overrides <-

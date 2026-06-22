@@ -9,8 +9,6 @@ session:
 mcp:
   enable-definition-knowledge-cache: true
   feedback-file: ./lore-mcp-feedback.txt
-  tools:
-    notifyKnowledgeReset: false
   custom-tools:
     # Override the default runTestSuite tool for a better performance.
     - name: runTestSuite
