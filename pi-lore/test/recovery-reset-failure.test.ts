@@ -41,7 +41,6 @@ test("cache sync failure after completion does not undo completedRecovery", asyn
     },
   });
 
-  host.currentAssistantStartId = "assistant-start";
   host.currentEntryIdValue = "assistant-start";
 
   await recovery.handleValidation(

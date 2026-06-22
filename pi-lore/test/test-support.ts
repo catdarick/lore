@@ -10,7 +10,6 @@ export class FakePiHost implements PiHost {
   notices: string[] = [];
   sentMessages: Array<{ message: { customType: string; content: unknown; display: boolean; details?: unknown }; options?: unknown }> = [];
   currentEntryIdValue?: string;
-  currentAssistantStartId?: string;
   handlers = new Map<string, ((...args: unknown[]) => unknown)[]>();
   summary = "Generated recovery summary.";
   summaryFromMessages = "Generated recovery summary from messages.";
@@ -66,10 +65,6 @@ export class FakePiHost implements PiHost {
 
   getCurrentEntryId(): string | undefined {
     return this.currentEntryIdValue;
-  }
-
-  getCurrentAssistantSequenceStartEntryId(): string | undefined {
-    return this.currentAssistantStartId;
   }
 
   setStatus(key: string, text: string): void {

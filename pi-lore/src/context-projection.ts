@@ -89,29 +89,16 @@ export function resolveCompletedRecoveryRange(
     ? -1
     : entries.findIndex((entry) => entry.id === completed.startEntryId);
   const callStart = findValidationStartIndex(entries, completed.startValidationToolCallId);
-  const start = entryStart >= 0 ? entryStart : callStart >= 0 ? callStart : -1;
+  const start = callStart >= 0 ? callStart : entryStart >= 0 ? entryStart : -1;
   if (start >= 0 && callEnd >= start) {
-    const replaceStart = projectionReplaceStart(entries, completed, start);
     const preserveStart = preserveStartIndex(entries, completed, callEnd);
     const replaceEnd = preserveStart - 1;
-    if (replaceEnd < replaceStart) {
+    if (replaceEnd < start) {
       return undefined;
     }
-    return { recoveryId: completed.recoveryId, startIndex: replaceStart, endIndex: replaceEnd };
+    return { recoveryId: completed.recoveryId, startIndex: start, endIndex: replaceEnd };
   }
   return undefined;
-}
-
-function projectionReplaceStart(entries: PiEntry[], completed: CompletedRecovery, fallbackStart: number): number {
-  const startValidationToolCallId = completed.startValidationToolCallId;
-  if (!startValidationToolCallId) {
-    return fallbackStart;
-  }
-  const startCall = findAssistantToolCallIndex(entries, startValidationToolCallId);
-  if (startCall >= 0 && startCall <= fallbackStart) {
-    return startCall;
-  }
-  return fallbackStart;
 }
 
 function preserveStartIndex(entries: PiEntry[], completed: CompletedRecovery, fallbackEnd: number): number {

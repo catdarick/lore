@@ -167,6 +167,78 @@ test("completed recovery with missing start boundary does not replace unrelated 
   assert.match(stats.warnings.join("\n"), /could not be resolved/);
 });
 
+test("completed recovery prefers validation call boundary over stale broad startEntryId", () => {
+  const recoveryId = "lore-recovery-00000000-0000-4000-8000-000000000015";
+  const completed: CompletedRecovery = {
+    recoveryId,
+    startEntryId: "a-old",
+    startValidationToolCallId: "call-failed",
+    finalValidationToolCallId: "call-fixed",
+    summary: "summary",
+    contextReplacement: "compressed",
+    diff: {
+      reliable: true,
+      changedPaths: [],
+      stats: { filesChanged: 0, additions: 0, deletions: 0 },
+      truncated: false,
+    },
+    tokenMetrics: {
+      originalRecoveryTokens: 100,
+      summaryReplacementTokens: 10,
+      estimated: true,
+    },
+    completedAt: 15,
+  };
+  const entries = [
+    { id: "u1", role: "user", content: "request" },
+    { id: "a-old", role: "assistant", content: [{ type: "toolCall", id: "call-definition", name: "getDefinitions" }] },
+    {
+      id: "t-old",
+      role: "toolResult",
+      toolCallId: "call-definition",
+      toolName: "getDefinitions",
+      content: [{ type: "text", text: "large definition output before recovery" }],
+    },
+    { id: "a-failed", role: "assistant", content: [{ type: "toolCall", id: "call-failed", name: "reloadHomeModules" }] },
+    {
+      id: "t-failed",
+      role: "toolResult",
+      toolCallId: "call-failed",
+      toolName: "reloadHomeModules",
+      content: [{ type: "text", text: "reload failed" }],
+    },
+    { id: "a-fixed", role: "assistant", content: [{ type: "toolCall", id: "call-fixed", name: "reloadHomeModules" }] },
+    {
+      id: "t-fixed",
+      role: "toolResult",
+      toolCallId: "call-fixed",
+      toolName: "reloadHomeModules",
+      content: [{ type: "text", text: "reload ok" }],
+    },
+  ];
+
+  const plan = planCompletedRecoveryRanges(entries, [completed]);
+  assert.deepEqual(plan.ranges, [{ recoveryId, startIndex: 3, endIndex: 4 }]);
+
+  const projected = projectCompletedRecoveries(entries, [completed]);
+  assert.deepEqual(
+    projected.map((entry) => entry.id),
+    ["u1", "a-old", "t-old", `lore-projection-${recoveryId}`, "a-fixed", "t-fixed"],
+  );
+
+  const stats = analyzeLoreUsage({
+    entries,
+    completedRecoveries: [completed],
+    registeredToolNames: ["getDefinitions", "reloadHomeModules"],
+  });
+  const definitions = stats.tools.find((tool) => tool.toolName === "getDefinitions");
+  assert.equal(definitions?.main.calls, 1);
+  assert.equal(definitions?.summarizedRecovery.calls, 0);
+  const reload = stats.tools.find((tool) => tool.toolName === "reloadHomeModules");
+  assert.equal(reload?.summarizedRecovery.calls, 1);
+  assert.equal(reload?.main.calls, 1);
+});
+
 test("hidden visible recovery summary is excluded from projected model context", () => {
   const recoveryId = "lore-recovery-00000000-0000-4000-8000-000000000004";
   const contextReplacement = "compressed recovery context";

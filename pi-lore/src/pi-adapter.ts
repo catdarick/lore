@@ -129,13 +129,6 @@ export function adaptPiHost(
       const leafId = context.getCurrentContext()?.sessionManager.getLeafId();
       return leafId ?? undefined;
     },
-    getCurrentAssistantSequenceStartEntryId() {
-      const ctx = context.getCurrentContext();
-      if (!ctx) {
-        return undefined;
-      }
-      return findAssistantSequenceStartEntryId(normalizePiEntries(ctx.sessionManager.getBranch()));
-    },
     setStatus(key, text, options) {
       const ctx = context.getCurrentContext();
       if (ctx) {
@@ -483,24 +476,6 @@ export function denormalizePiMessages(entries: PiEntry[]): unknown[] {
       timestamp: Date.now(),
     };
   });
-}
-
-function findAssistantSequenceStartEntryId(entries: PiEntry[]): string | undefined {
-  let foundAssistantId: string | undefined;
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const role = entries[index].role;
-    if (role === "assistant") {
-      foundAssistantId = entries[index].id ?? foundAssistantId;
-      continue;
-    }
-    if (role === "toolResult") {
-      continue;
-    }
-    if (foundAssistantId) {
-      break;
-    }
-  }
-  return foundAssistantId;
 }
 
 function timestampToMs(value: unknown): number | undefined {

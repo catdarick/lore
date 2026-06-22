@@ -161,7 +161,7 @@ export class RecoveryManager {
       recoveryId,
       contextMarker: recoveryContextMarker(recoveryId),
       startValidationToolName: outcome.toolName,
-      startEntryId: this.host.getCurrentAssistantSequenceStartEntryId?.() ?? this.host.getCurrentEntryId?.(),
+      startEntryId: this.host.getCurrentEntryId?.(),
       startValidationToolCallId: toolCallId,
       startedAt: nowMs(),
       reason,

@@ -142,12 +142,12 @@ library
       Lore.Internal.ProjectEnvironment.Prepare
       Lore.Internal.ProjectEnvironment.Refresh
       Lore.Internal.ProjectEnvironment.Types
+      Lore.Internal.ProjectPath
       Lore.Internal.ProjectProvider
       Lore.Internal.ProjectProvider.Ops
-      Lore.Internal.ProjectPath
       Lore.Internal.Session
-      Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.Cache.Registry
+      Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.CacheInvalidation
       Lore.Internal.Session.Environment
       Lore.Internal.SourceEdit
@@ -362,6 +362,7 @@ test-suite lore-test
       Lore.Internal.ProjectEnvironment.Prepare
       Lore.Internal.ProjectEnvironment.Refresh
       Lore.Internal.ProjectProvider
+      Lore.Internal.ProjectPath
       Lore.Internal.Session
       Lore.Internal.Session.Cache.Types
       Lore.Internal.Session.Cache.Registry

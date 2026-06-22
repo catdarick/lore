@@ -255,7 +255,6 @@ export type PiHost = {
   ) => Promise<"appended" | "already-present"> | "appended" | "already-present";
   getActiveBranchEntries?: () => PiEntry[] | Promise<PiEntry[]> | undefined;
   getCurrentEntryId?: () => string | undefined;
-  getCurrentAssistantSequenceStartEntryId?: () => string | undefined;
   setStatus?: (key: string, text: string, options?: unknown) => void | Promise<void>;
   clearStatus?: (key: string) => void | Promise<void>;
   notify?: (message: string, options?: unknown) => void | Promise<void>;

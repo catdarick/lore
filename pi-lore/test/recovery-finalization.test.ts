@@ -51,7 +51,6 @@ test("recovery finalization waits for a context event with the persisted toolRes
   await runtime.start();
   try {
     host.currentEntryIdValue = "assistant-1";
-    host.currentAssistantStartId = "assistant-1";
 
     await host.tools.get("reloadHomeModules")?.execute("call-1", { success: false }, undefined, undefined, undefined);
     const markerMessage = host.sentMessages.find((event) => event.message.customType === "lore-recovery-context-marker");
@@ -147,7 +146,6 @@ test("recovery finalization remains retryable when restart lacks summary context
   const firstRuntime = await createLoreExtension(host);
   await firstRuntime.start();
   host.currentEntryIdValue = "assistant-1";
-  host.currentAssistantStartId = "assistant-1";
   await host.tools.get("reloadHomeModules")?.execute("call-1", { success: false }, undefined, undefined, undefined);
   await host.tools
     .get("reloadHomeModules")
@@ -185,7 +183,6 @@ test("context projection waits for recovery finalization before continuing the s
   await runtime.start();
   try {
     host.currentEntryIdValue = "assistant-1";
-    host.currentAssistantStartId = "assistant-1";
 
     await host.tools.get("reloadHomeModules")?.execute("call-1", { success: false }, undefined, undefined, undefined);
     await host.tools
@@ -322,7 +319,6 @@ test("test-recovery summarization prompt requires test sections only", async () 
   await runtime.start();
   try {
     host.currentEntryIdValue = "assistant-1";
-    host.currentAssistantStartId = "assistant-1";
 
     await host.tools.get("runTestSuite")?.execute("test-call-1", { success: false }, undefined, undefined, undefined);
     await host.tools.get("runTestSuite")?.execute("test-call-2", { success: true }, undefined, undefined, undefined);
@@ -505,7 +501,6 @@ test("abandon prevents an in-flight finalization from committing completion", as
   await runtime.start();
   try {
     host.currentEntryIdValue = "assistant-1";
-    host.currentAssistantStartId = "assistant-1";
     await host.tools.get("reloadHomeModules")?.execute("call-1", { success: false }, undefined, undefined, undefined);
     await host.tools.get("reloadHomeModules")?.execute("call-2", { success: true }, undefined, undefined, undefined);
     const marker = runtime.getState().recovery.phase === "readyToFinalize"
@@ -542,7 +537,6 @@ test("completion message uses immediate display and status clears when notify fa
   await runtime.start();
   try {
     host.currentEntryIdValue = "assistant-1";
-    host.currentAssistantStartId = "assistant-1";
     await host.tools.get("reloadHomeModules")?.execute("call-1", { success: false }, undefined, undefined, undefined);
     await host.tools.get("reloadHomeModules")?.execute("call-2", { success: true }, undefined, undefined, undefined);
     host.entries.unshift({
