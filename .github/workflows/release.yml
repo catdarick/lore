@@ -9,9 +9,32 @@ permissions:
   contents: write
 
 jobs:
+  prepare-tools:
+    name: Prepare release tools
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: 9.6.5
+          cabal-version: latest
+      - name: Build hpack
+        run: |
+          cabal update
+          mkdir -p tools
+          cabal install hpack-0.39.1 \
+            --install-method=copy \
+            --installdir="$PWD/tools" \
+            --overwrite-policy=always
+          tools/hpack --numeric-version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hpack-0.39.1-linux-x64-gnu
+          path: tools/hpack
+
   build-linux-x64-gnu:
     name: Build lore-mcp GHC ${{ matrix.ghc }}
     runs-on: ubuntu-22.04
+    needs: prepare-tools
     strategy:
       fail-fast: false
       matrix:
@@ -22,10 +45,17 @@ jobs:
         with:
           ghc-version: ${{ matrix.ghc }}
           cabal-version: latest
-      - name: Install hpack
+      - uses: actions/download-artifact@v4
+        with:
+          name: hpack-0.39.1-linux-x64-gnu
+          path: tools
+      - name: Put hpack on PATH
         run: |
-          cabal update
-          cabal install hpack-0.39.1 --overwrite-policy=always
+          chmod +x tools/hpack
+          echo "$PWD/tools" >> "$GITHUB_PATH"
+          tools/hpack --numeric-version
+      - name: Update Cabal package index
+        run: cabal update
       - name: Check tag matches lore-mcp package version
         run: |
           VERSION=$(awk '/^version:/{print $2; exit}' lore-mcp/package.yaml)
