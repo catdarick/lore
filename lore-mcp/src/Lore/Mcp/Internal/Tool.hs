@@ -1,12 +1,11 @@
 module Lore.Mcp.Internal.Tool where
 
-import Control.Lens ((%~), (&), (.~), (?~), (^.))
+import Control.Lens (ifoldMap, imap, (%~), (&), (.~), (?~), (^.))
 import qualified Data.Aeson as J
 import qualified Data.Aeson.Key as JK
 import qualified Data.Aeson.KeyMap as JKM
 import qualified Data.ByteString.Lazy as LBS
 import Data.Data (Proxy (..))
-import qualified Data.HashMap.Strict.InsOrd as IOM
 import Data.Maybe (catMaybes)
 import Data.OpenApi (ToSchema, toInlinedSchema)
 import qualified Data.OpenApi as OpenApi
@@ -250,7 +249,7 @@ moveFieldsAnnotationsIntoDescription schema =
           xs -> Just $ T.intercalate "\n" xs
 
       requiredNames = schema ^. OpenApi.required
-      allProperties = IOM.keys $ schema ^. OpenApi.properties
+      allProperties = ifoldMap (\name _ -> [name]) $ schema ^. OpenApi.properties
 
       makeNullable :: OpenApi.Schema -> OpenApi.Schema
       makeNullable =
@@ -286,7 +285,7 @@ moveFieldsAnnotationsIntoDescription schema =
         -- OpenAI strict-schema compatibility:
         -- originally optional properties become required-but-nullable.
         & OpenApi.required .~ allProperties
-        & OpenApi.properties %~ IOM.mapWithKey tweakProperty
+        & OpenApi.properties %~ imap tweakProperty
         & OpenApi.allOf %~ fmap (fmap (fmap moveFieldsAnnotationsIntoDescription))
         & OpenApi.anyOf %~ fmap (fmap (fmap moveFieldsAnnotationsIntoDescription))
         & OpenApi.oneOf %~ fmap (fmap (fmap moveFieldsAnnotationsIntoDescription))

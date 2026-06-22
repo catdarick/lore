@@ -109,7 +109,6 @@ library
     , filepath
     , ghc
     , ghc-boot
-    , insert-ordered-containers
     , lens
     , lore
     , lore-tools
@@ -182,7 +181,6 @@ executable lore-mcp
     , filepath
     , ghc
     , ghc-boot
-    , insert-ordered-containers
     , lens
     , lore
     , lore-mcp
@@ -280,7 +278,6 @@ test-suite lore-mcp-test
     , ghc
     , ghc-boot
     , hspec
-    , insert-ordered-containers
     , lens
     , lore
     , lore-mcp

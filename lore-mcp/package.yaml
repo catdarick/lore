@@ -22,7 +22,6 @@ dependencies:
 - lore
 - text
 - time
-- insert-ordered-containers
 - openapi3
 - lens
 - vector 
