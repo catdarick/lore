@@ -96,12 +96,14 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           ASSET="lore-mcp-v${VERSION}-ghc-${{ matrix.ghc }}-linux-x64-gnu.gz"
-          cp "${{ steps.identity.outputs.exe }}" lore-mcp
-          strip lore-mcp
-          ./lore-mcp --version-json
-          gzip -9c lore-mcp > "$ASSET"
+          mkdir -p dist-release
+          RELEASE_EXE="dist-release/lore-mcp"
+          cp "${{ steps.identity.outputs.exe }}" "$RELEASE_EXE"
+          strip "$RELEASE_EXE"
+          "$RELEASE_EXE" --version-json
+          gzip -9c "$RELEASE_EXE" > "$ASSET"
           SHA=$(sha256sum "$ASSET" | awk '{print $1}')
-          printf '{"ghcVersion":"%s","platform":"linux","arch":"x64","libc":"gnu","fileName":"%s","sha256":"%s"}\n' '${{ matrix.ghc }}' "$ASSET" "$SHA" > "${ASSET}.json"
+          python3 -c 'import json, sys; print(json.dumps({"ghcVersion": sys.argv[1], "platform": "linux", "arch": "x64", "libc": "gnu", "fileName": sys.argv[2], "sha256": sys.argv[3]}, separators=(",", ":")))' '${{ matrix.ghc }}' "$ASSET" "$SHA" > "${ASSET}.json"
           echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
