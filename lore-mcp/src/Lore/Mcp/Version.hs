@@ -18,7 +18,7 @@ import GHC.Version (cProjectVersion)
 -- Keep this in sync with lore-mcp/package.yaml. The release workflow verifies
 -- the executable-reported version against both the package version and tag.
 loreVersionText :: Text
-loreVersionText = "1.0.2.0"
+loreVersionText = "1.0.3.0"
 
 ghcVersionText :: Text
 ghcVersionText = T.pack cProjectVersion

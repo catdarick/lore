@@ -5,7 +5,7 @@ cabal-version: 2.2
 -- see: https://github.com/sol/hpack
 
 name:           lore-mcp
-version:        1.0.2.0
+version:        1.0.3.0
 description:    MCP executable package for the lore workspace
 homepage:       https://github.com/githubuser/lore#readme
 bug-reports:    https://github.com/githubuser/lore/issues
