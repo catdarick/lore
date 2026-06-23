@@ -67,15 +67,29 @@ jobs:
       - name: Verify binary identity
         id: identity
         run: |
-          EXE=$(cabal list-bin exe:lore-mcp)
-          JSON=$($EXE --version-json)
+          EXE=$(cabal list-bin exe:lore-mcp --enable-optimization=2)
+          test -x "$EXE"
+          JSON=$("$EXE" --version-json)
           echo "$JSON"
-          ACTUAL_LORE=$(node -e 'let j=JSON.parse(process.argv[1]); console.log(j.loreVersion)' "$JSON")
-          test "$ACTUAL_LORE" = "${GITHUB_REF_NAME#v}"
-          ACTUAL_GHC=$(node -e 'let j=JSON.parse(process.argv[1]); console.log(j.ghcVersion)' "$JSON")
-          test "$ACTUAL_GHC" = "${{ matrix.ghc }}"
-          TARGET=$(node -e 'let j=JSON.parse(process.argv[1]); console.log(j.target)' "$JSON")
-          test "$TARGET" = "linux-x64-gnu"
+          python3 - "$JSON" "${GITHUB_REF_NAME#v}" "${{ matrix.ghc }}" <<'PY'
+          import json
+          import sys
+
+          metadata = json.loads(sys.argv[1])
+          expected_lore = sys.argv[2]
+          expected_ghc = sys.argv[3]
+          expected_target = "linux-x64-gnu"
+
+          checks = {
+              "loreVersion": expected_lore,
+              "ghcVersion": expected_ghc,
+              "target": expected_target,
+          }
+          for field, expected in checks.items():
+              actual = metadata.get(field)
+              if actual != expected:
+                  raise SystemExit(f"{field}: expected {expected}, got {actual}")
+          PY
           echo "exe=$EXE" >> "$GITHUB_OUTPUT"
       - name: Package asset
         id: package
