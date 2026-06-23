@@ -23,6 +23,7 @@ import Lore.Tools.Cli.Tools.LookupSymbolInfo (lookupSymbolInfoCliTool)
 import Lore.Tools.Cli.Tools.PerformMajorGC (performMajorGCCliTool)
 import Lore.Tools.Cli.Tools.Reload (reloadCliTool)
 import Lore.Tools.Cli.Tools.ResolveInstance (resolveInstanceCliTool)
+import Lore.Tools.Cli.Tools.RtsStats (rtsStatsCliTool)
 import Lore.Tools.Cli.Tools.RunTestSuite (runTestSuiteCliTool)
 import Lore.Tools.Cli.Tools.SearchSymbols (searchSymbolsCliTool)
 
@@ -43,6 +44,7 @@ cliTools =
     SomeCliTool createTemporalModuleCliTool,
     SomeCliTool debugCacheMemoryCliTool,
     SomeCliTool performMajorGCCliTool,
+    SomeCliTool rtsStatsCliTool,
     SomeCliTool getTypeOfExpressionCliTool,
     SomeCliTool executeCodeCliTool,
     SomeCliTool runTestSuiteCliTool

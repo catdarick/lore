@@ -16,7 +16,11 @@ import Lore.Tools.Render.Doc
     numberedListFrom,
     paragraph,
   )
-import Numeric (showFFloat)
+import Lore.Tools.Render.Units
+  ( renderBytes,
+    renderMicrosAsSeconds,
+    renderSignedBytes,
+  )
 
 debugCacheMemory :: (Core.MonadLore m) => m Core.CacheMemoryDebugResult
 debugCacheMemory =
@@ -35,7 +39,7 @@ renderDebugCacheMemory result
               <> ", major GC rounds per cache: "
               <> T.pack (show result.cacheMemoryDebugGcRounds)
               <> ", delay per round: "
-              <> renderSeconds result.cacheMemoryDebugGcDelayMicros
+              <> renderMicrosAsSeconds result.cacheMemoryDebugGcDelayMicros
           )
         <> maybe mempty renderPreBaseline result.cacheMemoryDebugPreBaseline
         <> maybe mempty (renderBaseline result.cacheMemoryDebugPreBaseline) result.cacheMemoryDebugBaseline
@@ -97,22 +101,3 @@ renderSample sample =
 cacheMemInUseBytesFreed :: Core.CacheMemoryStats -> Integer
 cacheMemInUseBytesFreed sample =
   negate sample.cacheMemoryStatsMemInUseBytesDelta
-
-renderBytes :: (Integral a) => a -> T.Text
-renderBytes bytes =
-  T.pack (showFFloat (Just 2) mebibytes " MiB")
-  where
-    mebibytes :: Double
-    mebibytes = fromIntegral bytes / 1_048_576
-
-renderSignedBytes :: Integer -> T.Text
-renderSignedBytes deltaBytes
-  | deltaBytes < 0 = "-" <> renderBytes (abs deltaBytes)
-  | otherwise = "+" <> renderBytes deltaBytes
-
-renderSeconds :: Int -> T.Text
-renderSeconds micros =
-  T.pack (showFFloat (Just 2) seconds "s")
-  where
-    seconds :: Double
-    seconds = fromIntegral micros / 1_000_000

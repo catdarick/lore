@@ -49,6 +49,7 @@ library
       Lore.Tools.Cli.Tools.PerformMajorGC
       Lore.Tools.Cli.Tools.Reload
       Lore.Tools.Cli.Tools.ResolveInstance
+      Lore.Tools.Cli.Tools.RtsStats
       Lore.Tools.Cli.Tools.RunTestSuite
       Lore.Tools.Cli.Tools.SearchSymbols
   other-modules:

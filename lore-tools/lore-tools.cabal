@@ -55,8 +55,10 @@ library
       Lore.Tools.Render.Markdown
       Lore.Tools.Render.Source
       Lore.Tools.Render.Text
+      Lore.Tools.Render.Units
       Lore.Tools.ResolveInstance
       Lore.Tools.Result
+      Lore.Tools.RtsStats
       Lore.Tools.RunTestSuite
       Lore.Tools.SearchSymbols
   other-modules:

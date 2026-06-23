@@ -17,6 +17,7 @@ module Lore.Tools
     module Lore.Tools.ReloadHomeModules,
     module Lore.Tools.Result,
     module Lore.Tools.ResolveInstance,
+    module Lore.Tools.RtsStats,
     module Lore.Tools.RunTestSuite,
     module Lore.Tools.SearchSymbols,
     module Lore.Tools.FindReferences,
@@ -42,5 +43,6 @@ import Lore.Tools.Render.Markdown
 import Lore.Tools.ReloadHomeModules
 import Lore.Tools.Result
 import Lore.Tools.ResolveInstance
+import Lore.Tools.RtsStats
 import Lore.Tools.RunTestSuite
 import Lore.Tools.SearchSymbols
