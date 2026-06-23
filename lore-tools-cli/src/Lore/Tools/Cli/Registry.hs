@@ -20,6 +20,7 @@ import Lore.Tools.Cli.Tools.GetTypeOfExpression (getTypeOfExpressionCliTool)
 import Lore.Tools.Cli.Tools.ListExportedSymbols (listExportedSymbolsCliTool)
 import Lore.Tools.Cli.Tools.LookupInstances (lookupInstancesCliTool)
 import Lore.Tools.Cli.Tools.LookupSymbolInfo (lookupSymbolInfoCliTool)
+import Lore.Tools.Cli.Tools.PerformMajorGC (performMajorGCCliTool)
 import Lore.Tools.Cli.Tools.Reload (reloadCliTool)
 import Lore.Tools.Cli.Tools.ResolveInstance (resolveInstanceCliTool)
 import Lore.Tools.Cli.Tools.RunTestSuite (runTestSuiteCliTool)
@@ -41,6 +42,7 @@ cliTools =
     SomeCliTool resolveInstanceCliTool,
     SomeCliTool createTemporalModuleCliTool,
     SomeCliTool debugCacheMemoryCliTool,
+    SomeCliTool performMajorGCCliTool,
     SomeCliTool getTypeOfExpressionCliTool,
     SomeCliTool executeCodeCliTool,
     SomeCliTool runTestSuiteCliTool
