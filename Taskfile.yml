@@ -15,6 +15,16 @@ tasks:
     cmds:
       - python3 scripts/set-release-version.py "{{.VERSION}}"
 
+  release:cut:
+    aliases: [initiate-release]
+    desc: Set the release version, commit it, tag it, and push the branch and tag
+    requires:
+      vars: [VERSION]
+    cmds:
+      - |
+        REMOTE="${REMOTE:-origin}"
+        python3 scripts/cut-release.py "{{.VERSION}}" "$REMOTE"
+
   build:
     desc: Build the workspace with stack
     cmds:
