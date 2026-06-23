@@ -107,6 +107,7 @@ tests:
     - LookupSpec
     - LookupSearchSpec
     - LoggerSpec
+    - ModuleCacheSpec
     - ModulePatternSpec
     - RedundantImportsSpec
     - SessionEnvironmentSpec

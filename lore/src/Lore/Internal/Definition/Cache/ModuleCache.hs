@@ -6,7 +6,7 @@ module Lore.Internal.Definition.Cache.ModuleCache
 where
 
 import Control.Exception (evaluate)
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import GHC.MVar (MVar)
@@ -31,7 +31,8 @@ storeModuleCache ::
 storeModuleCache homeModule facts cacheVar =
   modifyMVar_ cacheVar \(ModuleCache factsByModule) ->
     evaluate $
-      ModuleCache (Map.insert homeModule facts factsByModule)
+      forceModuleCacheSpine $
+        ModuleCache (Map.insert homeModule facts factsByModule)
 
 retainModuleCache ::
   (MonadUnliftIO m) =>
@@ -39,8 +40,18 @@ retainModuleCache ::
   MVar (ModuleCache a) ->
   m ()
 retainModuleCache loadedModules cacheVar =
-  modifyMVar cacheVar \(ModuleCache factsByModule) ->
-    pure
-      ( ModuleCache (Map.restrictKeys factsByModule loadedModules),
-        ()
-      )
+  modifyMVar cacheVar \(ModuleCache factsByModule) -> do
+    retainedCache <-
+      liftIO $
+        evaluate $
+          forceModuleCacheSpine $
+            ModuleCache (Map.restrictKeys factsByModule loadedModules)
+    pure (retainedCache, ())
+
+forceModuleCacheSpine :: ModuleCache a -> ModuleCache a
+forceModuleCacheSpine cache@(ModuleCache factsByModule) =
+  moduleMapSpineSize factsByModule `seq` cache
+
+moduleMapSpineSize :: Map.Map GHC.Module a -> Int
+moduleMapSpineSize =
+  Map.foldlWithKey' (\count homeModule _ -> homeModule `seq` count + 1) 0

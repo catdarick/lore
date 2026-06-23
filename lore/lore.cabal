@@ -248,6 +248,7 @@ test-suite lore-test
       LookupSpec
       LookupSearchSpec
       LoggerSpec
+      ModuleCacheSpec
       ModulePatternSpec
       RedundantImportsSpec
       SessionEnvironmentSpec
