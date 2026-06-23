@@ -163,7 +163,7 @@ executable lore-cli
       ViewPatterns
       PartialTypeSignatures
       OverloadedRecordDot
-  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts "-with-rtsopts=-N -T -Iw10"
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts "-with-rtsopts=-N -T -I10 -A64m -Fd0.5"
   build-depends:
       aeson
     , base >=4.7 && <5

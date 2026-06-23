@@ -46,7 +46,7 @@ executables:
     ghc-options:
     - -threaded
     - -rtsopts
-    - '"-with-rtsopts=-N -T -Iw10"'
+    - '"-with-rtsopts=-N -T -I10 -A64m -Fd0.5"'
     dependencies:
     - lore-tools-cli
 
