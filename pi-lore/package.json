@@ -2,6 +2,15 @@
   "name": "pi-lore",
   "version": "1.0.4",
   "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/catdarick/lore.git",
+    "directory": "pi-lore"
+  },
+  "homepage": "https://github.com/catdarick/lore/tree/main/pi-lore#readme",
+  "bugs": {
+    "url": "https://github.com/catdarick/lore/issues"
+  },
   "type": "module",
   "main": "./index.ts",
   "exports": {
