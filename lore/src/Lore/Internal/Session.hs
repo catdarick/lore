@@ -221,6 +221,7 @@ preparePackageMaterializationBeforeEnvironmentProbeWithRunner runner loggerHandl
           runner
           logInfoWithHandle
           (relativeSourcePath projectRoot)
+          projectRoot
           packageRoots
       case eiCabalFiles of
         Left err ->

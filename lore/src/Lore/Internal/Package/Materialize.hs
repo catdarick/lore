@@ -18,7 +18,7 @@ import System.Directory (doesFileExist, listDirectory)
 import System.FilePath (takeExtension, (</>))
 
 data PackageMaterializeRunner = PackageMaterializeRunner
-  { runHpackGenerator :: FilePath -> IO (Either String ())
+  { runHpackGenerator :: FilePath -> FilePath -> IO (Either String ())
   }
 
 defaultPackageMaterializeRunner :: PackageMaterializeRunner
@@ -27,8 +27,8 @@ defaultPackageMaterializeRunner =
     { runHpackGenerator = runHpackGeneratorWithProcess runProcessInWorkingDir
     }
 
-runHpackGeneratorWithProcess :: (FilePath -> FilePath -> [String] -> IO (Either String String)) -> FilePath -> IO (Either String ())
-runHpackGeneratorWithProcess runProcess packageRoot =
+runHpackGeneratorWithProcess :: (FilePath -> FilePath -> [String] -> IO (Either String String)) -> FilePath -> FilePath -> IO (Either String ())
+runHpackGeneratorWithProcess runProcess _projectRoot packageRoot =
   tryCandidates [] hpackCommandCandidates
   where
     tryCandidates failures [] =
@@ -53,18 +53,20 @@ materializeCabalPackageFilesIO ::
   PackageMaterializeRunner ->
   (String -> IO ()) ->
   (FilePath -> FilePath) ->
+  FilePath ->
   [PackageRoot] ->
   IO (Either String [FilePath])
-materializeCabalPackageFilesIO runner logInfo displayPath packageRoots =
-  sequence <$> mapM (materializeCabalPackageFileIO runner logInfo displayPath) packageRoots
+materializeCabalPackageFilesIO runner logInfo displayPath projectRoot packageRoots =
+  sequence <$> mapM (materializeCabalPackageFileIO runner logInfo displayPath projectRoot) packageRoots
 
 materializeCabalPackageFileIO ::
   PackageMaterializeRunner ->
   (String -> IO ()) ->
   (FilePath -> FilePath) ->
+  FilePath ->
   PackageRoot ->
   IO (Either String FilePath)
-materializeCabalPackageFileIO runner logInfo displayPath packageRoot = do
+materializeCabalPackageFileIO runner logInfo displayPath projectRoot packageRoot = do
   let rootPath = packageRoot.packageRootPath
       packageYamlPath = rootPath </> "package.yaml"
   packageYamlExists <- doesFileExist packageYamlPath
@@ -73,7 +75,7 @@ materializeCabalPackageFileIO runner logInfo displayPath packageRoot = do
 
   if packageYamlExists
     then do
-      hpackResult <- runner.runHpackGenerator rootPath
+      hpackResult <- runner.runHpackGenerator projectRoot rootPath
       case hpackResult of
         Left err ->
           pure

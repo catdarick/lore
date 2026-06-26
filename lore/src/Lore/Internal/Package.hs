@@ -72,7 +72,7 @@ preparePackagesIO materializeRunner logInfo displayPath provider root ghcVersion
   case packageRootsResult of
     Left err -> pure (Left err)
     Right packageRoots -> do
-      cabalFilesResult <- materializeCabalPackageFilesIO materializeRunner logInfo displayPath packageRoots
+      cabalFilesResult <- materializeCabalPackageFilesIO materializeRunner logInfo displayPath root packageRoots
       case cabalFilesResult of
         Left err -> pure (Left err)
         Right cabalFiles -> do

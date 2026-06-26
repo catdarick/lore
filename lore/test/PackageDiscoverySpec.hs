@@ -128,7 +128,7 @@ spec = do
         logs <- newIORef ([] :: [String])
         let runner =
               PackageMaterializeRunner
-                { runHpackGenerator = \root -> do
+                { runHpackGenerator = \_projectRoot root -> do
                     modifyIORef' hpackCalls (root :)
                     pure (Right ())
                 }
@@ -138,6 +138,7 @@ spec = do
             runner
             (\msg -> modifyIORef' logs (msg :))
             id
+            projectRoot
             (mkRoot packageRootPath Nothing)
 
         result `shouldBe` Right (packageRootPath </> "foo.cabal")
@@ -154,13 +155,14 @@ spec = do
         hpackCalls <- newIORef ([] :: [FilePath])
         let runner =
               PackageMaterializeRunner
-                { runHpackGenerator = \root -> do
+                { runHpackGenerator = \seenProjectRoot root -> do
+                    seenProjectRoot `shouldBe` projectRoot
                     modifyIORef' hpackCalls (root :)
                     writeFile (root </> "foo.cabal") "name: foo\nversion: 0.1.0.0\n"
                     pure (Right ())
                 }
 
-        result <- materializeCabalPackageFileIO runner (\_ -> pure ()) id packageRoot
+        result <- materializeCabalPackageFileIO runner (\_ -> pure ()) id projectRoot packageRoot
 
         result `shouldBe` Right (packageRootPath </> "foo.cabal")
         readIORef hpackCalls `shouldReturn` [packageRootPath]
@@ -181,6 +183,7 @@ spec = do
                   "cabal" -> Right "generated"
                   _ -> Left "unexpected command"
             )
+            projectRoot
             packageRootPath
 
         result `shouldBe` Right ()
@@ -194,10 +197,10 @@ spec = do
 
         let runner =
               PackageMaterializeRunner
-                { runHpackGenerator = \_ -> pure (Right ())
+                { runHpackGenerator = \_projectRoot _packageRoot -> pure (Right ())
                 }
 
-        result <- materializeCabalPackageFileIO runner (\_ -> pure ()) id (mkRoot packageRootPath Nothing)
+        result <- materializeCabalPackageFileIO runner (\_ -> pure ()) id projectRoot (mkRoot packageRootPath Nothing)
         result
           `shouldBe` Left ("No .cabal file found in package directory: " <> packageRootPath)
 
@@ -210,11 +213,11 @@ spec = do
 
         let runner =
               PackageMaterializeRunner
-                { runHpackGenerator = \_ ->
+                { runHpackGenerator = \_projectRoot _packageRoot ->
                     pure (Left "lore.cabal was generated with a newer version of hpack, please upgrade and try again.")
                 }
 
-        result <- materializeCabalPackageFileIO runner (\_ -> pure ()) id (mkRoot packageRootPath Nothing)
+        result <- materializeCabalPackageFileIO runner (\_ -> pure ()) id projectRoot (mkRoot packageRootPath Nothing)
         result
           `shouldBe` Left
             ( "Detected package.yaml in "
@@ -235,6 +238,7 @@ spec = do
             noOpRunner
             (\_ -> pure ())
             id
+            projectRoot
             (mkRoot packageRootPath (Just preferredCabalFile))
         result `shouldBe` Right preferredCabalFile
 
@@ -250,6 +254,7 @@ spec = do
             noOpRunner
             (\_ -> pure ())
             id
+            projectRoot
             (mkRoot packageRootPath Nothing)
         result
           `shouldBe` Left ("Multiple .cabal files found in package directory: " <> packageRootPath <> ". Use explicit package entries or remove ambiguity.")
@@ -262,7 +267,8 @@ spec = do
         hpackCalls <- newIORef ([] :: [FilePath])
         let runner =
               PackageMaterializeRunner
-                { runHpackGenerator = \root -> do
+                { runHpackGenerator = \seenProjectRoot root -> do
+                    seenProjectRoot `shouldBe` projectRoot
                     modifyIORef' hpackCalls (root :)
                     writeFile (root </> "demo.cabal") "name: demo\nversion: 0.1.0.0\n"
                     pure (Right ())
@@ -293,7 +299,7 @@ spec = do
 noOpRunner :: PackageMaterializeRunner
 noOpRunner =
   PackageMaterializeRunner
-    { runHpackGenerator = \_ -> pure (Right ())
+    { runHpackGenerator = \_projectRoot _packageRoot -> pure (Right ())
     }
 
 mkRoot :: FilePath -> Maybe FilePath -> PackageRoot

@@ -77,8 +77,8 @@ providerDependencyInputPaths provider =
 stackPackageMaterializeRunner :: PackageMaterializeRunner
 stackPackageMaterializeRunner =
   PackageMaterializeRunner
-    { runHpackGenerator = \packageRoot -> do
-        hpackResult <- runProcessInWorkingDir packageRoot "stack" ["build", "--dry-run"]
+    { runHpackGenerator = \projectRoot _packageRoot -> do
+        hpackResult <- runProcessInWorkingDir projectRoot "stack" ["query"]
         pure (() <$ hpackResult)
     }
 
