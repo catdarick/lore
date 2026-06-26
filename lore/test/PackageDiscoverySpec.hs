@@ -9,6 +9,7 @@ import Lore.Internal.Package.Discovery
 import Lore.Internal.Package.Materialize
   ( PackageMaterializeRunner (..),
     materializeCabalPackageFileIO,
+    runHpackGeneratorWithProcess,
   )
 import Lore.Internal.Package.Root (PackageRoot (..))
 import Lore.Internal.ProjectProvider (ProjectProvider (..), detectProjectProvider)
@@ -164,6 +165,27 @@ spec = do
         result `shouldBe` Right (packageRootPath </> "foo.cabal")
         readIORef hpackCalls `shouldReturn` [packageRootPath]
 
+    it "tries system hpack before cabal exec hpack for Cabal projects" do
+      withTempProject \projectRoot -> do
+        let packageRootPath = projectRoot </> "pkg"
+        createDirectoryIfMissing True packageRootPath
+
+        calls <- newIORef ([] :: [(FilePath, [String])])
+        result <-
+          runHpackGeneratorWithProcess
+            ( \root command arguments -> do
+                root `shouldBe` packageRootPath
+                modifyIORef' calls (<> [(command, arguments)])
+                pure case command of
+                  "hpack" -> Left "system hpack unavailable"
+                  "cabal" -> Right "generated"
+                  _ -> Left "unexpected command"
+            )
+            packageRootPath
+
+        result `shouldBe` Right ()
+        readIORef calls `shouldReturn` [("hpack", []), ("cabal", ["exec", "--", "hpack"])]
+
     it "fails when hpack succeeds but no .cabal file exists" do
       withTempProject \projectRoot -> do
         let packageRootPath = projectRoot </> "pkg"
@@ -197,7 +219,7 @@ spec = do
           `shouldBe` Left
             ( "Detected package.yaml in "
                 <> packageRootPath
-                <> ", but failed to run hpack before reading the generated .cabal file. Install hpack or ensure it is available on PATH. lore.cabal was generated with a newer version of hpack, please upgrade and try again."
+                <> ", but failed to generate a .cabal file before reading package metadata. lore.cabal was generated with a newer version of hpack, please upgrade and try again."
             )
 
     it "succeeds with explicit preferred cabal when multiple cabal files exist" do

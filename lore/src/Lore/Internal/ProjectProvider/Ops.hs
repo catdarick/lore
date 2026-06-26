@@ -32,11 +32,7 @@ projectProviderOps = \case
     ProjectProviderOps
       { projectProviderPackageRoots = discoverStackPackageRoots,
         projectProviderMaterializeRunner =
-          PackageMaterializeRunner
-            { runHpackGenerator = \packageRoot -> do
-                hpackResult <- runProcessInWorkingDir packageRoot "stack" ["exec", "--", "hpack"]
-                pure (() <$ hpackResult)
-            },
+          stackPackageMaterializeRunner,
         projectProviderPrepareDependencies =
           runDependencyPreparationCommand
             "stack"
@@ -77,6 +73,14 @@ providerRunInEnvironment provider =
 providerDependencyInputPaths :: ProjectProvider -> [FilePath]
 providerDependencyInputPaths provider =
   (projectProviderOps provider).projectProviderDependencyInputPaths
+
+stackPackageMaterializeRunner :: PackageMaterializeRunner
+stackPackageMaterializeRunner =
+  PackageMaterializeRunner
+    { runHpackGenerator = \packageRoot -> do
+        hpackResult <- runProcessInWorkingDir packageRoot "stack" ["build", "--dry-run"]
+        pure (() <$ hpackResult)
+    }
 
 runDependencyPreparationCommand :: FilePath -> [String] -> FilePath -> IO (Either String ())
 runDependencyPreparationCommand exe args projectRoot = do
