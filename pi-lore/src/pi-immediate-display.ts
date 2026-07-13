@@ -37,8 +37,11 @@ type PatchState = {
   pending: Map<string, PendingDisplay>;
 };
 
+type Version = [number, number, number];
+
 const patchMarker = Symbol.for("lore.pi.immediate-display.patch");
-const supportedRange = ">=0.79.1 <0.80.0";
+const minimumPiVersion: Version = [0, 79, 1];
+const minimumPiVersionText = formatVersion(minimumPiVersion);
 const defaultAcknowledgementTimeoutMs = 5_000;
 
 export async function installPiImmediateDisplayBridge(input: InstallInput): Promise<ImmediateDisplayInstaller> {
@@ -46,7 +49,7 @@ export async function installPiImmediateDisplayBridge(input: InstallInput): Prom
     ? { AgentSession: input.agentSessionClass, version: input.piVersion ?? "0.79.1" }
     : await resolveRunningPiAgentSession();
 
-  assertSupportedPiVersion(resolved.version);
+  assertMinimumPiVersion(resolved.version);
   installPatch(resolved.AgentSession);
 
   return {
@@ -150,11 +153,15 @@ function installPatch(AgentSession: AgentSessionConstructor): void {
 async function resolveRunningPiAgentSession(): Promise<{ AgentSession: AgentSessionConstructor; version: string }> {
   const argvPath = process.argv[1];
   if (!argvPath) {
-    throw new Error(`Lore extension cannot install immediate transcript rendering. Supported Pi versions: ${supportedRange}.`);
+    throw new Error(
+      `Lore extension cannot install immediate transcript rendering. Minimum Pi version: ${minimumPiVersionText}.`,
+    );
   }
   const packageRoot = await findRunningPiPackageRoot(realPathIfPossible(argvPath));
   if (!packageRoot) {
-    throw new Error(`Lore extension cannot locate the running Pi package. Supported Pi versions: ${supportedRange}.`);
+    throw new Error(
+      `Lore extension cannot locate the running Pi package. Minimum Pi version: ${minimumPiVersionText}.`,
+    );
   }
 
   const packageJson = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")) as {
@@ -232,23 +239,23 @@ function realPathIfPossible(path: string): string {
   }
 }
 
-function assertSupportedPiVersion(version: string): void {
-  if (!isVersionInSupportedRange(version)) {
+function assertMinimumPiVersion(version: string): void {
+  if (!isAtLeastMinimumPiVersion(version)) {
     throw new Error(
-      `Lore extension cannot install immediate transcript rendering for Pi ${version}. Supported Pi versions: ${supportedRange}.`,
+      `Lore extension cannot install immediate transcript rendering for Pi ${version}. Minimum Pi version: ${minimumPiVersionText}.`,
     );
   }
 }
 
-function isVersionInSupportedRange(version: string): boolean {
+function isAtLeastMinimumPiVersion(version: string): boolean {
   const parsed = parseVersion(version);
   if (!parsed) {
     return false;
   }
-  return compareVersions(parsed, [0, 79, 1]) >= 0 && compareVersions(parsed, [0, 80, 0]) < 0;
+  return compareVersions(parsed, minimumPiVersion) >= 0;
 }
 
-function parseVersion(version: string): [number, number, number] | undefined {
+function parseVersion(version: string): Version | undefined {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
   if (!match) {
     return undefined;
@@ -256,7 +263,7 @@ function parseVersion(version: string): [number, number, number] | undefined {
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
-function compareVersions(left: [number, number, number], right: [number, number, number]): number {
+function compareVersions(left: Version, right: Version): number {
   for (let index = 0; index < left.length; index += 1) {
     const diff = left[index] - right[index];
     if (diff !== 0) {
@@ -266,7 +273,6 @@ function compareVersions(left: [number, number, number], right: [number, number,
   return 0;
 }
 
-export const __test = {
-  patchMarker,
-  isVersionInSupportedRange,
-};
+function formatVersion(version: Version): string {
+  return version.join(".");
+}

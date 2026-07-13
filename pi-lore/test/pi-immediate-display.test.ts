@@ -139,16 +139,24 @@ test("unsupported runtime shapes fail clearly", async () => {
   );
 });
 
-test("unsupported Pi versions fail clearly", async () => {
+test("Pi versions below the minimum fail clearly", async () => {
   const { FakeAgentSession } = makeFakeAgentSessionClass();
   await assert.rejects(
     () =>
       installPiImmediateDisplayBridge({
         agentSessionClass: FakeAgentSession,
-        piVersion: "0.80.0",
+        piVersion: "0.79.0",
       }),
-    /Supported Pi versions: >=0\.79\.1 <0\.80\.0/,
+    /Minimum Pi version: 0\.79\.1/,
   );
+});
+
+test("newer Pi versions are accepted when runtime capabilities are available", async () => {
+  const { FakeAgentSession } = makeFakeAgentSessionClass();
+  await installPiImmediateDisplayBridge({
+    agentSessionClass: FakeAgentSession,
+    piVersion: "0.80.6",
+  });
 });
 
 test("appendImmediately calls Pi sendMessage with the branded private option", async () => {
