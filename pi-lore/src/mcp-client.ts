@@ -181,7 +181,7 @@ export class LoreClient {
         {
           protocolVersion: "2024-11-05",
           capabilities: {},
-          clientInfo: { name: "pi-lore-extension", version: "1.0.8" },
+          clientInfo: { name: "pi-lore-extension", version: "1.0.9" },
         },
         this.config.startupTimeoutMs,
       );
