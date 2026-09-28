@@ -1,6 +1,5 @@
 module Lore.Mcp.Server
   ( runLoreMcpServer,
-    someFunction,
   )
 where
 
@@ -51,10 +50,6 @@ import Lore.Mcp.Tools.ResolveInstance (resolveInstanceTool)
 import Lore.Mcp.Tools.RunTestSuite (customRunTestSuiteTool, runTestSuiteTool)
 import Lore.Mcp.Tools.SearchSymbols (searchSymbolsTool)
 import Lore.Tools.Render.Markdown (renderLoreDocMarkdown)
-
-someFunction :: IO ()
-someFunction = do
-  const (print @String "done") $ runLoreMcpServer
 
 runLoreMcpServer :: IO ()
 runLoreMcpServer = do
