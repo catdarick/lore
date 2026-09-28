@@ -38,6 +38,7 @@ import Lore.Internal.Ghc.DynFlags
     setPackageEnvironmentM,
   )
 import Lore.Internal.Ghc.PackageEnvironment.Types (GhcToolchain (..))
+import Lore.Internal.Interpreter.Process (installInterpreterProcessHook)
 import Lore.Internal.Monad (LoreMonadT (..), MonadLore)
 import Lore.Internal.ProjectProvider (ProjectProvider (..))
 import Lore.Internal.Session
@@ -183,10 +184,10 @@ runLore sessionConfig lore = do
             workDir </> "stub",
             workDir </> "tmp"
           ]
+      GHC.setSession . installInterpreterProcessHook sessionContext =<< GHC.getSession
       modifySessionDynFlagsM
         ( setPackageEnvironmentM sessionContext.startupPackageEnvironment
-            <=< pure
-              . setGhciLikeDynFlags (parallelWorkersLimit sessionConfig)
+            <=< setGhciLikeDynFlags (parallelWorkersLimit sessionConfig)
               . setGhcWorkDirs (ghcWorkDir sessionConfig)
         )
       session <- GHC.getSession

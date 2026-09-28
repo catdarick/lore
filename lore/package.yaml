@@ -188,6 +188,7 @@ tests:
     - Lore.Internal.ImportCleanup.SourceSlice
     - Lore.Internal.ImportCleanup.Types
     - Lore.Internal.Interpreter
+    - Lore.Internal.Interpreter.Process
     - Lore.Internal.List
     - Lore.Internal.Lookup.Cache.Types
     - Lore.Internal.Lookup.InstanceResolution

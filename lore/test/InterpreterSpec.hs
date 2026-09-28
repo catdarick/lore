@@ -59,7 +59,14 @@ spec =
           Right rendered ->
             expectationFailure ("Expected parse failure, got: " <> show rendered)
 
-      it "runs an interpreted statement in a requested host directory" \fixture -> do
+      it "does not expose the host stdin to interpreted code" \fixture -> do
+        result <-
+          fixtureLore fixture do
+            executeStatement "System.IO.isEOF"
+
+        result `shouldBe` Right "True"
+
+      it "runs an interpreted statement in a requested directory without changing the host directory" \fixture -> do
         withFixtureCopy fixture \fixtureRoot -> do
           let executionDirectory = fixtureRoot </> "execution-directory"
           createDirectoryIfMissing True executionDirectory

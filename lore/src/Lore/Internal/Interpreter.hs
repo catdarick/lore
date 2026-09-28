@@ -10,8 +10,6 @@ module Lore.Internal.Interpreter
   )
 where
 
-import Control.Concurrent.MVar (MVar, newMVar, withMVar)
-import Control.DeepSeq (force)
 import qualified Control.Exception as Exception
 import Control.Monad.Catch (Handler (..), catches, finally)
 import Control.Monad.Reader (asks)
@@ -21,20 +19,15 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC
 import qualified GHC.Driver.Session as GHC.Session
-import GHC.IO.Handle (hDuplicate, hDuplicateTo)
 import qualified GHC.Types.SourceError as GHC.SourceError
 import Lore.Diagnostics (Diagnostic (..), DiagnosticClass (..), DiagnosticSpan (..), ghcMessagesToDiagnostics)
+import Lore.Internal.Interpreter.Process (captureInterpreterOutput, withInterpreterWorkingDirectory)
 import Lore.Internal.Lookup.ModSummaries (getCachedModSummaries)
 import Lore.Internal.Lookup.Types (ModSummaries (..))
 import Lore.Internal.Session (SessionContext (..))
 import Lore.Internal.Session.Cache.Types (InterpreterContextCache (..))
 import Lore.Monad (MonadLore)
-import System.Directory (removeFile)
-import System.IO (BufferMode (NoBuffering), Handle, hClose, hFlush, hSetBuffering, openTempFile, stderr, stdout)
-import System.IO.Error (catchIOError)
-import System.IO.Unsafe (unsafePerformIO)
-import UnliftIO (modifyMVar, readMVar, withRunInIO)
-import qualified UnliftIO.Directory as Dir
+import UnliftIO (modifyMVar, readMVar)
 
 data RedirectedExecution = RedirectedExecution
   { redirectedExecResult :: Either Exception.SomeException GHC.ExecResult,
@@ -115,27 +108,26 @@ mapMMaybe f =
 
 executeCompiledStatement :: (MonadLore m) => Maybe FilePath -> Text -> m (Either [Diagnostic] String)
 executeCompiledStatement maybeDirectory source =
-  withInterpreterWarningsAllowed $
-    withInterpretExecutionContext helperImports do
-      catches
-        ( do
-            redirectedExecution <- runStatementWithRedirect maybeDirectory (T.unpack source)
-            case redirectedExecResult redirectedExecution of
-              Left runtimeException ->
-                pure (Left [runtimeExceptionDiagnostic (Just redirectedExecution.redirectedOutput) runtimeException])
-              Right executionResult ->
-                case executionResult of
-                  GHC.ExecComplete {GHC.execResult = Left runtimeException} ->
-                    pure (Left [runtimeExceptionDiagnostic (Just redirectedExecution.redirectedOutput) runtimeException])
-                  GHC.ExecBreak {} ->
-                    pure (Left [unexpectedInterpreterResultDiagnostic "ExecBreak"])
-                  GHC.ExecComplete {} ->
-                    pure (Right redirectedExecution.redirectedOutput)
-        )
-        [ Handler \sourceError ->
-            pure (Left (ghcMessagesToDiagnostics (GHC.SourceError.srcErrorMessages sourceError))),
-          Handler (pure . Left . pure . runtimeExceptionDiagnostic Nothing)
-        ]
+  withInterpreterWarningsAllowed do
+    catches
+      ( do
+          redirectedExecution <- runStatementWithRedirect maybeDirectory (T.unpack source)
+          case redirectedExecResult redirectedExecution of
+            Left runtimeException ->
+              pure (Left [runtimeExceptionDiagnostic (Just redirectedExecution.redirectedOutput) runtimeException])
+            Right executionResult ->
+              case executionResult of
+                GHC.ExecComplete {GHC.execResult = Left runtimeException} ->
+                  pure (Left [runtimeExceptionDiagnostic (Just redirectedExecution.redirectedOutput) runtimeException])
+                GHC.ExecBreak {} ->
+                  pure (Left [unexpectedInterpreterResultDiagnostic "ExecBreak"])
+                GHC.ExecComplete {} ->
+                  pure (Right redirectedExecution.redirectedOutput)
+      )
+      [ Handler \sourceError ->
+          pure (Left (ghcMessagesToDiagnostics (GHC.SourceError.srcErrorMessages sourceError))),
+        Handler (pure . Left . pure . runtimeExceptionDiagnostic Nothing)
+      ]
 
 withInterpreterWarningsAllowed :: (MonadLore m) => m a -> m a
 withInterpreterWarningsAllowed action = do
@@ -149,135 +141,23 @@ withInterpreterWarningsAllowed action = do
 
 runStatementWithRedirect :: (MonadLore m) => Maybe FilePath -> String -> m RedirectedExecution
 runStatementWithRedirect maybeDirectory statement = do
-  (executionResult, redirectedOutput) <-
-    captureProcessOutput $
-      withExecutionDirectory maybeDirectory do
-        result <-
-          catches
-            (Right <$> GHC.execStmt statement GHC.execOptions)
-            [Handler (\runtimeException -> pure (Left runtimeException))]
-        _ <- GHC.execStmt "System.IO.hFlush System.IO.stdout" GHC.execOptions
-        _ <- GHC.execStmt "System.IO.hFlush System.IO.stderr" GHC.execOptions
-        pure result
+  (executionResult, capturedOutput) <-
+    captureInterpreterOutput $
+      withExecutionDirectory maybeDirectory $
+        catches
+          (Right <$> GHC.execStmt statement GHC.execOptions)
+          [Handler (\runtimeException -> pure (Left runtimeException))]
   pure
     RedirectedExecution
       { redirectedExecResult = executionResult,
-        redirectedOutput
+        redirectedOutput = trimTrailingNewlines capturedOutput
       }
 
 withExecutionDirectory :: (MonadLore m) => Maybe FilePath -> m a -> m a
 withExecutionDirectory maybeDirectory action =
   case maybeDirectory of
     Nothing -> action
-    Just directory -> Dir.withCurrentDirectory directory action
-
-withInterpretExecutionContext :: (MonadLore m) => [GHC.InteractiveImport] -> m a -> m a
-withInterpretExecutionContext extraImports action = do
-  originalContext <- GHC.getContext
-  GHC.setContext (extraImports <> originalContext)
-  action `finally` GHC.setContext originalContext
-
-helperImports :: [GHC.InteractiveImport]
-helperImports =
-  map
-    qualifiedImport
-    [ "GHC.IO.Handle",
-      "System.IO",
-      "Data.IORef",
-      "System.IO.Unsafe"
-    ]
-
-qualifiedImport :: String -> GHC.InteractiveImport
-qualifiedImport moduleName =
-  GHC.IIDecl $
-    (GHC.simpleImportDecl (GHC.mkModuleName moduleName))
-      { GHC.ideclQualified = GHC.QualifiedPre
-      }
-
-data SavedProcessHandles = SavedProcessHandles
-  { savedStdout :: Handle,
-    savedStderr :: Handle
-  }
-
--- The internal interpreter runs in this process, so stdout/stderr redirection
--- is process-wide. Serialize captures across every Lore session.
-{-# NOINLINE processOutputCaptureLock #-}
-processOutputCaptureLock :: MVar ()
-processOutputCaptureLock = unsafePerformIO (newMVar ())
-
-captureProcessOutput :: (MonadLore m) => m a -> m (a, String)
-captureProcessOutput action =
-  withRunInIO $ \runInIO ->
-    withMVar processOutputCaptureLock $ \_ ->
-      Exception.bracket
-        createCaptureFile
-        cleanupCaptureFile
-        ( \(capturePath, captureHandle) -> do
-            hSetBuffering captureHandle NoBuffering
-            result <-
-              Exception.bracket
-                (redirectProcessOutput captureHandle)
-                restoreProcessOutput
-                (const (runInIO action))
-            hClose captureHandle
-            capturedOutput <- readTrimmedCaptureFile capturePath
-            pure (result, capturedOutput)
-        )
-
-createCaptureFile :: IO (FilePath, Handle)
-createCaptureFile =
-  openTempFile "/tmp" "lore-interpreter-output"
-
-cleanupCaptureFile :: (FilePath, Handle) -> IO ()
-cleanupCaptureFile (capturePath, captureHandle) = do
-  ignoreIOException (hClose captureHandle)
-  ignoreIOException (removeFile capturePath)
-
-redirectProcessOutput :: Handle -> IO SavedProcessHandles
-redirectProcessOutput captureHandle =
-  Exception.mask_ do
-    hFlush stdout
-    hFlush stderr
-    savedStdout <- hDuplicate stdout
-    savedStderr <- hDuplicate stderr `Exception.onException` hClose savedStdout
-    let savedHandles = SavedProcessHandles {savedStdout, savedStderr}
-    ( do
-        hDuplicateTo captureHandle stdout
-        hDuplicateTo captureHandle stderr
-      )
-      `Exception.onException` restoreProcessOutput savedHandles
-    pure savedHandles
-
-restoreProcessOutput :: SavedProcessHandles -> IO ()
-restoreProcessOutput SavedProcessHandles {savedStdout, savedStderr} =
-  Exception.mask_ do
-    cleanupErrors <-
-      mapM
-        tryCleanup
-        [ hFlush stdout,
-          hFlush stderr,
-          hDuplicateTo savedStdout stdout,
-          hDuplicateTo savedStderr stderr,
-          hClose savedStdout,
-          hClose savedStderr
-        ]
-    case [cleanupError | Just cleanupError <- cleanupErrors] of
-      [] -> pure ()
-      firstError : _ -> Exception.throwIO firstError
-
-tryCleanup :: IO () -> IO (Maybe Exception.SomeException)
-tryCleanup cleanupAction =
-  (cleanupAction >> pure Nothing)
-    `Exception.catch` (pure . Just)
-
-ignoreIOException :: IO () -> IO ()
-ignoreIOException action =
-  catchIOError action (const (pure ()))
-
-readTrimmedCaptureFile :: FilePath -> IO String
-readTrimmedCaptureFile capturePath = do
-  capturedOutput <- readFile capturePath
-  Exception.evaluate (force (trimTrailingNewlines capturedOutput))
+    Just directory -> withInterpreterWorkingDirectory directory action
 
 trimTrailingNewlines :: String -> String
 trimTrailingNewlines =

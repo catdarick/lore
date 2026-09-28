@@ -64,9 +64,14 @@ clearUnitDbs unitEnv =
 clearUnitDbs = GHC.ue_setUnitDbs Nothing
 #endif
 
+setGhciLikeDynFlags :: (MonadIO m, GHC.HasLogger m) => ParallelWorkersCount -> GHC.DynFlags -> m GHC.DynFlags
+setGhciLikeDynFlags parallelWorkersLimit =
+  addGhcOptionsAndExtensions Nothing (map GhcOption ["-fexternal-interpreter", "-dynamic"]) []
+    . setGhciLikeCompilationFlags parallelWorkersLimit
+
 {- ORMOLU_DISABLE -}
-setGhciLikeDynFlags :: ParallelWorkersCount -> GHC.DynFlags -> GHC.DynFlags
-setGhciLikeDynFlags parallelWorkersLimit dflags0 =
+setGhciLikeCompilationFlags :: ParallelWorkersCount -> GHC.DynFlags -> GHC.DynFlags
+setGhciLikeCompilationFlags parallelWorkersLimit dflags0 =
   let dflags1 =
         dflags0
           { GHC.ghcMode = GHC.CompManager,
@@ -83,7 +88,7 @@ setGhciLikeDynFlags parallelWorkersLimit dflags0 =
           ThisWorkersCount jobs -> dflags1 {GHC.parMakeCount = Just jobs}
           WorkersAsNumProcessors -> dflags1 {GHC.parMakeCount = Nothing}
 #endif
-   in GHC.gopt_unset dflags2 GHC.Opt_ExternalInterpreter
+   in dflags2
         `GHC.gopt_set` GHC.Opt_UseBytecodeRatherThanObjects
         `GHC.gopt_set` GHC.Opt_Haddock
         `GHC.gopt_set` GHC.Opt_IgnoreHpcChanges
