@@ -8,6 +8,7 @@ module Lore.Internal.Ghc.DynFlags
     Extension (..),
     modifySessionDynFlagsM,
     setGhciLikeDynFlags,
+    externalInterpreterWorkersCount,
     setGhcWorkDirs,
     setGhcOptionsAndExtensions,
     addGhcOptionsAndExtensions,
@@ -67,7 +68,19 @@ clearUnitDbs = GHC.ue_setUnitDbs Nothing
 setGhciLikeDynFlags :: (MonadIO m, GHC.HasLogger m) => ParallelWorkersCount -> GHC.DynFlags -> m GHC.DynFlags
 setGhciLikeDynFlags parallelWorkersLimit =
   addGhcOptionsAndExtensions Nothing (map GhcOption ["-fexternal-interpreter", "-dynamic"]) []
-    . setGhciLikeCompilationFlags parallelWorkersLimit
+    . setGhciLikeCompilationFlags (externalInterpreterWorkersCount parallelWorkersLimit)
+
+-- GHC 9.8 and 9.10 do not serialize messages to the external interpreter, while
+-- bytecode generation sends them from every compilation worker. Concurrent
+-- workers corrupt the protocol and deadlock the session.
+{- ORMOLU_DISABLE -}
+externalInterpreterWorkersCount :: ParallelWorkersCount -> ParallelWorkersCount
+#if MIN_VERSION_ghc(9,8,0) && !MIN_VERSION_ghc(9,12,0)
+externalInterpreterWorkersCount _ = ThisWorkersCount 1
+#else
+externalInterpreterWorkersCount = id
+#endif
+{- ORMOLU_ENABLE -}
 
 {- ORMOLU_DISABLE -}
 setGhciLikeCompilationFlags :: ParallelWorkersCount -> GHC.DynFlags -> GHC.DynFlags
@@ -129,7 +142,8 @@ addGhcOptionsAndExtensions :: (MonadIO m, GHC.HasLogger m) => Maybe Language -> 
 addGhcOptionsAndExtensions language ghcOptions extensions dflags = do
   logger <- GHC.getLogger
   (dflags', _, _) <- GHC.parseDynamicFlags logger dflags (map GHC.noLoc (languageToOpts <> ghcOptionsToOpts <> extensionsToOpts))
-  pure dflags'
+  -- Compilation parallelism is owned by the Lore session, not by project options.
+  pure dflags' {GHC.parMakeCount = GHC.parMakeCount dflags}
   where
     languageToOpts = maybe [] (\lang -> ["-X" <> unLanguage lang]) language
     ghcOptionsToOpts = map unGhcOption ghcOptions

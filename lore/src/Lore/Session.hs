@@ -18,7 +18,7 @@ module Lore.Session
 where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad ((<=<))
+import Control.Monad (when, (<=<))
 import Control.Monad.Catch (bracket)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ReaderT (runReaderT), asks)
@@ -32,6 +32,7 @@ import Lore.Config (LoadedConfigDocument (..), loadConfigDocumentAt, loreConfigF
 import Lore.Internal.Definition.Callbacks (installDefinitionCallbacks)
 import Lore.Internal.Ghc.DynFlags
   ( ParallelWorkersCount (..),
+    externalInterpreterWorkersCount,
     modifySessionDynFlagsM,
     setGhcWorkDirs,
     setGhciLikeDynFlags,
@@ -58,6 +59,7 @@ import Lore.Internal.Session.Environment
     renderSessionConfigError,
   )
 import Lore.Logger (noLogHandle)
+import qualified Lore.Logger as Log
 import System.Directory (createDirectoryIfMissing, getCurrentDirectory, makeAbsolute, setCurrentDirectory)
 import System.FilePath (takeDirectory, (</>))
 import System.Mem (performMajorGC)
@@ -170,9 +172,19 @@ runLore sessionConfig lore = do
             pure cwd
         )
         (liftIO . setCurrentDirectory)
-        (\_ -> GHC.runGhcT (Just sessionContext.ghcToolchain.ghcToolchainLibDir) $ setupGhcSession sessionContext >> runReaderT (unLoreMonadT lore) sessionContext)
+        (\_ -> GHC.runGhcT (Just sessionContext.ghcToolchain.ghcToolchainLibDir) $ runReaderT (unLoreMonadT (setupGhcSession sessionContext >> lore)) sessionContext)
   where
+    configuredWorkersLimit = parallelWorkersLimit sessionConfig
+    effectiveWorkersLimit = externalInterpreterWorkersCount configuredWorkersLimit
+
     setupGhcSession sessionContext = do
+      when (effectiveWorkersLimit /= configuredWorkersLimit) $
+        Log.info $
+          "Using parallel workers limit "
+            <> show effectiveWorkersLimit
+            <> " instead of "
+            <> show configuredWorkersLimit
+            <> ": the external interpreter of this GHC version does not support parallel compilation."
       liftIO $ do
         let workDir = ghcWorkDir sessionConfig
         mapM_
@@ -187,7 +199,7 @@ runLore sessionConfig lore = do
       GHC.setSession . installInterpreterProcessHook sessionContext =<< GHC.getSession
       modifySessionDynFlagsM
         ( setPackageEnvironmentM sessionContext.startupPackageEnvironment
-            <=< setGhciLikeDynFlags (parallelWorkersLimit sessionConfig)
+            <=< setGhciLikeDynFlags configuredWorkersLimit
               . setGhcWorkDirs (ghcWorkDir sessionConfig)
         )
       session <- GHC.getSession

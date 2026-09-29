@@ -61,6 +61,7 @@ jobs:
           VERSION=$(awk '/^version:/{print $2; exit}' lore-mcp/package.yaml)
           test "${GITHUB_REF_NAME}" = "v${VERSION}"
       - name: Build and test
+        timeout-minutes: 50
         run: |
           cabal build exe:lore-mcp --enable-optimization=2
           cabal test lore-mcp-test --test-options='--format=failed-examples --no-color'
